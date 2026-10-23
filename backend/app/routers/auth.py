@@ -8,7 +8,7 @@ from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from ..config import settings
+from ..config import apply_ai_settings, settings
 from ..db import get_db
 from ..models import Tenant, User
 from ..security import Ctx, create_token, current_ctx, hash_password, require_roles, verify_password
@@ -39,6 +39,15 @@ class InviteIn(BaseModel):
     email: EmailStr
     role: str = "presales"
     password: str = ""  # empty: the person signs in with Google only
+
+
+class AIConfigIn(BaseModel):
+    provider: str = "none"
+    api_key: str = ""
+    model: str = ""
+    embed_model: str = "gemini-embedding-001"
+    rpm: int = 8
+    paid: bool = False
 
 
 class GoogleIn(BaseModel):
@@ -107,6 +116,39 @@ def auth_config():
         notice = ("Test version: use sample or dummy documents only. The AI runs on a free Google key, "
                   "so please don't upload confidential client RFPs or company data.")
     return {"google_client_id": settings.google_client_id or None, "google_domains": settings.google_allowed_domains, "notice": notice}
+
+
+@router.get("/ai-config")
+def get_ai_config():
+    from ..services import llm
+    provider = llm.provider_name()
+    keys = {
+        "gemini": settings.gemini_api_key,
+        "anthropic": settings.anthropic_api_key,
+        "openai": settings.openai_api_key,
+        "azure": settings.azure_api_key,
+    }
+    api_key = keys.get(provider, "")
+    return {
+        "provider": provider,
+        "api_key_present": bool(api_key),
+        "model": {
+            "gemini": settings.gemini_model or "auto (newest Flash)",
+            "anthropic": settings.anthropic_model,
+            "openai": settings.openai_model,
+            "azure": settings.azure_deployment,
+        }.get(provider, ""),
+        "embed_model": settings.gemini_embed_model,
+        "rpm": settings.llm_rpm,
+        "paid": settings.llm_paid,
+    }
+
+
+@router.put("/ai-config")
+def save_ai_config(data: AIConfigIn, ctx: Ctx = Depends(require_roles())):
+    res = apply_ai_settings(data.model_dump())
+    ctx.audit("ai.config.update", data.provider)
+    return res
 
 
 def verify_google(credential: str) -> dict:

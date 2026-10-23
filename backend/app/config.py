@@ -9,6 +9,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = Path(os.getenv("RF_DATA_DIR", BASE_DIR / "data"))
 UPLOAD_DIR = DATA_DIR / "uploads"
 OUTPUT_DIR = DATA_DIR / "outputs"
+LOCAL_ENV_FILE = BASE_DIR / ".env.local"
 
 
 # Settings the whole team shares through git. Only these non-secret keys are read from team.env, so an
@@ -16,7 +17,7 @@ OUTPUT_DIR = DATA_DIR / "outputs"
 TEAM_KEYS = {"GOOGLE_CLIENT_ID", "GOOGLE_ALLOWED_DOMAINS"}
 
 
-def _load_env_file(path: Path, allowed: set[str] | None = None) -> None:
+def _load_env_file(path: Path, allowed: set[str] | None = None, override: bool = False) -> None:
     if not path.exists():
         return
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -28,11 +29,14 @@ def _load_env_file(path: Path, allowed: set[str] | None = None) -> None:
         if allowed is not None and k not in allowed:
             continue
         if v or (allowed is None and k not in TEAM_KEYS):  # an empty shared setting means "use the team's value"
-            os.environ.setdefault(k, v)
+            if override or k not in os.environ:
+                os.environ[k] = v
 
 
-# Order matters: real environment variables win, then your own backend/.env, then the shared backend/team.env.
+# Order matters: real environment variables win, then your own backend/.env, then the UI override file,
+# then the shared backend/team.env. The UI override file is created automatically from the admin settings screen.
 _load_env_file(BASE_DIR / ".env")
+_load_env_file(LOCAL_ENV_FILE, override=True)
 _load_env_file(BASE_DIR / "team.env", TEAM_KEYS)
 
 
@@ -89,3 +93,77 @@ if not settings.jwt_secret:
     else:
         settings.jwt_secret = secrets.token_urlsafe(48)
         secret_file.write_text(settings.jwt_secret)
+
+
+def apply_ai_settings(payload: dict) -> dict:
+    """Persist selected AI config to .env.local and update the live config object."""
+    provider = str(payload.get("provider", settings.llm_provider or "none")).lower()
+    provider = provider if provider in {"gemini", "anthropic", "openai", "azure", "none"} else "none"
+    api_key = str(payload.get("api_key", "") or "").strip()
+    model = str(payload.get("model", "") or "").strip()
+    embed_model = str(payload.get("embed_model", settings.gemini_embed_model or "gemini-embedding-001")).strip()
+    rpm = int(payload.get("rpm", settings.llm_rpm or 8) or 8)
+    paid = bool(payload.get("paid", settings.llm_paid))
+
+    values = {
+        "LLM_PROVIDER": provider,
+        "LLM_RPM": str(max(1, rpm)),
+        "LLM_PAID": "true" if paid else "false",
+        "GEMINI_MODEL": "",
+        "ANTHROPIC_MODEL": settings.anthropic_model,
+        "OPENAI_MODEL": settings.openai_model,
+        "AZURE_OPENAI_DEPLOYMENT": settings.azure_deployment,
+        "GEMINI_EMBED_MODEL": embed_model,
+    }
+    if provider == "gemini":
+        values["GEMINI_API_KEY"] = api_key
+        values["GEMINI_MODEL"] = model or settings.gemini_model
+    elif provider == "anthropic":
+        values["ANTHROPIC_API_KEY"] = api_key
+        values["ANTHROPIC_MODEL"] = model or settings.anthropic_model
+    elif provider == "openai":
+        values["OPENAI_API_KEY"] = api_key
+        values["OPENAI_MODEL"] = model or settings.openai_model
+    elif provider == "azure":
+        values["AZURE_OPENAI_API_KEY"] = api_key
+        values["AZURE_OPENAI_DEPLOYMENT"] = model or settings.azure_deployment
+    else:
+        values["GEMINI_API_KEY"] = ""
+        values["ANTHROPIC_API_KEY"] = ""
+        values["OPENAI_API_KEY"] = ""
+        values["AZURE_OPENAI_API_KEY"] = ""
+
+    # Always keep the selected provider's secret current; clear others to avoid stale keys.
+    for key, value in values.items():
+        os.environ[key] = str(value)
+    with LOCAL_ENV_FILE.open("w", encoding="utf-8") as f:
+        for key in [
+            "LLM_PROVIDER",
+            "GEMINI_API_KEY",
+            "GEMINI_MODEL",
+            "GEMINI_EMBED_MODEL",
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_MODEL",
+            "OPENAI_API_KEY",
+            "OPENAI_MODEL",
+            "AZURE_OPENAI_API_KEY",
+            "AZURE_OPENAI_DEPLOYMENT",
+            "LLM_RPM",
+            "LLM_PAID",
+        ]:
+            if key in os.environ:
+                f.write(f"{key}={os.environ[key]}\n")
+
+    settings.llm_provider = provider
+    settings.gemini_api_key = os.environ.get("GEMINI_API_KEY", "")
+    settings.gemini_model = os.environ.get("GEMINI_MODEL", "")
+    settings.gemini_embed_model = os.environ.get("GEMINI_EMBED_MODEL", settings.gemini_embed_model)
+    settings.anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    settings.anthropic_model = os.environ.get("ANTHROPIC_MODEL", settings.anthropic_model)
+    settings.openai_api_key = os.environ.get("OPENAI_API_KEY", "")
+    settings.openai_model = os.environ.get("OPENAI_MODEL", settings.openai_model)
+    settings.azure_api_key = os.environ.get("AZURE_OPENAI_API_KEY", "")
+    settings.azure_deployment = os.environ.get("AZURE_OPENAI_DEPLOYMENT", settings.azure_deployment)
+    settings.llm_rpm = int(os.environ.get("LLM_RPM", str(settings.llm_rpm)))
+    settings.llm_paid = os.environ.get("LLM_PAID", "false").lower() in ("1", "true", "yes")
+    return {"provider": provider, "model": model or values.get(f"{provider.upper()}_MODEL", ""), "rpm": settings.llm_rpm, "paid": settings.llm_paid}

@@ -17,13 +17,43 @@ export default function SettingsPage() {
   const qc = useQueryClient();
   const { data: c } = useQuery({ queryKey: ["company"], queryFn: () => api.get("/company") });
   const { data: users } = useQuery({ queryKey: ["users"], queryFn: () => api.get("/auth/users") });
+  const { data: aiCfg } = useQuery({ queryKey: ["ai-config"], queryFn: () => api.get("/auth/ai-config") });
   const [s, setS] = useState<any>(null);
+  const [llmForm, setLlmForm] = useState({ provider: "none", api_key: "", model: "", embed_model: "gemini-embedding-001", rpm: 8, paid: false });
   const [inv, setInv] = useState(false);
   const [nu, setNu] = useState({ name: "", email: "", role: "presales", password: "" });
   useEffect(() => { if (c && !s) setS({ ...c.settings, about: c.about }); }, [c]);
+  useEffect(() => {
+    if (aiCfg) {
+      setLlmForm({
+        provider: aiCfg.provider || "none",
+        api_key: "",
+        model: aiCfg.model || "",
+        embed_model: aiCfg.embed_model || "gemini-embedding-001",
+        rpm: aiCfg.rpm || 8,
+        paid: !!aiCfg.paid,
+      });
+    }
+  }, [aiCfg]);
   const save = useMutation({
     mutationFn: () => api.put("/company", { about: s.about, settings: { target_margin: s.target_margin, min_margin: s.min_margin, travel_pct: s.travel_pct, hide_employee_names: s.hide_employee_names } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["company"] }); toast("ok", "Settings saved. New pricing runs use them."); },
+    onError: (e: any) => toast("error", e.message),
+  });
+  const saveAi = useMutation({
+    mutationFn: () => api.put("/auth/ai-config", {
+      provider: llmForm.provider,
+      api_key: llmForm.api_key,
+      model: llmForm.model,
+      embed_model: llmForm.embed_model,
+      rpm: Number(llmForm.rpm),
+      paid: llmForm.paid,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["company"] });
+      qc.invalidateQueries({ queryKey: ["ai-config"] });
+      toast("ok", "AI provider settings saved.");
+    },
     onError: (e: any) => toast("error", e.message),
   });
   const invite = useMutation({
@@ -59,6 +89,56 @@ export default function SettingsPage() {
         {isAdmin && <button className="btn-primary mt-4" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending && <Spinner />} Save settings</button>}
       </section>
 
+      <section className="card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <div className="font-bold">AI engine</div>
+            <div className="text-[13px] text-ink-muted">Choose the provider and enter the API key for this workspace.</div>
+          </div>
+          {isAdmin && <button className="btn-primary" onClick={() => saveAi.mutate()} disabled={saveAi.isPending}>{saveAi.isPending && <Spinner />} Save AI settings</button>}
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-4">
+          <label className="text-[13px]">
+            <span className="label">Provider</span>
+            <select className="input" value={llmForm.provider} onChange={(e) => setLlmForm({ ...llmForm, provider: e.target.value })} disabled={!isAdmin}>
+              <option value="none">Rules engine only</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="anthropic">Anthropic Claude</option>
+              <option value="openai">OpenAI</option>
+              <option value="azure">Azure OpenAI</option>
+            </select>
+          </label>
+
+          <label className="text-[13px]">
+            <span className="label">API key</span>
+            <input className="input" type="password" placeholder={aiCfg?.api_key_present ? "Leave blank to keep the existing key" : "Paste your API key"} value={llmForm.api_key} onChange={(e) => setLlmForm({ ...llmForm, api_key: e.target.value })} disabled={!isAdmin} />
+          </label>
+
+          <label className="text-[13px]">
+            <span className="label">Model</span>
+            <input className="input" value={llmForm.model} onChange={(e) => setLlmForm({ ...llmForm, model: e.target.value })} disabled={!isAdmin} placeholder={llmForm.provider === "gemini" ? "gemini-2.5-flash" : llmForm.provider === "anthropic" ? "claude-sonnet-4-5" : llmForm.provider === "openai" ? "gpt-4o" : "deployment name"} />
+          </label>
+
+          <label className="text-[13px]">
+            <span className="label">Embedding model</span>
+            <input className="input" value={llmForm.embed_model} onChange={(e) => setLlmForm({ ...llmForm, embed_model: e.target.value })} disabled={!isAdmin} />
+          </label>
+
+          <label className="text-[13px]">
+            <span className="label">Requests / minute</span>
+            <input className="input num" type="number" min={1} value={llmForm.rpm} onChange={(e) => setLlmForm({ ...llmForm, rpm: Number(e.target.value) || 1 })} disabled={!isAdmin} />
+          </label>
+
+          <label className="flex items-center gap-2 text-[13.5px] pt-6">
+            <input type="checkbox" className="h-4 w-4 accent-[#118AC3]" checked={!!llmForm.paid} onChange={(e) => setLlmForm({ ...llmForm, paid: e.target.checked })} disabled={!isAdmin} />
+            Paid tier / billed project
+          </label>
+        </div>
+
+        {!isAdmin && <div className="mt-4 text-[12.5px] text-ink-muted">Only admins can change the AI provider and keys.</div>}
+      </section>
+
       <section className="card">
         <div className="px-5 py-3.5 border-b border-line flex items-center">
           <div><div className="font-bold">People in this workspace</div><div className="text-[13px] text-ink-muted">Each stage is approved by the role responsible for it.</div></div>
@@ -80,33 +160,6 @@ export default function SettingsPage() {
             ))}
           </tbody>
         </table>
-      </section>
-
-      <section className="card p-5 flex gap-4">
-        <Cpu className="h-5 w-5 text-brand-600 mt-0.5 shrink-0" />
-        <div className="text-[13.5px] flex-1 min-w-0">
-          <div className="font-bold">AI engine</div>
-          {c.llm.enabled ? (
-            <>
-              <div className="text-ink-soft mt-1">Using <b className="capitalize">{c.llm.provider}</b> ({c.llm.model}) to read RFPs, judge capability fit, plan mitigations, design the architecture and write answers. Semantic matching: {c.llm.embeddings ? "on (embeddings)" : "off (text matching)"}. If a call fails, that step falls back to the rules engine and the deal still completes.</div>
-              <div className="mt-3 grid sm:grid-cols-4 gap-3 text-[12.5px]">
-                <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">Tier</div><div className="font-semibold">{c.llm.paid ? "Paid" : "Free"}</div></div>
-                <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">Rate limit used</div><div className="font-semibold num">{c.llm.rpm}/min</div></div>
-                <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">AI calls since start</div><div className="font-semibold num">{c.llm.calls}</div></div>
-                <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">Failed calls</div><div className={`font-semibold num ${c.llm.failures ? "text-fit-gap-ink" : ""}`}>{c.llm.failures}</div></div>
-              </div>
-              {!c.llm.paid && <div className="mt-3 rounded border border-ember-100 bg-ember-50 px-3 py-2 text-[12.5px] text-ember-600">Free tier: Google may use submitted content to improve its products and reviewers may read it. Don't process confidential client RFPs until the key is on a billed project; then set <code>LLM_PAID=true</code>.</div>}
-              {c.llm.last_error && <div className="mt-2 text-[12px] text-fit-gap-ink break-words">Last error: {c.llm.last_error}</div>}
-            </>
-          ) : (
-            <div className="text-ink-soft mt-1">
-              {c.llm.disabled_reason ? <span className="text-fit-gap-ink font-semibold">{c.llm.disabled_reason} </span> : "AI is off, so deals run on the built-in rules engine. "}
-              To turn on Gemini, create <code className="bg-paper px-1 rounded">backend/.env</code> with:
-              <pre className="mt-2 bg-paper rounded p-3 text-[12px] overflow-x-auto">LLM_PROVIDER=gemini{"\n"}GEMINI_API_KEY=your-key</pre>
-              and restart. Claude, OpenAI and Azure OpenAI also work (see <code>backend/.env.example</code>).
-            </div>
-          )}
-        </div>
       </section>
 
       <Modal open={inv} onClose={() => setInv(false)} title="Add a person">
