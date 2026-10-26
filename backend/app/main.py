@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import BASE_DIR, settings
 from .db import init_db
-from .routers import auth, deals, insights, learning, library
+from .routers import assistant, auth, deals, insights, learning, library
 from .services import llm
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -56,6 +56,7 @@ app.include_router(library.router)
 app.include_router(deals.router)
 app.include_router(insights.router)
 app.include_router(learning.router)
+app.include_router(assistant.router)
 
 # Serve the built frontend (frontend/dist) when present, so one process runs everything.
 DIST = BASE_DIR.parent / "frontend" / "dist"
