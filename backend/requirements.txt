@@ -19,3 +19,4 @@ imageio-ffmpeg>=0.5
 Pillow>=10.1
 fonttools>=4.47
 psycopg2-binary>=2.9  # only used when DATABASE_URL points at PostgreSQL
+cryptography>=42  # encrypts each company's AI key at rest

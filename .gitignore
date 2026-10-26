@@ -20,3 +20,6 @@ backend/.env
 .DS_Store
 Thumbs.db
 *.log
+
+# TypeScript build cache
+*.tsbuildinfo

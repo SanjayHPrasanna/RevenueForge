@@ -167,7 +167,8 @@ def _fallback(f: dict) -> dict:
 
 def write_narration(f: dict) -> dict:
     fb = _fallback(f)
-    key = settings.gemini_video_api_key or None
+    # the separate narration key only stands in for the server's default AI, never for a company's own key
+    key = (settings.gemini_video_api_key or None) if llm.current_profile().source == "server" else None
     if not key and not llm.is_enabled():
         return fb
     facts = {k: v for k, v in f.items() if not k.startswith("_")}
@@ -938,6 +939,7 @@ def _run(doc_id: str, deal_id: str, use_client_name: bool) -> None:
         db = SessionLocal()
         try:
             doc, deal = db.get(Document, doc_id), db.get(Deal, deal_id)
+            llm.set_tenant(deal.tenant_id)
 
             def progress(pct, msg):
                 doc.parsed = {**(doc.parsed or {}), "pct": pct, "message": msg}

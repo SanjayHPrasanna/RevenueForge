@@ -192,6 +192,7 @@ def _process_one(did: str) -> None:
         doc = db.get(Document, did)
         if not doc or doc.status != "analyzing":
             return
+        llm.set_tenant(doc.tenant_id)  # the company's own AI settings, if it has any
         try:
             data = Path(doc.path).read_bytes()
             parsed = parse_document(data, doc.filename)
@@ -218,6 +219,7 @@ def _ai_one(did: str) -> None:
         if not doc or doc.status != "review" or doc.kind not in KINDS or (doc.parsed or {}).get("ai") != "pending":
             return
         kind, path, name = doc.kind, doc.path, doc.filename
+        llm.set_tenant(doc.tenant_id)
         db.close()
         recs: list = []
         try:

@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import BASE_DIR, settings
 from .db import init_db
 from .routers import assistant, auth, deals, insights, learning, library
-from .services import llm
+from .services import company_ai, llm  # noqa: F401  (company_ai registers the per-company AI settings)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -19,9 +19,29 @@ app = FastAPI(title="RevenueForge API", version="1.0.0", description="AI deal & 
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 
+@app.middleware("http")
+async def _company_ai_context(request: Request, call_next):
+    """AI calls made while handling this request use the signed-in company's own AI settings (if it has any)."""
+    tid = None
+    auth = request.headers.get("authorization", "")
+    if auth[:7].lower() == "bearer ":
+        try:
+            import jwt
+            tid = jwt.decode(auth[7:], settings.jwt_secret, algorithms=["HS256"]).get("tid")
+        except Exception:
+            tid = None
+    token = llm.set_tenant(tid)
+    try:
+        return await call_next(request)
+    finally:
+        llm.reset_tenant(token)
+
+
 @app.on_event("startup")
 def _startup():
     init_db()
+    from .services import ai_settings
+    ai_settings.apply_saved()  # AI engine settings saved from Settings → AI engine
     # Any deal left mid-run by a restart is marked so the user can re-run it.
     from sqlalchemy import select
     from .db import SessionLocal

@@ -56,12 +56,13 @@ export function GoogleButton({ onCredential, text = "continue_with" }: { onCrede
 }
 
 /** Site-wide notice (e.g. "sample data only" while the AI runs on a free key). Set on the server with PUBLIC_NOTICE. */
-export function NoticeBar({ className = "" }: { className?: string }) {
+export function NoticeBar({ className = "", text }: { className?: string; text?: string }) {
   const { data } = useAuthConfig();
-  if (!data?.notice) return null;
+  const notice = text !== undefined ? text : data?.notice;
+  if (!notice) return null;
   return (
     <div role="note" className={`bg-[#FBF1DD] text-[#6E4A06] border-b border-[#EED9A8] text-[13px] leading-snug px-4 py-2 text-center ${className}`}>
-      {data.notice}
+      {notice}
     </div>
   );
 }
