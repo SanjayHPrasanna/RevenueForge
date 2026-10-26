@@ -50,7 +50,7 @@ export default function GraphPage() {
     <div className="px-4 lg:px-8 py-6 max-w-[1500px]">
       <div className="flex flex-wrap items-end gap-3 mb-4">
         <div>
-          <h1 className="font-display text-[32px] leading-tight text-brand-950">Knowledge graph</h1>
+          <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Knowledge graph</h1>
           <p className="text-ink-muted text-sm mt-0.5">How your requirements, capabilities, technologies, skills, references, architecture, people and costs connect. It grows with every deal.</p>
         </div>
         <div className="flex-1" />

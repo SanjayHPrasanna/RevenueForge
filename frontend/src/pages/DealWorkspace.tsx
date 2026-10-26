@@ -62,7 +62,8 @@ function StageRail({ deal, current, metric, onPick }: { deal: any; current: stri
           return (
             <li key={s.key} className="flex-none">
               <button onClick={() => onPick(s.key)} aria-current={active ? "page" : undefined}
-                className={clsx("w-full text-left px-2.5 pt-2.5 pb-3 border-b-2 -mb-px transition-colors", active ? "border-brand-950" : "border-transparent hover:border-line")}>
+                className={clsx("w-full text-left px-3 pt-2.5 pb-3 border-b-2 -mb-px rounded-t-xl transition-all duration-200 ease-apple",
+                  active ? "border-brand-950 bg-white/80 shadow-[0_-6px_18px_-12px_rgba(8,43,61,.35)]" : "border-transparent hover:border-line hover:bg-white/50")}>
                 <span className="flex items-center gap-1.5">
                   <StepGlyph status={status} n={i} />
                   <span className={clsx("text-[13px] whitespace-nowrap", active ? "font-bold text-ink" : "font-medium text-ink-soft")}>
@@ -187,7 +188,7 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
       <Link to="/app/deals" className="text-[13px] text-ink-muted hover:text-ink inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" /> Deals</Link>
       <div className="mt-2 flex flex-wrap items-start gap-x-6 gap-y-3">
         <div className="min-w-[min(100%,30rem)] flex-1">
-          <h1 className="font-display text-[28px] md:text-[36px] leading-[1.08] tracking-[-0.01em] text-brand-950">{deal.name}</h1>
+          <h1 className="font-display text-[30px] md:text-[42px] leading-[1.04] tracking-[-0.025em] text-brand-950">{deal.name}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-ink-muted">
             <span className="inline-flex items-center gap-1.5 font-semibold text-ink-soft" title={deal.confidential ? "Client name masked" : undefined}>{deal.confidential && <EyeOff className="h-3.5 w-3.5" />}{deal.client}</span>
             <span>{deal.doc_type}</span>
