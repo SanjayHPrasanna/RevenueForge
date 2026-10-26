@@ -42,6 +42,8 @@ def _startup():
     init_db()
     from .services import ai_settings
     ai_settings.apply_saved()  # AI engine settings saved from Settings → AI engine
+    from .services import notify
+    notify.start_deadline_watch()  # "due in 3 days / tomorrow" reminder emails
     # Any deal left mid-run by a restart is marked so the user can re-run it.
     from sqlalchemy import select
     from .db import SessionLocal

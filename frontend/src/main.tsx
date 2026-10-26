@@ -17,8 +17,10 @@ import Landing from "./pages/Landing";
 import Learning from "./pages/Learning";
 import Library from "./pages/Library";
 import { Login, Signup } from "./pages/Auth";
+import { MicrosoftCallback } from "./components/GoogleButton";
 import Onboarding from "./pages/Onboarding";
 import SettingsPage from "./pages/Settings";
+import WinLoss from "./pages/WinLoss";
 
 const qc = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1, staleTime: 5_000 } } });
 
@@ -46,6 +48,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
           <BrowserRouter>
             <Routes>
               <Route path="/" element={<Landing />} />
+              <Route path="/auth/microsoft" element={<MicrosoftCallback />} />
               <Route path="/login" element={<Public><Login /></Public>} />
               <Route path="/signup" element={<Public><Signup /></Public>} />
               <Route path="/onboarding" element={<Private><Onboarding /></Private>} />
@@ -58,6 +61,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="library/:kind" element={<Library />} />
                 <Route path="graph" element={<GraphPage />} />
                 <Route path="learning" element={<Learning />} />
+                <Route path="winloss" element={<WinLoss />} />
                 <Route path="settings" element={<SettingsPage />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />

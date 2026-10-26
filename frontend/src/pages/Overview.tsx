@@ -1,11 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, History } from "lucide-react";
 import { useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { PageLoader } from "../components/ui";
 import { Bars, CoverageMap, FitLegend, PriceLadder, ReadinessScale, StatusRows, TeamBars, WeightBar } from "../components/viz";
 import { api } from "../lib/api";
-import { CATEGORIES, money } from "../lib/format";
+import { CATEGORIES, ENGAGEMENT, money } from "../lib/format";
+import { DealStatus } from "./Dashboard";
 
 const useStage = (id: string, stage: string) => useQuery({ queryKey: ["stage", id, stage], queryFn: () => api.get(`/deals/${id}/stages/${stage}`) });
 
@@ -138,6 +139,7 @@ export function OverviewStage({ deal }: { deal: any }) {
         </Panel>
       )}
 
+      <SimilarDeals deal={deal} />
       <NextStep deal={deal} />
     </div>
   );
@@ -166,5 +168,47 @@ function NextStep({ deal }: { deal: any }) {
       </div>
       <Link to={`/app/deals/${deal.id}/${next.stage}`} className="btn bg-white text-brand-950 hover:bg-brand-50 h-10 px-5">Review {STAGE_LABEL[next.stage]} <ArrowRight className="h-4 w-4" /></Link>
     </div>
+  );
+}
+
+/** "You've bid this before": the company's past deals most like this one, and how they went. Hidden when there are none. */
+function SimilarDeals({ deal }: { deal: any }) {
+  const { data } = useQuery({ queryKey: ["similar", deal.id], queryFn: () => api.get<any[]>(`/deals/${deal.id}/similar`), staleTime: 60_000 });
+  if (!data?.length) return null;
+  return (
+    <section className="card p-5 md:p-6">
+      <div className="flex items-start gap-3 mb-4">
+        <span className="h-9 w-9 shrink-0 rounded-xl bg-gradient-to-b from-brand-50 to-white border border-brand-100 text-brand-600 grid place-items-center"><History className="h-[18px] w-[18px]" /></span>
+        <div className="min-w-0">
+          <h3 className="font-bold text-[15.5px] text-ink">You've bid this before</h3>
+          <p className="text-[12.5px] text-ink-muted mt-0.5">Your past deals most like this one, by technologies, capabilities, industry and engagement type. Learn from how they went.</p>
+        </div>
+      </div>
+      <div className="grid md:grid-cols-3 gap-3">
+        {data.map((s) => (
+          <Link key={s.id} to={`/app/deals/${s.id}`} className="group rounded-xl border border-line-soft bg-[#FBFCFD] p-4 transition-all duration-300 hover:border-brand-200 hover:bg-white hover:shadow-hover">
+            <div className="flex items-center gap-2">
+              <span className="num text-[12px] font-bold text-brand-700">{s.similarity}% alike</span>
+              <span className="ml-auto"><DealStatus s={s.status} /></span>
+            </div>
+            <div className="mt-2 font-semibold text-[14px] leading-snug text-ink line-clamp-2 group-hover:text-brand-800">{s.name}</div>
+            <div className="text-[12px] text-ink-muted mt-0.5 truncate">
+              {s.client}{s.industry ? ` · ${s.industry}` : ""}{s.engagement_type ? ` · ${(ENGAGEMENT[s.engagement_type] || "").toLowerCase()}` : ""}
+            </div>
+            <dl className="mt-3 grid grid-cols-3 gap-2 text-[12px]">
+              <div><dt className="text-ink-faint">Price</dt><dd className="num font-semibold text-ink">{s.value ? money(s.value, s.value_currency || "USD") : "—"}</dd></div>
+              <div><dt className="text-ink-faint">Margin</dt><dd className="num font-semibold text-ink">{s.margin_pct != null ? `${s.margin_pct}%` : "—"}</dd></div>
+              <div><dt className="text-ink-faint">Readiness</dt><dd className="num font-semibold text-ink">{s.readiness != null ? `${s.readiness}%` : "—"}</dd></div>
+            </dl>
+            {s.common_technologies?.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-1">
+                {s.common_technologies.slice(0, 5).map((t: string) => <span key={t} className="chip bg-white border border-line text-ink-soft font-medium">{t}</span>)}
+              </div>
+            )}
+            {s.outcome_notes && <p className="mt-3 text-[12px] text-ink-soft italic line-clamp-2">“{s.outcome_notes}”</p>}
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }

@@ -41,6 +41,7 @@ export default function SettingsPage() {
   return (
     <div className="px-4 lg:px-8 py-6 max-w-[1100px] space-y-4">
       <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Settings</h1>
+      <MyEmails />
       <section className="card p-5">
         <div className="font-bold">Commercial policy</div>
         <div className="text-[13px] text-ink-muted mb-4">Used by every pricing run. Finance can still adjust per deal.</div>
@@ -101,6 +102,37 @@ const PROVIDER_LABEL: Record<string, string> = { gemini: "Google Gemini", anthro
 const MODEL_HINT: Record<string, string> = { gemini: "Leave empty to use the newest Flash model", anthropic: "e.g. claude-sonnet-4-5", openai: "e.g. gpt-4o", azure: "Your deployment name" };
 
 /** AI engine status for everyone; the change form only for the server's platform admins (the set-up is shared by every company). */
+/** Each person chooses which emails they get. */
+function MyEmails() {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["my-prefs"], queryFn: () => api.get("/auth/me/prefs") });
+  const save = useMutation({
+    mutationFn: (emails: Record<string, boolean>) => api.put("/auth/me/prefs", { emails }),
+    onSuccess: (d) => { qc.setQueryData(["my-prefs"], d); toast("ok", "Email preferences saved."); },
+    onError: (e: any) => toast("error", e.message),
+  });
+  if (!data) return null;
+  return (
+    <section className="card p-5">
+      <div className="font-bold">My email notifications</div>
+      <div className="text-[13px] text-ink-muted mb-4">
+        {data.email_enabled ? <>Sent to <span className="font-semibold text-ink">{data.email}</span>. Only you see these choices.</>
+          : "Email isn't set up on this server yet (SMTP settings), so no emails are sent. Your choices are kept for when it is."}
+      </div>
+      <div className="grid sm:grid-cols-2 gap-2.5">
+        {data.emails.map((e: any) => (
+          <label key={e.key} className="flex items-center gap-3 rounded-xl border border-line-soft px-3.5 py-3 text-[13.5px] cursor-pointer hover:border-brand-200 hover:bg-brand-50/30 transition-colors">
+            <input type="checkbox" className="h-4 w-4 accent-[#118AC3]" checked={e.on} disabled={save.isPending}
+              onChange={(ev) => save.mutate({ [e.key]: ev.target.checked })} />
+            {e.label}
+          </label>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function AiEngine({ c }: { c: any }) {
   const toast = useToast();
   const qc = useQueryClient();

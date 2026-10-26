@@ -7,11 +7,12 @@ import time
 from collections import defaultdict, deque
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
 from ..config import settings
-from ..services import llm
+from ..security import Ctx, current_ctx
+from ..services import llm, workspace_ai
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
 log = logging.getLogger("revenueforge.assistant")
@@ -119,4 +120,39 @@ def chat(body: ChatRequest, request: Request):
     answer = answer.strip()
     if not answer:
         raise HTTPException(503, "Maahi couldn't create a response just now. Please try again shortly.")
+    return {"answer": answer}
+
+
+@router.post("/workspace")
+def workspace_chat(body: ChatRequest, ctx: Ctx = Depends(current_ctx)):
+    """Maahi inside the app: answers from the signed-in company's own deals and knowledge library only."""
+    _check_rate_limit(f"user:{ctx.user.id}")
+    # A company that set its own AI keeps its data on that AI; otherwise Maahi's own key (then the server default).
+    own = llm.current_profile().source == "company"
+    key = None if own else (settings.maahi_gemini_api_key or None)
+    if not key and not llm.is_enabled():
+        raise HTTPException(503, "Maahi's AI service is not configured on this server yet.")
+    question = body.messages[-1].content
+    data = workspace_ai.build_context(ctx, question)
+    conversation = "\n".join(f"{turn.role}: {turn.content}" for turn in body.messages)
+    try:
+        answer = llm.complete(
+            workspace_ai.system_prompt(ctx),
+            f"WORKSPACE DATA\n{data}\n\nCONVERSATION\n{conversation}\n\nReply to the final user message.",
+            max_tokens=900,
+            temperature=0.2,
+            api_key=key,
+            attempts=3,
+            timeout=45,
+            max_wait=1,
+            fast=True,
+        )
+    except llm.LLMUnavailable as e:
+        log.warning("Maahi workspace chat failed: %s", str(e)[:300])
+        raise HTTPException(503, "Maahi couldn't reach the AI service just now. Please try again shortly.")
+    answer = answer.strip()
+    if not answer:
+        raise HTTPException(503, "Maahi couldn't create a response just now. Please try again shortly.")
+    ctx.audit("assistant.workspace_chat", "", chars=len(question))
+    ctx.db.commit()
     return {"answer": answer}

@@ -59,6 +59,10 @@ Web App → **Settings → Environment variables → App settings** → add each
 | `GOOGLE_ALLOWED_DOMAINS` | e.g. `yourcompany.com` | Optional: only company Google accounts can sign in |
 | `GEMINI_VIDEO_API_KEY` | second key | Optional: separate quota for video narration |
 | `MAAHI_GEMINI_API_KEY` | third key | Optional: separate quota for Maahi, the chat assistant |
+| `PLATFORM_ADMINS` | your email(s) | Who may change the server's default AI in Settings |
+| `MS_CLIENT_ID`, `MS_TENANT_ID` | from the Entra ID app registration | Optional: "Sign in with Microsoft". Add `https://<your-app>.azurewebsites.net/auth/microsoft` as a redirect URI in the app registration |
+| `APP_URL` | `https://<your-app>.azurewebsites.net` | Link used in "ready for review" emails |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | your mail service | Optional: emails people when their deal is ready for review (e.g. Microsoft 365 `smtp.office365.com` / `587`, or Azure Communication Services). Empty `SMTP_HOST` = no emails |
 
 While the key is a free one, everyone sees a "test version: sample or dummy documents only" banner.
 When you switch to a billed key, add `LLM_PAID=true` and the banner disappears. Set `PUBLIC_NOTICE`

@@ -45,6 +45,8 @@ class User(Base):
     role: Mapped[str] = mapped_column(String(30), default="admin")  # admin, presales, architect, finance, delivery, viewer
     password_hash: Mapped[str] = mapped_column(String(300))
     google_sub: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)  # Google account id once linked
+    ms_oid: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)  # Microsoft (Entra ID) account id once linked
+    prefs: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=dict)  # personal settings, e.g. which emails to get
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -217,6 +219,20 @@ class Requirement(Base):
     notes: Mapped[str] = mapped_column(Text, default="")
 
     deal: Mapped[Deal] = relationship(back_populates="requirements")
+
+
+class RequirementComment(Base):
+    """A discussion note on one requirement. Mentions (@name) email the people named."""
+    __tablename__ = "requirement_comments"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    tenant_id: Mapped[str] = mapped_column(String(32), index=True)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    requirement_id: Mapped[str] = mapped_column(ForeignKey("requirements.id", ondelete="CASCADE"), index=True)
+    user_id: Mapped[str] = mapped_column(String(32), default="")
+    author: Mapped[str] = mapped_column(String(200), default="")
+    text: Mapped[str] = mapped_column(Text)
+    mentions: Mapped[list] = mapped_column(JSON, default=list)  # user ids
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 STAGES = ["requirements", "matching", "gaps", "architecture", "estimation", "pricing", "proposal", "handoff"]

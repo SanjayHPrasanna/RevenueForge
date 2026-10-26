@@ -45,6 +45,12 @@ class Settings:
     google_client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     # Optional: only these email domains may sign in with Google, e.g. "isteer.com,example.com". Empty = any verified Google account.
     google_allowed_domains = [d.strip().lower().lstrip("@") for d in os.getenv("GOOGLE_ALLOWED_DOMAINS", "").split(",") if d.strip()]
+    # "Sign in with Microsoft" (work accounts, Microsoft Entra ID): the Application (client) ID of an app registration.
+    # Empty = the Microsoft button is hidden. MS_TENANT_ID: your directory (tenant) ID to allow only your organisation,
+    # or "organizations" for any work account. MS_ALLOWED_DOMAINS works like GOOGLE_ALLOWED_DOMAINS.
+    ms_client_id = os.getenv("MS_CLIENT_ID", "").strip()
+    ms_tenant_id = os.getenv("MS_TENANT_ID", "organizations").strip() or "organizations"
+    ms_allowed_domains = [d.strip().lower().lstrip("@") for d in os.getenv("MS_ALLOWED_DOMAINS", "").split(",") if d.strip()]
     cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]
 
     # LLM: gemini | anthropic | openai | azure | none
@@ -66,6 +72,17 @@ class Settings:
     # Banner shown to every user (sign-in page and app). Empty = automatic: a "sample data only" warning while the AI
     # runs on a free key. Set to "off" to hide it, or to your own text.
     public_notice = os.getenv("PUBLIC_NOTICE", "").strip()
+    # Email ("your deal is ready for review"). Any SMTP service works, e.g. Gmail (smtp.gmail.com, an app password),
+    # Microsoft 365 (smtp.office365.com) or Azure Communication Services. Empty SMTP_HOST = no emails.
+    smtp_host = os.getenv("SMTP_HOST", "").strip()
+    smtp_port = int(os.getenv("SMTP_PORT", "587") or 587)
+    smtp_user = os.getenv("SMTP_USER", "").strip()
+    smtp_password = os.getenv("SMTP_PASSWORD", "").strip()
+    smtp_from = os.getenv("SMTP_FROM", "").strip()  # empty = SMTP_USER
+    smtp_from_name = os.getenv("SMTP_FROM_NAME", "RevenueForge").strip()
+    smtp_security = os.getenv("SMTP_SECURITY", "starttls").strip().lower()  # starttls (port 587) | ssl (port 465) | none
+    # The address people open the app at, used for links in emails.
+    app_url = os.getenv("APP_URL", "http://localhost:5173").strip()
     # People who may change the server's AI provider and keys from Settings (comma-separated emails). The AI setup is
     # shared by every company on this server, so this is deliberately separate from each company's own admins.
     platform_admins = [e.strip().lower() for e in os.getenv("PLATFORM_ADMINS", "").split(",") if e.strip()]

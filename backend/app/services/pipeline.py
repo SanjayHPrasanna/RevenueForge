@@ -317,7 +317,7 @@ def draft_responses(db: Session, deal: Deal, prog=lambda m: None) -> None:
     db.commit()
 
 
-def run_pipeline(deal_id: str, from_stage: str = "requirements", until: str | None = None) -> None:
+def run_pipeline(deal_id: str, from_stage: str = "requirements", until: str | None = None, notify_user: str | None = None) -> None:
     lock = _locks.setdefault(deal_id, threading.Lock())
     if not lock.acquire(blocking=False):
         return
@@ -350,6 +350,9 @@ def run_pipeline(deal_id: str, from_stage: str = "requirements", until: str | No
         deal.meta = m
         deal.progress = {"stage": "done", "pct": 100, "message": "Deal package ready for review"}
         db.commit()
+        if notify_user:
+            from . import notify
+            notify.deal_finished(db, deal_id, notify_user, ok=True)
     except Exception as e:
         log.error("pipeline failed: %s\n%s", e, traceback.format_exc())
         db.rollback()
@@ -361,10 +364,14 @@ def run_pipeline(deal_id: str, from_stage: str = "requirements", until: str | No
             for st in db.scalars(select(DealStage).where(DealStage.deal_id == deal_id, DealStage.status == "running")):
                 st.status = "failed"
             db.commit()
+            if notify_user:
+                from . import notify
+                notify.deal_finished(db, deal_id, notify_user, ok=False, error=str(e))
     finally:
         db.close()
         lock.release()
 
 
-def start(deal_id: str, from_stage: str = "requirements", until: str | None = None) -> None:
-    threading.Thread(target=run_pipeline, args=(deal_id, from_stage, until), daemon=True).start()
+def start(deal_id: str, from_stage: str = "requirements", until: str | None = None, notify_user: str | None = None) -> None:
+    """`notify_user`: the user to email when the deal is ready for review (or couldn't finish)."""
+    threading.Thread(target=run_pipeline, args=(deal_id, from_stage, until, notify_user), daemon=True).start()

@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowLeft, Check, ChevronDown, Download, EyeOff, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Download, EyeOff, Mail, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Modal, PageLoader, Spinner, StageStatus, useToast } from "../components/ui";
+import { useAuthConfig } from "../components/GoogleButton";
 import { api, download } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ENGAGEMENT, money, STAGES } from "../lib/format";
@@ -106,6 +107,8 @@ function Standfirst({ deal, est }: { deal: any; est: any }) {
 }
 
 function Processing({ deal }: { deal: any }) {
+  const { user } = useAuth();
+  const { data: cfg } = useAuthConfig();
   const p = deal.progress || {};
   const idx = Math.max(0, STAGES.findIndex((s) => s.key === p.stage));
   return (
@@ -127,6 +130,15 @@ function Processing({ deal }: { deal: any }) {
           </li>
         ))}
       </ol>
+      {cfg?.email_notifications && user?.email && (
+        <div className="mt-6 flex items-start gap-3 rounded-xl bg-brand-50/70 border border-brand-100 px-4 py-3 text-[13.5px] text-ink-soft">
+          <span className="h-8 w-8 shrink-0 rounded-lg bg-white border border-brand-100 grid place-items-center text-brand-600"><Mail className="h-4 w-4" aria-hidden /></span>
+          <div>
+            <div className="font-semibold text-ink">I’ll email you when it’s ready for review</div>
+            <div className="mt-0.5">We’ll send a note to <span className="font-semibold text-ink">{user.email}</span>, so you can close this page and come back later.</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -21,7 +21,7 @@ function loadGis(): Promise<void> {
 }
 
 export function useAuthConfig() {
-  return useQuery({ queryKey: ["auth-config"], queryFn: () => api.get<{ google_client_id: string | null; google_domains: string[]; notice?: string }>("/auth/config"), staleTime: Infinity });
+  return useQuery({ queryKey: ["auth-config"], queryFn: () => api.get<{ google_client_id: string | null; google_domains: string[]; notice?: string; email_notifications?: boolean; ms_client_id?: string | null; ms_tenant_id?: string | null }>("/auth/config"), staleTime: Infinity });
 }
 
 /** Google's own "Sign in with Google" button. Renders nothing until GOOGLE_CLIENT_ID is set on the server. */
@@ -75,4 +75,99 @@ export function OrDivider({ label }: { label: string }) {
       <span className="h-px flex-1 bg-line" />{label}<span className="h-px flex-1 bg-line" />
     </div>
   );
+}
+
+
+// ------------------------------------------------------------------ Sign in with Microsoft (work accounts)
+// Opens Microsoft's sign-in in a small window; the ID token comes back to /auth/microsoft on this site and is passed to
+// the server, which checks Microsoft's signature, this app's ID and the one-time nonce. No extra library needed.
+const MS_STATE = "rf.ms.pending";
+const MS_RESULT = "rf.ms.result";
+
+function rand() {
+  const a = new Uint8Array(24);
+  crypto.getRandomValues(a);
+  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function MicrosoftLogo() {
+  return (
+    <svg viewBox="0 0 21 21" className="h-[18px] w-[18px]" aria-hidden>
+      <rect x="1" y="1" width="9" height="9" fill="#F25022" /><rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+      <rect x="1" y="11" width="9" height="9" fill="#00A4EF" /><rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+    </svg>
+  );
+}
+
+export function MicrosoftButton({ onCredential, label = "Sign in with Microsoft" }: { onCredential: (idToken: string, nonce: string) => void; label?: string }) {
+  const { data: cfg } = useAuthConfig();
+  const [busy, setBusy] = useState(false);
+  const cb = useRef(onCredential);
+  cb.current = onCredential;
+
+  // Back from a full-page sign-in (when the popup was blocked)
+  useEffect(() => {
+    try {
+      const done = JSON.parse(sessionStorage.getItem(MS_RESULT) || "null");
+      const pending = JSON.parse(sessionStorage.getItem(MS_STATE) || "null");
+      if (done && pending && done.state === pending.state && done.id_token) {
+        sessionStorage.removeItem(MS_RESULT);
+        sessionStorage.removeItem(MS_STATE);
+        cb.current(done.id_token, pending.nonce);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  if (!cfg?.ms_client_id) return null;
+  const start = () => {
+    const state = rand(), nonce = rand();
+    try { sessionStorage.setItem(MS_STATE, JSON.stringify({ state, nonce, back: window.location.pathname })); } catch { /* ignore */ }
+    const q = new URLSearchParams({
+      client_id: cfg.ms_client_id!, response_type: "id_token", redirect_uri: `${window.location.origin}/auth/microsoft`,
+      scope: "openid profile email", response_mode: "fragment", state, nonce, prompt: "select_account",
+    });
+    const url = `https://login.microsoftonline.com/${cfg.ms_tenant_id || "organizations"}/oauth2/v2.0/authorize?${q}`;
+    const w = 480, h = 640;
+    const popup = window.open(url, "rf-ms-signin", `width=${w},height=${h},left=${window.screenX + (window.outerWidth - w) / 2},top=${window.screenY + (window.outerHeight - h) / 2}`);
+    if (!popup) return window.location.assign(url);  // popup blocked: sign in on this page instead
+    setBusy(true);
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin || e.data?.type !== "rf-ms-signin") return;
+      window.removeEventListener("message", onMsg);
+      clearInterval(timer);
+      setBusy(false);
+      if (e.data.state === state && e.data.id_token) cb.current(e.data.id_token, nonce);
+    };
+    window.addEventListener("message", onMsg);
+    const timer = window.setInterval(() => { if (popup.closed) { clearInterval(timer); window.removeEventListener("message", onMsg); setBusy(false); } }, 600);
+  };
+  return (
+    <button type="button" onClick={start} disabled={busy}
+      className="mb-3 flex h-10 w-full items-center justify-center gap-2.5 rounded-[10px] border border-[#8C8C8C]/40 bg-white text-[14px] font-semibold text-[#3C4043] transition-colors hover:bg-[#F7F8F8] disabled:opacity-60">
+      <MicrosoftLogo /> {busy ? "Waiting for Microsoft…" : label}
+    </button>
+  );
+}
+
+/** Page Microsoft returns to (/auth/microsoft): hands the token to the window that opened it, then closes. */
+export function MicrosoftCallback() {
+  useEffect(() => {
+    const p = new URLSearchParams(window.location.hash.slice(1));
+    const msg = { type: "rf-ms-signin", id_token: p.get("id_token"), state: p.get("state"), error: p.get("error_description") || p.get("error") };
+    try {
+      if (window.opener && window.opener.location.origin === window.location.origin) {
+        window.opener.postMessage(msg, window.location.origin);
+        window.close();
+        return;
+      }
+    } catch { /* opener on another site: fall through to this-page sign-in */ }
+    try {
+      sessionStorage.setItem(MS_RESULT, JSON.stringify(msg));
+      const back = JSON.parse(sessionStorage.getItem(MS_STATE) || "{}").back || "/login";
+      window.location.replace(back);
+    } catch {
+      window.location.replace("/login");
+    }
+  }, []);
+  return <div className="min-h-screen grid place-items-center text-ink-muted text-sm">Signing you in…</div>;
 }

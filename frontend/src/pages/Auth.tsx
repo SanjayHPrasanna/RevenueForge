@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { GoogleButton, NoticeBar, OrDivider } from "../components/GoogleButton";
+import { GoogleButton, MicrosoftButton, NoticeBar, OrDivider } from "../components/GoogleButton";
 import clsx from "clsx";
 import { ProductMark, Spinner } from "../components/ui";
 import { useTilt } from "../components/motion";
@@ -63,7 +63,7 @@ function Frame({ title, sub, children }: { title: string; sub: ReactNode; childr
 }
 
 export function Login() {
-  const { login, google } = useAuth();
+  const { login, google, microsoft } = useAuth();
   const nav = useNavigate();
   const [sp] = useSearchParams();
   const [email, setEmail] = useState("");
@@ -93,8 +93,19 @@ export function Login() {
       setErr(e.message);
     }
   };
+  const withMicrosoft = async (credential: string, nonce: string) => {
+    setErr("");
+    try {
+      const r = await microsoft(credential, nonce);
+      if (r.needs_company) nav("/signup", { state: { google: { credential, nonce, provider: "microsoft", email: r.email, name: r.name } } });
+      else nav(sp.get("next") || "/app");
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  };
   return (
     <Frame title="Sign in" sub={<>New to RevenueForge? <Link className="text-brand-600 font-semibold" to="/signup">Create a company workspace</Link></>}>
+      <MicrosoftButton onCredential={withMicrosoft} />
       <GoogleButton onCredential={withGoogle} text="signin_with" />
       <OrDivider label="or with your email" />
       <form onSubmit={submit} className="space-y-4">
@@ -114,10 +125,10 @@ export function Login() {
 }
 
 export function Signup() {
-  const { register, google } = useAuth();
+  const { register, google, microsoft } = useAuth();
   const nav = useNavigate();
   const loc = useLocation();
-  const [g, setG] = useState<{ credential: string; email: string; name: string } | null>((loc.state as any)?.google || null);
+  const [g, setG] = useState<{ credential: string; email: string; name: string; provider?: "google" | "microsoft"; nonce?: string } | null>((loc.state as any)?.google || null);
   const [f, setF] = useState({ company_name: "", industry: "", headquarters: "", name: "", email: "", password: "" });
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -128,7 +139,8 @@ export function Signup() {
     setErr("");
     try {
       if (g) {
-        const r = await google(g.credential, { company_name: f.company_name, industry: f.industry, headquarters: f.headquarters });
+        const company = { company_name: f.company_name, industry: f.industry, headquarters: f.headquarters };
+        const r = g.provider === "microsoft" ? await microsoft(g.credential, g.nonce || "", company) : await google(g.credential, company);
         if (r.needs_company) throw new Error("Enter your company name.");
         nav(r.user && Object.keys(r.user.tenant.onboarding || {}).length ? "/app" : "/onboarding");
       } else {
@@ -151,12 +163,22 @@ export function Signup() {
       setErr(e.message);
     }
   };
+  const withMicrosoft = async (credential: string, nonce: string) => {
+    setErr("");
+    try {
+      const r = await microsoft(credential, nonce);
+      if (r.needs_company) setG({ credential, nonce, provider: "microsoft", email: r.email!, name: r.name! });
+      else nav("/app");
+    } catch (e: any) {
+      setErr(e.message);
+    }
+  };
   return (
     <Frame title="Create your company workspace" sub={<>Already have one? <Link className="text-brand-600 font-semibold" to="/login">Sign in</Link></>}>
-      {!g && <><GoogleButton onCredential={withGoogle} text="signup_with" /><OrDivider label="or sign up with your email" /></>}
+      {!g && <><MicrosoftButton onCredential={withMicrosoft} label="Sign up with Microsoft" /><GoogleButton onCredential={withGoogle} text="signup_with" /><OrDivider label="or sign up with your email" /></>}
       {g && (
         <div className="rounded-md border border-line bg-paper px-4 py-3 mb-5 text-[13.5px]">
-          <div className="text-ink-muted">Signing up with Google as</div>
+          <div className="text-ink-muted">Signing up with {g.provider === "microsoft" ? "Microsoft" : "Google"} as</div>
           <div className="font-semibold">{g.name} <span className="font-normal text-ink-muted">({g.email})</span></div>
           <button type="button" className="text-[12.5px] text-brand-700 font-semibold mt-1" onClick={() => setG(null)}>Use a different method</button>
         </div>

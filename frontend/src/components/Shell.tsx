@@ -1,16 +1,18 @@
 import clsx from "clsx";
 import { NoticeBar } from "./GoogleButton";
-import { BookOpen, Brain, Briefcase, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, Network, Settings, Sparkles, X } from "lucide-react";
+import { BookOpen, Brain, Briefcase, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, Network, Settings, Sparkles, Trophy, X } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ProductMark } from "./ui";
+import LandingAssistant from "./LandingAssistant";
 
 const NAV = [
   { to: "/app", label: "Home", icon: LayoutDashboard, end: true },
   { to: "/app/deals", label: "Deals", icon: Briefcase },
+  { to: "/app/winloss", label: "Win/loss", icon: Trophy },
   { to: "/app/library", label: "Knowledge library", icon: BookOpen },
   { to: "/app/graph", label: "Knowledge graph", icon: Network },
   { to: "/app/learning", label: "AI learning", icon: Brain },
@@ -175,9 +177,10 @@ export default function Shell() {
             )}
           </div>
         </header>
-        <main key={loc.pathname.split("/").slice(0, 3).join("/")} className="flex-1 min-w-0 page-enter">
+        <main key={loc.pathname.split("/").slice(0, 3).join("/")} className="flex-1 min-w-0 page-enter pb-20">
           <Outlet />
         </main>
+        <LandingAssistant mode="workspace" company={company?.name} />
       </div>
     </div>
   );

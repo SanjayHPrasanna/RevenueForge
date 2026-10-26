@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { BookOpen, Boxes, CheckCircle2, ChevronLeft, ChevronRight, Circle, Download, FileText, Plus, RefreshCw, Search, Upload, Users, X } from "lucide-react";
+import { BookOpen, Boxes, CheckCircle2, ChevronLeft, ChevronRight, Circle, Download, FileText, MessageSquare, Plus, RefreshCw, Search, Upload, Users, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CatChip, Empty, MatchChip, Meter, Modal, PageLoader, RiskChip, Spinner, Stat, StatStrip, useToast } from "../components/ui";
 import { Bars, CoverageMap, FitLegend, Gantt, PriceLadder, ReadinessScale, ShareBar, StatusRows, TeamBars, Waterfall } from "../components/viz";
@@ -9,6 +9,8 @@ import StoryVideo, { ProposalDownload } from "../components/StoryVideo";
 import { api, download } from "../lib/api";
 import { CATEGORIES, ENGAGEMENT, money } from "../lib/format";
 import { MatchMixBar } from "./Dashboard";
+import { CommentsPanel } from "../components/Comments";
+import { Clarifications } from "../components/Clarifications";
 
 type P = { deal: any; stage: string; onChanged: () => void };
 
@@ -54,6 +56,29 @@ function SourcePanel({ dealId, req, onClose }: { dealId: string; req: any; onClo
         })}
       </div>
       <div className="px-4 py-2 border-t border-line text-[12px] text-ink-muted">Highlighted: where {req.source_ref || req.code} was found{req.section ? ` · ${req.section}` : ""}</div>
+    </div>
+  );
+}
+
+/** Side panel for a selected requirement: where it is in the RFP, and the team's discussion about it. */
+function ReqSide({ dealId, req, onClose }: { dealId: string; req: any; onClose: () => void }) {
+  const [tab, setTab] = useState<"source" | "talk">("source");
+  return (
+    <div className="min-w-0 self-start lg:sticky lg:top-[72px]">
+      <div className="mb-2 flex items-center gap-1">
+        <div className="inline-flex rounded-xl border border-line bg-white p-0.5 shadow-card" role="tablist" aria-label={`${req.source_ref || req.code} details`}>
+          {([["source", "Source", BookOpen], ["talk", "Discussion", MessageSquare]] as const).map(([k, label, Icon]) => (
+            <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+              className={clsx("inline-flex h-8 items-center gap-1.5 rounded-[10px] px-3 text-[12.5px] font-semibold transition-all", tab === k ? "bg-brand-900 text-white shadow-sm" : "text-ink-soft hover:text-ink")}>
+              <Icon className="h-3.5 w-3.5" /> {label}
+              {k === "talk" && req.comments > 0 && <span className={clsx("num rounded-full px-1.5 text-[10.5px]", tab === k ? "bg-white/20" : "bg-ember-50 text-ember-600")}>{req.comments}</span>}
+            </button>
+          ))}
+        </div>
+        <span className="ml-2 truncate text-[12px] font-semibold text-ink-muted">{req.source_ref || req.code}</span>
+        <button className="btn-ghost ml-auto h-8 px-1.5" onClick={onClose} aria-label="Close panel"><X className="h-4 w-4" /></button>
+      </div>
+      {tab === "source" ? <SourcePanel dealId={dealId} req={req} onClose={onClose} /> : <CommentsPanel dealId={dealId} req={req} />}
     </div>
   );
 }
@@ -145,6 +170,8 @@ export function RequirementsStage({ deal }: P) {
         </div>
       </div>
 
+      <Clarifications deal={deal} />
+
       <div className={clsx("grid gap-4", sel ? "lg:grid-cols-[minmax(0,1fr)_420px]" : "")}>
         <div className="card min-w-0">
           <div className="px-3 py-2.5 border-b border-line flex flex-wrap items-center gap-2">
@@ -174,6 +201,7 @@ export function RequirementsStage({ deal }: P) {
                         <span className={clsx("font-semibold mr-1", r.classified_by === "ai" ? "text-brand-600" : r.classified_by === "company_model" ? "text-ember-600" : r.classified_by === "human" ? "text-ok" : "text-ink-faint")}>
                           {{ ai: "AI", company_model: "Your model", human: "Edited", rules: "Rules" }[r.classified_by as string] || "Rules"}
                         </span>· {r.subcategory}{r.section ? ` · ${r.section}` : ""}
+                        {r.comments > 0 && <span className="ml-2 inline-flex items-center gap-0.5 font-semibold text-brand-600"><MessageSquare className="h-3 w-3" />{r.comments}</span>}
                       </div>
                     </td>
                     <td className="td" onClick={(e) => e.stopPropagation()}>
@@ -204,7 +232,7 @@ export function RequirementsStage({ deal }: P) {
             </button>
           </div>
         </div>
-        {sel && <SourcePanel dealId={deal.id} req={sel} onClose={() => setSel(null)} />}
+        {sel && <ReqSide dealId={deal.id} req={(reqs || []).find((x) => x.id === sel.id) || sel} onClose={() => setSel(null)} />}
       </div>
 
       <Modal open={!!labelRes} onClose={() => setLabelRes(null)} title="Accuracy against your labelled set">
@@ -347,7 +375,7 @@ export function MatchingStage({ deal }: P) {
           </ul>
         </div>
       </div>
-      {sel && <SourcePanel dealId={deal.id} req={sel} onClose={() => setSel(null)} />}
+      {sel && <ReqSide dealId={deal.id} req={(reqs || []).find((x) => x.id === sel.id) || sel} onClose={() => setSel(null)} />}
     </div>
   );
 }

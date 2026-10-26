@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import jwt
+
 import re
 import secrets
 
@@ -101,7 +103,10 @@ def auth_config():
     """What the sign-in page offers. The client ID is public by design (it is embedded in every Google button)."""
     from ..services import llm
     notice = llm.notice()  # the signed-in company's own AI key decides; signed out, the server default does
-    return {"google_client_id": settings.google_client_id or None, "google_domains": settings.google_allowed_domains, "notice": notice}
+    from ..services import notify
+    return {"google_client_id": settings.google_client_id or None, "google_domains": settings.google_allowed_domains, "notice": notice,
+            "ms_client_id": settings.ms_client_id or None, "ms_tenant_id": settings.ms_tenant_id if settings.ms_client_id else None,
+            "email_notifications": notify.enabled()}
 
 
 # --------------------------------------------------------------------------- AI engine (server-wide)
@@ -168,6 +173,67 @@ def verify_google(credential: str) -> dict:
     return {"sub": info["sub"], "email": email, "name": info.get("name") or email.split("@")[0]}
 
 
+_ms_jwks = None
+
+
+class MicrosoftIn(GoogleIn):
+    nonce: str = Field(min_length=16, max_length=200)  # the one-time value the browser put in the sign-in request
+
+
+def verify_microsoft(credential: str, nonce: str) -> dict:
+    """Check a Microsoft Entra ID token from the browser: Microsoft's signature, our app as audience, and the allowed tenant."""
+    global _ms_jwks
+    if not settings.ms_client_id:
+        raise HTTPException(400, "Microsoft sign-in isn't set up on this server. Add MS_CLIENT_ID to backend/.env.")
+    try:
+        if _ms_jwks is None:
+            _ms_jwks = jwt.PyJWKClient("https://login.microsoftonline.com/common/discovery/v2.0/keys", cache_keys=True, lifespan=86400)
+        key = _ms_jwks.get_signing_key_from_jwt(credential).key
+        info = jwt.decode(credential, key, algorithms=["RS256"], audience=settings.ms_client_id, leeway=10,
+                          options={"verify_iss": False})  # issuer depends on the person's tenant: checked below
+    except jwt.PyJWTError:
+        raise HTTPException(401, "Microsoft sign-in couldn't be verified. Try again.")
+    except Exception:
+        raise HTTPException(503, "Couldn't reach Microsoft to verify the sign-in. Check the internet connection and try again.")
+    tid = info.get("tid", "")
+    if info.get("nonce") != nonce:  # this token was issued for this browser's sign-in, not replayed from elsewhere
+        raise HTTPException(401, "Microsoft sign-in couldn't be verified. Try again.")
+    if info.get("iss") != f"https://login.microsoftonline.com/{tid}/v2.0":
+        raise HTTPException(401, "Microsoft sign-in couldn't be verified. Try again.")
+    if tid == "9188040d-6c67-4c5b-b112-36a304b66dad":  # personal Microsoft accounts (outlook.com, hotmail.com)
+        raise HTTPException(403, "Sign in with your work Microsoft account.")
+    if settings.ms_tenant_id not in ("organizations", "common") and tid != settings.ms_tenant_id:
+        raise HTTPException(403, "This Microsoft account isn't from your organisation's directory.")
+    email = (info.get("email") or info.get("preferred_username") or "").lower()
+    if "@" not in email:
+        raise HTTPException(401, "This Microsoft account has no email address.")
+    if settings.ms_allowed_domains and email.split("@")[-1] not in settings.ms_allowed_domains:
+        raise HTTPException(403, f"Sign in with your {' or '.join('@' + d for d in settings.ms_allowed_domains)} Microsoft account.")
+    return {"sub": info.get("oid") or info.get("sub"), "email": email, "name": info.get("name") or email.split("@")[0]}
+
+
+@router.post("/microsoft")
+def microsoft_sign_in(data: MicrosoftIn, db: Session = Depends(get_db)):
+    """Sign in with a Microsoft ID token. Same rules as Google: match on Microsoft id, then email; new people pick a company."""
+    m = verify_microsoft(data.credential, data.nonce)
+    u = db.scalar(select(User).where(User.ms_oid == m["sub"])) or db.scalar(select(User).where(func.lower(User.email) == m["email"]))
+    if u:
+        if not u.is_active:
+            raise HTTPException(403, "This account is disabled. Ask your company admin to re-enable it.")
+        if not u.ms_oid:
+            u.ms_oid = m["sub"]
+            db.commit()
+        return {"token": create_token(u), "user": user_out(u, db.get(Tenant, u.tenant_id))}
+    if not data.company_name.strip():
+        return {"needs_company": True, "email": m["email"], "name": m["name"]}
+    reg = RegisterIn(company_name=data.company_name, industry=data.industry, headquarters=data.headquarters, name=m["name"], email=m["email"],
+                     password="x" * 8)
+    t, u = create_tenant(db, reg)
+    u.password_hash, u.ms_oid = _unusable_password(), m["sub"]
+    db.commit()
+    return {"token": create_token(u), "user": user_out(u, t)}
+
+
 @router.post("/google")
 def google_sign_in(data: GoogleIn, db: Session = Depends(get_db)):
     """Sign in with a Google ID token. Existing accounts match on Google id, then on verified email.
@@ -194,6 +260,26 @@ def google_sign_in(data: GoogleIn, db: Session = Depends(get_db)):
 @router.get("/me")
 def me(ctx: Ctx = Depends(current_ctx)):
     return user_out(ctx.user, ctx.tenant)
+
+
+@router.get("/me/prefs")
+def my_prefs(ctx: Ctx = Depends(current_ctx)):
+    from ..services import notify
+    p = ctx.user.prefs or {}
+    return {"email_enabled": notify.enabled(), "email": ctx.user.email,
+            "emails": [{"key": k, "label": label, "on": p.get(f"email_{k}", True)} for k, label in notify.KINDS.items()]}
+
+
+@router.put("/me/prefs")
+def save_my_prefs(body: dict, ctx: Ctx = Depends(current_ctx)):
+    from ..services import notify
+    p = dict(ctx.user.prefs or {})
+    for k in notify.KINDS:
+        if k in (body.get("emails") or {}):
+            p[f"email_{k}"] = bool(body["emails"][k])
+    ctx.user.prefs = p
+    ctx.db.commit()
+    return my_prefs(ctx)
 
 
 @router.get("/users")

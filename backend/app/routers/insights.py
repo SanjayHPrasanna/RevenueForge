@@ -114,3 +114,73 @@ def node_detail(key: str, ctx: Ctx = Depends(current_ctx)):
             "links": [{"rel": e.rel, "direction": "out" if e.src == key else "in", "id": e.dst if e.src == key else e.src,
                        "type": labels.get(e.dst if e.src == key else e.src, ("", ""))[0],
                        "label": labels.get(e.dst if e.src == key else e.src, ("", ""))[1]} for e in edges][:80]}
+
+
+# --------------------------------------------------------------------------- win / loss
+def _rate(won: int, lost: int):
+    return round(won / (won + lost) * 100) if (won + lost) else None
+
+
+@router.get("/insights/winloss")
+def win_loss(ctx: Ctx = Depends(current_ctx)):
+    """How decided deals (won or lost) break down by margin, size, industry, engagement type and readiness."""
+    tid = ctx.tenant_id
+    ccy = ctx.tenant.currency or "USD"
+    deals = ctx.db.scalars(select(Deal).where(Deal.tenant_id == tid)).all()
+    stages = defaultdict(dict)
+    for s in ctx.db.scalars(select(DealStage).where(DealStage.tenant_id == tid, DealStage.stage.in_(("gaps", "pricing")))):
+        stages[s.deal_id][s.stage] = s.data or {}
+    rows = []
+    for d in deals:
+        g, pr = stages[d.id].get("gaps", {}), stages[d.id].get("pricing", {})
+        sel = next((s for s in pr.get("scenarios", []) if s["name"] == pr.get("selected", "Target")), None) if pr else None
+        base = pr.get("currency") or ccy
+        value = (sel["price"] / FX_PER_USD.get(base, 1) * FX_PER_USD.get(ccy, 1)) if sel else (d.final_value or 0)
+        mask = deal_masker(d)
+        rows.append({"id": d.id, "name": mask(d.name), "client": d.client_alias if d.confidential else d.client_name, "status": d.status,
+                     "industry": d.industry or "Not set", "engagement_type": d.engagement_type or "not_set", "value": round(value),
+                     "margin_pct": sel["margin_pct"] if sel else None, "readiness": g.get("mitigated_readiness"), "coverage": g.get("coverage_pct"),
+                     "updated_at": d.updated_at, "notes": mask(d.outcome_notes or "")[:200]})
+    decided = [r for r in rows if r["status"] in ("won", "lost")]
+
+    def breakdown(key_fn, order=None):
+        b = defaultdict(lambda: [0, 0, 0.0])
+        for r in decided:
+            k = key_fn(r)
+            if k is None:
+                continue
+            b[k][0 if r["status"] == "won" else 1] += 1
+            if r["status"] == "won":
+                b[k][2] += r["value"]
+        keys = order or sorted(b, key=lambda k: -(b[k][0] + b[k][1]))
+        return [{"label": k, "won": b[k][0], "lost": b[k][1], "win_rate": _rate(b[k][0], b[k][1]), "won_value": round(b[k][2])} for k in keys if k in b]
+
+    def margin_band(r):
+        m = r["margin_pct"]
+        return None if m is None else "Under 20%" if m < 20 else "20–30%" if m < 30 else "30% and above"
+
+    def size_band(r):
+        v = r["value"]
+        return None if not v else f"Under {ccy} 0.5M" if v < 5e5 else f"{ccy} 0.5–2M" if v < 2e6 else f"{ccy} 2M and above"
+
+    def avg(xs):
+        xs = [x for x in xs if x is not None]
+        return round(sum(xs) / len(xs)) if xs else None
+
+    won = [r for r in decided if r["status"] == "won"]
+    lost = [r for r in decided if r["status"] == "lost"]
+    return {
+        "currency": ccy,
+        "totals": {"decided": len(decided), "won": len(won), "lost": len(lost), "win_rate": _rate(len(won), len(lost)),
+                   "won_value": round(sum(r["value"] for r in won)), "open": sum(1 for r in rows if r["status"] in ("in_review", "submitted", "processing")),
+                   "no_bid": sum(1 for r in rows if r["status"] == "no_bid")},
+        "won_vs_lost": {"readiness": [avg(r["readiness"] for r in won), avg(r["readiness"] for r in lost)],
+                        "margin": [avg(r["margin_pct"] for r in won), avg(r["margin_pct"] for r in lost)],
+                        "coverage": [avg(r["coverage"] for r in won), avg(r["coverage"] for r in lost)],
+                        "value": [avg(r["value"] for r in won), avg(r["value"] for r in lost)]},
+        "by_margin": breakdown(margin_band, ["Under 20%", "20–30%", "30% and above"]),
+        "by_size": breakdown(size_band, [f"Under {ccy} 0.5M", f"{ccy} 0.5–2M", f"{ccy} 2M and above"]),
+        "by_industry": breakdown(lambda r: r["industry"]),
+        "by_engagement": breakdown(lambda r: r["engagement_type"]),
+        "recent": sorted(decided, key=lambda r: r["updated_at"] or 0, reverse=True)[:10],
+    }

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import re
 from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,7 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
-from ..models import STAGES, Deal, DealStage, Document, Requirement
+from ..models import STAGES, Deal, DealStage, Document, Requirement, RequirementComment, User
 from ..security import Ctx, current_ctx, require_roles
 from ..services import knowledge as K
 from ..services import learning, pipeline
@@ -97,7 +98,7 @@ async def create_deal(file: UploadFile = File(...), name: str = Form(""), client
     ctx.db.add(d)
     ctx.audit("deal.create", d.name, file=file.filename)
     ctx.db.commit()
-    pipeline.start(d.id)
+    pipeline.start(d.id, notify_user=ctx.user.id)
     return deal_out(ctx, d)
 
 
@@ -167,7 +168,7 @@ def rerun(deal_id: str, body: dict | None = None, ctx: Ctx = Depends(require_rol
     d.status = "processing"
     d.progress = {"stage": stage, "pct": int(STAGES.index(stage) / len(STAGES) * 100), "message": "Queued"}
     ctx.db.commit()
-    pipeline.start(d.id, stage)
+    pipeline.start(d.id, stage, notify_user=ctx.user.id)
     return deal_out(ctx, d)
 
 
@@ -186,7 +187,71 @@ def list_requirements(deal_id: str, ctx: Ctx = Depends(current_ctx)):
     d = _deal(ctx, deal_id)
     mask = deal_masker(d)
     rows = ctx.db.scalars(select(Requirement).where(Requirement.deal_id == d.id).order_by(Requirement.seq)).all()
-    return [_req_out(r, mask) for r in rows]
+    counts = dict(ctx.db.execute(select(RequirementComment.requirement_id, func.count()).where(RequirementComment.deal_id == d.id)
+                                 .group_by(RequirementComment.requirement_id)).all())
+    return [{**_req_out(r, mask), "comments": counts.get(r.id, 0)} for r in rows]
+
+
+# --------------------------------------------------------------------------- comments on requirements
+def _comment_out(c: RequirementComment, mask, me: str) -> dict:
+    return {"id": c.id, "author": c.author, "user_id": c.user_id, "text": mask(c.text), "created_at": c.created_at, "mine": c.user_id == me}
+
+
+def _mentions(ctx: Ctx, text: str) -> list[str]:
+    """@name → user ids: matches a first name, a full name written without spaces, or the part of an email before @."""
+    tags = {t.lower() for t in re.findall(r"@([A-Za-z0-9._-]{2,60})", text)}
+    if not tags:
+        return []
+    ids = []
+    for u in ctx.db.scalars(select(User).where(User.tenant_id == ctx.tenant_id, User.is_active == True)):  # noqa: E712
+        keys = {u.email.split("@")[0].lower(), (u.name or "").split(" ")[0].lower(), re.sub(r"\s+", "", (u.name or "")).lower(),
+                re.sub(r"\s+", ".", (u.name or "").strip()).lower()}
+        if tags & keys:
+            ids.append(u.id)
+    return ids
+
+
+@router.get("/{deal_id}/requirements/{req_id}/comments")
+def list_comments(deal_id: str, req_id: str, ctx: Ctx = Depends(current_ctx)):
+    d = _deal(ctx, deal_id)
+    mask = deal_masker(d)
+    rows = ctx.db.scalars(select(RequirementComment).where(RequirementComment.deal_id == d.id, RequirementComment.requirement_id == req_id)
+                          .order_by(RequirementComment.created_at)).all()
+    return [_comment_out(c, mask, ctx.user.id) for c in rows]
+
+
+@router.post("/{deal_id}/requirements/{req_id}/comments")
+def add_comment(deal_id: str, req_id: str, body: dict, ctx: Ctx = Depends(current_ctx)):
+    d = _deal(ctx, deal_id)
+    r = ctx.db.get(Requirement, req_id)
+    if not r or r.deal_id != d.id:
+        raise HTTPException(404, "Requirement not found.")
+    text = str(body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "Write a comment first.")
+    ids = _mentions(ctx, text[:4000])
+    c = RequirementComment(tenant_id=ctx.tenant_id, deal_id=d.id, requirement_id=r.id, user_id=ctx.user.id, author=ctx.user.name,
+                           text=text[:4000], mentions=ids)
+    ctx.db.add(c)
+    ctx.audit("requirement.comment", f"{d.id}:{r.code}", mentions=len(ids))
+    ctx.db.commit()
+    if ids:
+        from ..services import notify
+        notify.mentioned(ctx.db, d, ctx.user, c.text, r.code, ids)
+    return _comment_out(c, deal_masker(d), ctx.user.id)
+
+
+@router.delete("/{deal_id}/comments/{comment_id}")
+def delete_comment(deal_id: str, comment_id: str, ctx: Ctx = Depends(current_ctx)):
+    d = _deal(ctx, deal_id)
+    c = ctx.db.get(RequirementComment, comment_id)
+    if not c or c.deal_id != d.id:
+        raise HTTPException(404, "Comment not found.")
+    if c.user_id != ctx.user.id and ctx.user.role != "admin":
+        raise HTTPException(403, "You can only delete your own comments.")
+    ctx.db.delete(c)
+    ctx.db.commit()
+    return {"ok": True}
 
 
 @router.patch("/{deal_id}/requirements/{req_id}")
@@ -372,6 +437,8 @@ def approve(deal_id: str, stage: str, ctx: Ctx = Depends(current_ctx)):
     if stage == "proposal":
         learned["answers_added"] = learning.harvest_answers(ctx.db, d, ctx.user.name)
     ctx.db.commit()
+    from ..services import notify
+    notify.next_stage_ready(ctx.db, d, exclude_user_id=ctx.user.id, after=stage)  # "your turn" email to the next approvers
     return {"stage": stage, "status": st.status, "approved_by": st.approved_by, "approved_at": st.approved_at, "learned": learned}
 
 
@@ -531,3 +598,41 @@ def download(deal_id: str, what: str, ctx: Ctx = Depends(current_ctx)):
         return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                  headers={"Content-Disposition": f'attachment; filename="{safe} - requirements.xlsx"'})
     raise HTTPException(404, "Unknown download.")
+
+
+# --------------------------------------------------------------------------- client clarification questions
+@router.get("/{deal_id}/clarifications")
+def get_clarifications(deal_id: str, ctx: Ctx = Depends(current_ctx)):
+    d = _deal(ctx, deal_id)
+    return (d.meta or {}).get("clarifications") or {"items": [], "by": None, "generated_at": None}
+
+
+@router.post("/{deal_id}/clarifications")
+def make_clarifications(deal_id: str, ctx: Ctx = Depends(require_roles("presales", "architect"))):
+    from ..services import clarify
+    d = _deal(ctx, deal_id)
+    if d.status == "processing":
+        raise HTTPException(409, "Wait until the deal has finished processing.")
+    ctx.audit("deal.clarifications", d.id)
+    return clarify.generate(ctx.db, d)
+
+
+@router.put("/{deal_id}/clarifications")
+def save_clarifications(deal_id: str, body: dict, ctx: Ctx = Depends(require_roles("presales", "architect"))):
+    d = _deal(ctx, deal_id)
+    items = [{"code": str(i.get("code") or "")[:40], "question": str(i.get("question") or "").strip()[:800], "why": str(i.get("why") or "")[:200]}
+             for i in (body.get("items") or [])[:60] if str(i.get("question") or "").strip()]
+    meta = dict(d.meta or {})
+    cur = dict(meta.get("clarifications") or {})
+    cur.update({"items": items, "edited_by": ctx.user.name, "edited_at": datetime.now(timezone.utc).isoformat()})
+    meta["clarifications"] = cur
+    d.meta = meta
+    ctx.db.commit()
+    return cur
+
+
+# --------------------------------------------------------------------------- similar past deals
+@router.get("/{deal_id}/similar")
+def similar_deals(deal_id: str, ctx: Ctx = Depends(current_ctx)):
+    from ..services import similar
+    return similar.similar(ctx.db, _deal(ctx, deal_id))
