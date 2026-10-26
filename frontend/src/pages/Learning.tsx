@@ -65,7 +65,7 @@ export default function Learning() {
     <div className="px-4 lg:px-8 py-6 max-w-[1400px] space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <div>
-          <h1 className="font-display text-[32px] leading-tight text-brand-950">AI learning</h1>
+          <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">AI learning</h1>
           <p className="text-ink-muted text-sm mt-0.5 max-w-3xl">What RevenueForge has learned from your team. Every correction, approved answer and deal outcome makes the next deal sharper, and none of it is shared with other companies.</p>
         </div>
         <div className="flex-1" />

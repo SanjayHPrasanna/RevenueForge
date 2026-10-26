@@ -1,29 +1,59 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { GoogleButton, NoticeBar, OrDivider } from "../components/GoogleButton";
+import clsx from "clsx";
 import { ProductMark, Spinner } from "../components/ui";
+import { useTilt } from "../components/motion";
 import { useAuth } from "../lib/auth";
+
+/** A small illustrative panel floating in perspective on the dark side of the sign-in page. Decorative only. */
+function AuthPreview() {
+  const tilt = useTilt<HTMLDivElement>(5, [10, -12]);
+  const tiles = "SSPGSCSPGPSSPCGSSPSPGSCPSPS";
+  const col: Record<string, string> = { S: "bg-fit-strong", P: "bg-fit-partial", G: "bg-fit-gap", C: "border-[1.5px] border-fit-confirm" };
+  return (
+    <div aria-hidden className="perspective max-w-md">
+      <div className="rise-3d" style={{ animationDelay: ".15s" }}>
+        <div ref={tilt} className="tilt tilt-glare rounded-2xl bg-white/[.07] border border-white/15 backdrop-blur-xl p-5 shadow-float">
+          <div className="flex items-center justify-between text-[12px] text-brand-100/80">
+            <span className="font-semibold text-white">Coverage map</span><span className="num">85 requirements</span>
+          </div>
+          <div className="mt-4 grid grid-cols-9 gap-1.5">
+            {tiles.split("").map((c, i) => <span key={i} className={clsx("h-5 rounded-[4px]", col[c])} />)}
+          </div>
+          <div className="mt-5 flex items-end justify-between">
+            <div><div className="text-[11px] uppercase tracking-[0.08em] text-brand-100/60">Bid readiness</div><div className="font-display num text-[30px] leading-none mt-1">84%</div></div>
+            <div className="text-right"><div className="text-[11px] uppercase tracking-[0.08em] text-brand-100/60">Margin</div><div className="font-display num text-[30px] leading-none mt-1 text-ember-400">28%</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function Frame({ title, sub, children }: { title: string; sub: ReactNode; children: ReactNode }) {
   return (
     <div className="min-h-screen grid lg:grid-cols-[1fr_1.1fr] bg-white">
-      <div className="hidden lg:flex flex-col justify-between bg-brand-950 text-white p-10">
-        <ProductMark white />
-        <div>
-          <div className="text-[32px] font-bold leading-tight tracking-tight max-w-md">Your company's deal knowledge, working on every RFP.</div>
-          <p className="text-brand-100/80 mt-4 max-w-md leading-relaxed">
+      <div className="hidden lg:flex relative overflow-hidden flex-col justify-between stage-dark text-white p-10">
+        <div aria-hidden className="absolute inset-0 grid-lines" />
+        <div aria-hidden className="absolute -right-32 top-1/4 h-96 w-96 rounded-full bg-brand-500/25 blur-[100px] drift" />
+        <div className="relative"><ProductMark white /></div>
+        <div className="relative">
+          <AuthPreview />
+          <div className="mt-12 font-display font-medium text-[38px] xl:text-[44px] leading-[1.05] tracking-[-0.03em] max-w-md text-balance">Your company's deal knowledge, working on every RFP.</div>
+          <p className="text-brand-100/75 mt-5 max-w-md leading-relaxed text-[15.5px]">
             Requirements traced to the page. Matches backed by real capabilities, people and references. Proposals in your own template.
           </p>
         </div>
-        <div className="text-[12px] text-brand-100/60">Your data stays in your company's workspace.</div>
+        <div className="relative text-[12px] text-brand-100/55">Your data stays in your company's workspace.</div>
       </div>
-      <div className="flex items-center justify-center p-6">
-        <div className="w-full max-w-[400px]">
+      <div className="flex items-center justify-center p-6 ambient">
+        <div className="w-full max-w-[400px] page-enter">
           <div className="lg:hidden mb-8">
             <ProductMark />
           </div>
           <NoticeBar className="rounded-lg border mb-6 text-left" />
-          <h1 className="font-display text-[32px] leading-tight text-brand-950">{title}</h1>
+          <h1 className="font-display text-[38px] leading-[1.05] tracking-[-0.025em] text-brand-950">{title}</h1>
           <div className="text-ink-muted text-sm mt-1 mb-7">{sub}</div>
           {children}
         </div>

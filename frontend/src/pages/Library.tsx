@@ -114,7 +114,7 @@ export default function Library() {
     <div className="px-4 lg:px-8 py-6 max-w-[1500px]">
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-[260px]">
-          <h1 className="font-display text-[32px] leading-tight text-brand-950">Knowledge library</h1>
+          <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Knowledge library</h1>
           <p className="text-ink-muted text-sm mt-0.5">Everything RevenueForge knows about your company. Matches, estimates and proposals use only what's here.</p>
         </div>
         <input
@@ -142,8 +142,8 @@ export default function Library() {
       </div>
       <div className="mt-5 border-b border-line flex gap-1 overflow-x-auto scroll-thin">
         {TABS.map((t) => (
-          <NavLink key={t.key} to={`/app/library/${t.key}`} className={() => clsx("px-3 h-10 inline-flex items-center text-[14px] font-medium border-b-2 -mb-px whitespace-nowrap",
-            kind === t.key ? "border-brand-500 text-brand-800" : "border-transparent text-ink-muted hover:text-ink")}>{t.label}</NavLink>
+          <NavLink key={t.key} to={`/app/library/${t.key}`} className={() => clsx("px-3 h-10 inline-flex items-center text-[14px] font-medium border-b-2 -mb-px whitespace-nowrap rounded-t-lg transition-all duration-200 ease-apple",
+            kind === t.key ? "border-brand-500 text-brand-800 bg-white/70" : "border-transparent text-ink-muted hover:text-ink hover:bg-white/50")}>{t.label}</NavLink>
         ))}
       </div>
       <div className="mt-4">

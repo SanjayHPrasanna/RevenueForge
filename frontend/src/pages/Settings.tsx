@@ -40,7 +40,7 @@ export default function SettingsPage() {
   const isAdmin = user?.role === "admin";
   return (
     <div className="px-4 lg:px-8 py-6 max-w-[1100px] space-y-4">
-      <h1 className="font-display text-[32px] leading-tight text-brand-950">Settings</h1>
+      <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Settings</h1>
       <section className="card p-5">
         <div className="font-bold">Commercial policy</div>
         <div className="text-[13px] text-ink-muted mb-4">Used by every pricing run. Finance can still adjust per deal.</div>

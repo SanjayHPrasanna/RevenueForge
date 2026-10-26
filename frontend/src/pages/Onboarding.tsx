@@ -133,7 +133,7 @@ export default function Onboarding() {
         {step === "folder" ? (
           <section className="card p-6 md:p-8 min-w-0">
             <div className="text-[12.5px] text-ink-muted">Fastest way to set up</div>
-            <h1 className="font-display text-[32px] leading-tight text-brand-950 mt-1 mb-2">Bring in everything at once</h1>
+            <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950 mt-1 mb-2">Bring in everything at once</h1>
             <p className="text-ink-soft text-[14.5px] mb-5">No need to upload files one by one. Point RevenueForge at the folder where your company knowledge lives, check what it found, and import it all in one go. You can still fix or add single files afterwards.</p>
             <FolderImport onDone={firstOpen} />
             <div className="mt-6 pt-5 border-t border-line-soft flex items-center">
@@ -144,7 +144,7 @@ export default function Onboarding() {
         ) : (
         <section className="card p-6 md:p-8 min-w-0">
           <div className="text-[12.5px] text-ink-muted num">Step {idx + 1} of {STEPS.length}</div>
-          <h1 className="font-display text-[32px] leading-tight text-brand-950 mt-1 mb-4">{cur.key === "profile" ? "Tell us about your company" : cur.key === "template" ? "Your proposal template" : KIND_INFO[cur.key].title}</h1>
+          <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950 mt-1 mb-4">{cur.key === "profile" ? "Tell us about your company" : cur.key === "template" ? "Your proposal template" : KIND_INFO[cur.key].title}</h1>
           {cur.key === "profile" ? (
             <Profile company={company} onSaved={() => next("profile")} />
           ) : cur.key === "template" ? (

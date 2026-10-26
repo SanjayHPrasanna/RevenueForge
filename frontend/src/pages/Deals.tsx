@@ -121,7 +121,7 @@ export default function Deals() {
   return (
     <div className="px-4 lg:px-8 py-6 max-w-[1400px]">
       <div className="flex items-center gap-3 mb-5">
-        <h1 className="font-display text-[32px] leading-tight text-brand-950">Deals</h1>
+        <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Deals</h1>
         <div className="flex-1" />
         <button className="btn-primary" onClick={() => setSp({ new: "1" })}><Plus className="h-4 w-4" /> New deal</button>
       </div>

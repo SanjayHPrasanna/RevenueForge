@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { ArrowRight, Briefcase, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Empty, Meter, PageLoader, Stat, StatStrip } from "../components/ui";
+import { useTilt } from "../components/motion";
 import { Bars, FitLegend, useTip } from "../components/viz";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -68,6 +69,7 @@ export function DealStatus({ s }: { s: string }) {
 export default function Dashboard() {
   const { user } = useAuth();
   const { show, hide } = useTip();
+  const tilt = useTilt<HTMLDivElement>(1.6);
   const { data, isLoading } = useQuery({ queryKey: ["dashboard"], queryFn: () => api.get("/dashboard"), refetchInterval: 8000 });
   if (isLoading || !data) return <PageLoader />;
   const k = data.kpis;
@@ -77,13 +79,17 @@ export default function Dashboard() {
   return (
     <div className="px-4 lg:px-8 py-7 max-w-[1400px]">
       <div className="flex flex-wrap items-end gap-3 mb-6">
-        <div>
-          <h1 className="font-display text-[32px] md:text-[38px] leading-tight text-brand-950">{hello}, {user?.name.split(" ")[0]}</h1>
+        <div className="stagger">
+          <div className="eyebrow mb-1.5">Pipeline overview</div>
+          <h1 className="font-display text-[34px] md:text-[44px] leading-[1.05] tracking-[-0.02em] text-brand-950">{hello}, {user?.name.split(" ")[0]}</h1>
           <p className="text-ink-muted text-[14px] mt-1">Your bid pipeline, and what it says about your capabilities.</p>
         </div>
         <div className="flex-1" />
         <Link to="/app/deals?new=1" className="btn-primary h-10 px-4"><Plus className="h-4 w-4" /> New deal</Link>
       </div>
+
+      <div className="rise-3d">
+      <div ref={tilt} className="tilt tilt-glare rounded-xl2 hover:shadow-lift">
 
       <StatStrip items={[
         { label: "Pipeline value", value: money(k.pipeline_value, ccy), sub: `${money(k.weighted_pipeline, ccy)} weighted by bid readiness` },
@@ -92,8 +98,10 @@ export default function Dashboard() {
         { label: "Classification accuracy", value: k.classification_accuracy != null ? `${k.classification_accuracy}%` : "—", sub: k.reviewed ? `Measured on ${k.reviewed} reviewed requirements` : "Review requirements in a deal to measure it" },
         { label: "Win rate", value: k.win_rate != null ? `${k.win_rate}%` : "—", sub: `${k.won} won, ${k.lost} lost` },
       ]} />
+      </div>
+      </div>
 
-      <section className="card mt-4 min-w-0">
+      <section className="card mt-5 min-w-0 overflow-hidden rise-3d" style={{ animationDelay: ".08s" }}>
         <div className="px-5 py-4 border-b border-line flex items-center gap-3">
           <div className="flex-1 min-w-0"><h2 className="font-bold text-[15.5px]">Deals</h2><p className="text-[12.5px] text-ink-muted">Each bar is a deal's requirements, coloured by how well you cover them.</p></div>
           <FitLegend className="hidden lg:flex" />
@@ -113,7 +121,7 @@ export default function Dashboard() {
                 {data.deals.slice(0, 8).map((d: any) => {
                   const total = FIT.reduce((n, f) => n + (d.match_mix?.[f.key] || 0), 0);
                   return (
-                    <tr key={d.id} className="hover:bg-paper">
+                    <tr key={d.id} className="hover:bg-brand-50/40">
                       <td className="td">
                         <Link to={`/app/deals/${d.id}`} className="font-semibold hover:text-brand-700 line-clamp-1">{d.name}</Link>
                         <div className="text-[12px] text-ink-muted">{d.client}{d.engagement_type ? `, ${(ENGAGEMENT[d.engagement_type] || "").toLowerCase()}` : ""}{d.due_date ? `. Due ${d.due_date}` : ""}</div>
@@ -148,8 +156,8 @@ export default function Dashboard() {
         )}
       </section>
 
-      <div className="grid lg:grid-cols-3 gap-4 mt-4">
-        <section className="card p-5">
+      <div className="grid lg:grid-cols-3 gap-5 mt-5 stagger">
+        <section className="card card-hover p-5">
           <h2 className="font-bold text-[15px]">Skills the pipeline is asking for</h2>
           <p className="text-[12.5px] text-ink-muted mt-0.5 mb-4">Technologies in RFPs you can't cover today. A hiring and training signal.</p>
           {data.skill_gaps.length ? (
@@ -157,13 +165,13 @@ export default function Dashboard() {
           ) : <div className="text-sm text-ink-muted">No gaps yet.</div>}
         </section>
 
-        <section className="card p-5">
+        <section className="card card-hover p-5">
           <h2 className="font-bold text-[15px]">Most-matched capabilities</h2>
           <p className="text-[12.5px] text-ink-muted mt-0.5 mb-4">Where your offer is landing with clients.</p>
           {data.capability_demand.length ? <Bars rows={data.capability_demand.map((c: any) => ({ label: c.capability, value: c.requirements }))} format={(v) => `${v}`} /> : <div className="text-sm text-ink-muted">No matches yet.</div>}
         </section>
 
-        <section className="card p-5">
+        <section className="card card-hover p-5">
           <h2 className="font-bold text-[15px]">Across all deals</h2>
           <p className="text-[12.5px] text-ink-muted mt-0.5 mb-4">How every requirement analysed so far is covered.</p>
           <MatchMixBar mix={data.match_mix} />
