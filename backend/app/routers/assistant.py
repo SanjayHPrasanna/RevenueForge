@@ -1,6 +1,7 @@
 """Public, product-scoped chat assistant for the landing page."""
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import defaultdict, deque
@@ -9,9 +10,11 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
+from ..config import settings
 from ..services import llm
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
+log = logging.getLogger("revenueforge.assistant")
 
 _RATE_LIMIT = 10
 _RATE_WINDOW = 60
@@ -42,7 +45,7 @@ Product facts:
 - Each stage is a draft for the appropriate expert to review and approve. Changes update downstream work.
 - Each workspace's company data is isolated. Client-name masking can be enabled per deal; requirements are
   traceable to their RFP source pages.
-- The AI provider can be Gemini, Claude, OpenAI, or Azure OpenAI, configured by the server.
+- The AI provider can be Gemini, Claude, OpenAI, or Azure OpenAI. Each company can set its own provider and key in Settings.
 - Approved corrections, answer-library entries, and deal outcomes can improve future classifications,
   answers, and estimates.
 - To get started, create a company workspace and add capabilities, a skills matrix, a rate card, and a
@@ -89,7 +92,10 @@ def _check_rate_limit(client_ip: str):
 
 @router.post("/chat")
 def chat(body: ChatRequest, request: Request):
-    if not llm.is_enabled():
+    # Maahi has its own key (MAAHI_GEMINI_API_KEY) so chat never uses up the quota that deals depend on.
+    # Without it, Maahi falls back to the AI the rest of the app uses.
+    key = settings.maahi_gemini_api_key or None
+    if not key and not llm.is_enabled():
         raise HTTPException(503, "Maahi's AI service is not configured on this server yet.")
 
     client_ip = request.client.host if request.client else "unknown"
@@ -101,8 +107,14 @@ def chat(body: ChatRequest, request: Request):
             f"Conversation so far:\n{conversation}\n\nReply to the final user message.",
             max_tokens=500,
             temperature=0.45,
+            api_key=key,
+            attempts=3,  # main model, then two lighter stand-ins if Google says it's busy
+            timeout=25,
+            max_wait=1,
+            fast=True,
         )
-    except llm.LLMUnavailable:
+    except llm.LLMUnavailable as e:
+        log.warning("Maahi chat failed: %s", str(e)[:300])
         raise HTTPException(503, "Maahi couldn't reach the AI service just now. Please try again shortly.")
     answer = answer.strip()
     if not answer:

@@ -131,6 +131,9 @@
 @keyframes toast-in { from { opacity: 0; transform: translateY(12px) scale(.97); } to { opacity: 1; transform: none; } }
 @keyframes float { 0%, 100% { transform: translate3d(0, 0, 0); } 50% { transform: translate3d(0, -10px, 0); } }
 @keyframes drift { from { transform: translate3d(-3%, -2%, 0) scale(1); } to { transform: translate3d(3%, 2%, 0) scale(1.06); } }
+/* Maahi's picture: a slow, gentle "alive" movement */
+.maahi-breathe { animation: maahi-breathe 7s ease-in-out infinite; transform-origin: 68% 40%; }
+@keyframes maahi-breathe { 0%, 100% { transform: scale(1.02) rotate(0deg); } 30% { transform: scale(1.045) rotate(.35deg) translateY(-1px); } 60% { transform: scale(1.03) rotate(-.25deg); } }
 .anim-scale-in { animation: scale-in .28s cubic-bezier(.22,.61,.36,1) both; }
 .anim-fade-in { animation: fade-in .22s ease both; }
 .anim-toast-in { animation: toast-in .35s cubic-bezier(.2,.9,.25,1.15) both; }

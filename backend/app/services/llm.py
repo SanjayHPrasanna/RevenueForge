@@ -223,18 +223,21 @@ def _gemini_pick_model(client: httpx.Client, p: Profile) -> str:
     try:
         r = client.get(f"{settings.gemini_base_url}/models", headers=_gemini_headers(p), params={"pageSize": 200})
         r.raise_for_status()
-        names = []
+        names, lite = [], []
         for m in r.json().get("models", []):
             name = m.get("name", "").split("/")[-1]
             methods = m.get("supportedGenerationMethods", [])
             if "generateContent" not in methods or "flash" not in name:
                 continue
-            if re.search(r"lite|image|tts|live|audio|preview|exp|thinking|native|8b|latest|robotics|computer", name):
+            if re.search(r"image|tts|live|audio|preview|exp|thinking|native|8b|latest|robotics|computer", name):
                 continue
             ver = re.search(r"gemini-(\d+(?:\.\d+)?)", name)
-            names.append((float(ver.group(1)) if ver else 0, name))
+            (lite if "lite" in name else names).append((float(ver.group(1)) if ver else 0, name))
+        names.sort(reverse=True)
+        lite.sort(reverse=True)
+        # stand-ins for quick calls when the main model is overloaded: the previous Flash, then the newest Flash-Lite
+        st["gemini_backups"] = [n for _, n in names[1:2]] + [n for _, n in lite[:1]] + ["gemini-flash-lite-latest"]
         if names:
-            names.sort(reverse=True)
             st["gemini_model"] = names[0][1]
             log.info("Gemini model selected: %s", names[0][1])
             return names[0][1]
@@ -244,9 +247,16 @@ def _gemini_pick_model(client: httpx.Client, p: Profile) -> str:
     return st["gemini_model"]
 
 
-def _gemini_complete(p: Profile, system: str, prompt: str, max_tokens: int, temperature: float, want_json: bool) -> str:
-    with httpx.Client(timeout=180) as client:
+def _gemini_complete(p: Profile, system: str, prompt: str, max_tokens: int, temperature: float, want_json: bool,
+                     timeout: float = 180, fast: bool = False, alt: int = 0) -> str:
+    """`alt` > 0 uses a stand-in model (for quick calls whose main model is overloaded)."""
+    with httpx.Client(timeout=timeout) as client:
         model = _gemini_pick_model(client, p)
+        if alt and not p.gemini_model:
+            backups = [m for m in _st(p).get("gemini_backups") or ["gemini-flash-lite-latest"] if m != model]
+            if backups:
+                model = backups[(alt - 1) % len(backups)]
+                log.info("Main Gemini model busy; trying %s", model)
         body = {
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -254,7 +264,14 @@ def _gemini_complete(p: Profile, system: str, prompt: str, max_tokens: int, temp
         }
         if want_json:
             body["generationConfig"]["responseMimeType"] = "application/json"
-        r = client.post(f"{settings.gemini_base_url}/models/{model}:generateContent", headers=_gemini_headers(p), json=body)
+        url = f"{settings.gemini_base_url}/models/{model}:generateContent"
+        if fast:  # quick replies (chat): skip the model's "thinking" step; models that can't switch it off get a normal call
+            fast_body = {**body, "generationConfig": {**body["generationConfig"], "thinkingConfig": {"thinkingBudget": 0}}}
+            r = client.post(url, headers=_gemini_headers(p), json=fast_body)
+            if r.status_code == 400:  # some models reject the switch (wording varies): ask again the normal way
+                r = client.post(url, headers=_gemini_headers(p), json=body)
+        else:
+            r = client.post(url, headers=_gemini_headers(p), json=body)
         if r.status_code == 404 and not p.gemini_model:
             _st(p)["gemini_model"] = None
         if r.status_code >= 400:
@@ -319,9 +336,11 @@ class _HttpError(Exception):
 
 # --------------------------------------------------------------------------- public API
 def complete(system: str, prompt: str, max_tokens: int = 4000, temperature: float = 0.2, want_json: bool = False,
-             api_key: str | None = None, attempts: int = 4) -> str:
+             api_key: str | None = None, attempts: int = 4, timeout: float | None = None, max_wait: float = 65,
+             fast: bool = False) -> str:
     """`api_key` sends this one call to Gemini with a separate key (e.g. the video narration key), so it neither uses
-    nor can switch off the company's main AI key."""
+    nor can switch off the company's main AI key. `timeout` (seconds per Gemini attempt) and `max_wait` (longest pause
+    between retries) keep interactive calls such as chat from hanging while the free tier is busy."""
     base = current_profile()
     p = replace(server_profile(), provider="gemini", gemini_api_key=api_key, gemini_model="", source="override") if api_key else base
     name = _usable(p)
@@ -336,7 +355,8 @@ def complete(system: str, prompt: str, max_tokens: int = 4000, temperature: floa
         try:
             st["calls"] += 1
             if name == "gemini":
-                return _gemini_complete(p, system, prompt, max_tokens, temperature, want_json)
+                return _gemini_complete(p, system, prompt, max_tokens, temperature, want_json, timeout or 180, fast,
+                                        attempt if fast else 0)
             return _other_complete(p, name, system, prompt, max_tokens, temperature, want_json)
         except _HttpError as e:
             last = e
@@ -354,15 +374,16 @@ def complete(system: str, prompt: str, max_tokens: int = 4000, temperature: floa
             if e.status in (429, 500, 502, 503, 504):
                 if attempt + 1 >= attempts:
                     break
+                wait = min(wait, 65, max_wait)
                 log.warning("AI call failed (%s); retrying in %ss", e.status, wait)
-                time.sleep(min(wait, 65))
+                time.sleep(wait)
                 continue
             break
         except Exception as e:
             last = e
             log.warning("AI call failed (attempt %s): %s", attempt + 1, e)
             if attempt + 1 < attempts:
-                time.sleep(3 * (attempt + 1))
+                time.sleep(min(3 * (attempt + 1), max_wait))
     st["failures"] += 1
     st["last_error"] = str(last)
     raise LLMUnavailable(f"AI call failed: {last}")

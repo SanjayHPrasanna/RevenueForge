@@ -52,6 +52,8 @@ class Settings:
     gemini_api_key = os.getenv("GEMINI_API_KEY", "")
     # Optional second free Gemini key used only to write proposal-video narration, so it doesn't eat the main key's quota.
     gemini_video_api_key = os.getenv("GEMINI_VIDEO_API_KEY", "").strip()
+    # Optional free Gemini key used only by Maahi, the chat assistant, for every visitor and every company.
+    maahi_gemini_api_key = os.getenv("MAAHI_GEMINI_API_KEY", "").strip()
     # Optional: name of the computer voice for proposal videos (Windows: e.g. "Microsoft Zira Desktop"). Empty = system default.
     video_voice = os.getenv("VIDEO_VOICE", "").strip()
     gemini_model = os.getenv("GEMINI_MODEL", "")  # empty = pick the newest stable Flash model automatically
