@@ -42,7 +42,7 @@ function Header() {
         scrolled ? "shadow-lift" : "shadow-[0_10px_40px_-20px_rgba(3,15,23,.6)]")}>
         <Link to="/" aria-label="RevenueForge home" className="shrink-0">
           <span className="hidden sm:block"><ProductMark /></span>
-          <img src="/brand/revenueforge-mark.svg" alt="" className="h-8 w-8 sm:hidden" />
+          <img src="/brand/revenueforge-mark.png" alt="" className="h-8 w-8 sm:hidden" />
         </Link>
         <nav aria-label="Main" className="hidden lg:flex items-center gap-1 text-[14px] font-medium text-ink-soft">
           {NAV.map(([href, label]) => <a key={href} href={href} className="rounded-lg px-3 py-1.5 hover:bg-ink/[.05] hover:text-brand-950 transition-colors">{label}</a>)}

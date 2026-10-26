@@ -48,7 +48,7 @@ export default function Shell() {
       <span aria-hidden className="pointer-events-none absolute -top-24 -left-16 h-64 w-64 rounded-full bg-brand-500/20 blur-3xl" />
       <span aria-hidden className="pointer-events-none absolute inset-y-0 right-0 w-px bg-gradient-to-b from-white/10 via-white/5 to-transparent" />
       <div className={clsx("pt-5 pb-6", mini ? "px-0 flex justify-center" : "px-5")}>
-        {mini ? <img src="/brand/revenueforge-mark.svg" alt="RevenueForge" className="h-8 w-8" /> : <ProductMark white />}
+        {mini ? <img src="/brand/revenueforge-mark.png" alt="RevenueForge" className="h-8 w-8" /> : <ProductMark white />}
       </div>
       <div className={clsx("flex-1 space-y-0.5", mini ? "px-2" : "px-3")}>
         {NAV.map((n) => (

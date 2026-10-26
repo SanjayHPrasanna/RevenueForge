@@ -6,7 +6,7 @@ import { CAT_STYLE, MATCH_LABEL, MATCH_STYLE } from "../lib/format";
 export function ProductMark({ white = false }: { white?: boolean }) {
   return (
     <div className="flex items-center gap-2.5">
-      <img src="/brand/revenueforge-mark.svg" alt="" className="h-8 w-8" />
+      <img src="/brand/revenueforge-mark.png" alt="" className="h-8 w-8" />
       <div className="leading-none">
         <div className={clsx("text-[17px] font-extrabold tracking-tight", white ? "text-white" : "text-brand-900")}>
           Revenue<span className={white ? "text-ember-400" : "text-ember-500"}>Forge</span>
