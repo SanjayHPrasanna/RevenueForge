@@ -3,6 +3,7 @@ import { Check, EyeOff, FileSearch, Lock, ShieldCheck } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ProductMark } from "../components/ui";
+import LandingAssistant from "../components/LandingAssistant";
 import { CoverageMap, FitLegend, PriceLadder, ReadinessScale } from "../components/viz";
 import { useAuth } from "../lib/auth";
 import { STAGES } from "../lib/format";
@@ -464,6 +465,7 @@ export default function Landing() {
         <ClosingCta />
       </main>
       <Footer />
+      <LandingAssistant />
     </div>
   );
 }

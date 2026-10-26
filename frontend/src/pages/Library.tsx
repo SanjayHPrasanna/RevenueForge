@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { Download, FileText, FolderUp, Search, Trash2, Upload } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import FolderImport from "../components/FolderImport";
+import GoogleDriveImport from "../components/GoogleDriveImport";
 import UploadReview, { KIND_INFO, TemplateUpload } from "../components/UploadReview";
 import { Empty, Modal, PageLoader, useToast } from "../components/ui";
 import { api, download } from "../lib/api";
@@ -94,9 +95,12 @@ function TemplateTab() {
 
 export default function Library() {
   const { kind = "capabilities" } = useParams();
+  const folderInput = useRef<HTMLInputElement>(null);
   const [q, setQ] = useState("");
   const [up, setUp] = useState(false);
   const [folder, setFolder] = useState(false);
+  const [drive, setDrive] = useState(false);
+  const [pickedFiles, setPickedFiles] = useState<File[] | null>(null);
   const qc = useQueryClient();
   const toast = useToast();
   const { data, isLoading } = useQuery({ queryKey: ["lib", kind], queryFn: () => api.get(`/library/${kind}`), enabled: kind !== "template" });
@@ -113,7 +117,28 @@ export default function Library() {
           <h1 className="font-display text-[32px] leading-tight text-brand-950">Knowledge library</h1>
           <p className="text-ink-muted text-sm mt-0.5">Everything RevenueForge knows about your company. Matches, estimates and proposals use only what's here.</p>
         </div>
-        <button className="btn-outline" onClick={() => setFolder(true)}><FolderUp className="h-4 w-4" /> Import a folder</button>
+        <input
+          ref={folderInput}
+          type="file"
+          hidden
+          multiple
+          {...({ webkitdirectory: "", directory: "" } as any)}
+          onChange={(event) => {
+            const files = Array.from(event.target.files || []);
+            event.target.value = "";
+            if (files.length) {
+              setPickedFiles(files);
+              setFolder(true);
+            }
+          }}
+        />
+        <button className="btn-outline" onClick={() => folderInput.current?.click()}><FolderUp className="h-4 w-4" /> Import a folder</button>
+        <button className="btn-outline" onClick={() => {
+          window.open("https://drive.google.com/drive/my-drive", "_blank", "noopener,noreferrer");
+          setDrive(true);
+        }}>
+          <GoogleDriveLogo /> Import from Google Drive
+        </button>
       </div>
       <div className="mt-5 border-b border-line flex gap-1 overflow-x-auto scroll-thin">
         {TABS.map((t) => (
@@ -152,12 +177,17 @@ export default function Library() {
           </div>
         )}
       </div>
-      <Modal open={folder} onClose={() => setFolder(false)} title="Import a folder" xl>
-        <FolderImport onDone={() => setFolder(false)} compact />
+      <Modal open={folder} onClose={() => { setFolder(false); setPickedFiles(null); }} title="Import a folder" xl>
+        <FolderImport onDone={() => setFolder(false)} compact autoStartFiles={pickedFiles} />
       </Modal>
+      {drive && <GoogleDriveImport onClose={() => setDrive(false)} onImported={() => { setDrive(false); setFolder(true); }} />}
       <Modal open={up} onClose={() => setUp(false)} title={`Upload ${KIND_INFO[kind]?.title.toLowerCase()}`} wide>
         {kind !== "template" && <UploadReview kind={kind} onImported={() => setTimeout(() => setUp(false), 900)} />}
       </Modal>
     </div>
   );
+}
+
+function GoogleDriveLogo() {
+  return <img aria-hidden="true" src="/brand/google-drive.png" alt="" className="h-4 w-4 shrink-0" />;
 }

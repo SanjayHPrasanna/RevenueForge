@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { AlertTriangle, CheckCircle2, FileSpreadsheet, FileText, FolderOpen, FolderUp, RefreshCw, XCircle } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../lib/api";
 import { Modal, Spinner, useToast } from "./ui";
 import { KIND_INFO, MappingAndPreview } from "./UploadReview";
@@ -57,7 +57,18 @@ function chunks(list: Picked[]): Picked[][] {
   return out;
 }
 
-export default function FolderImport({ onDone, compact }: { onDone?: () => void; compact?: boolean }) {
+async function uploadPart(part: Picked[], batch: string): Promise<{ batch: string; skipped: { path: string; reason: string }[] }> {
+  const fd = new FormData();
+  part.forEach((p) => { fd.append("files", p.file, p.file.name); fd.append("paths", p.path); });
+  if (batch) fd.append("batch", batch);
+  return api.upload("/library/folder", fd);
+}
+
+export default function FolderImport({ onDone, compact, autoStartFiles }: {
+  onDone?: () => void;
+  compact?: boolean;
+  autoStartFiles?: File[] | null;
+}) {
   const toast = useToast();
   const qc = useQueryClient();
   const input = useRef<HTMLInputElement>(null);
@@ -99,10 +110,7 @@ export default function FolderImport({ onDone, compact }: { onDone?: () => void;
     let id = "";
     try {
       for (const part of chunks(files)) {
-        const fd = new FormData();
-        part.forEach((p) => { fd.append("files", p.file, p.file.name); fd.append("paths", p.path); });
-        if (id) fd.append("batch", id);
-        const r = await api.upload<{ batch: string; skipped: { path: string; reason: string }[] }>("/library/folder", fd);
+        const r = await uploadPart(part, id);
         id = r.batch;
         setSkipped((s) => [...s, ...r.skipped]);
         setProgress((p) => p && { ...p, done: p.done + part.length });
@@ -115,6 +123,12 @@ export default function FolderImport({ onDone, compact }: { onDone?: () => void;
       setProgress(null);
     }
   };
+
+  useEffect(() => {
+    if (autoStartFiles?.length) {
+      start(autoStartFiles.map((file) => ({ file, path: (file as any).webkitRelativePath || file.name })));
+    }
+  }, [autoStartFiles]);
 
   const setType = useMutation({
     mutationFn: ({ row, type }: { row: Row; type: string | null }) => api.post(`/library/folder/${batch}/${row.id}/type`, { type }),

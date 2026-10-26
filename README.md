@@ -56,9 +56,17 @@ With AI on, every stage is AI-first: Gemini reads the RFP, classifies requiremen
 
 **Free tier caution.** On Google's free (unpaid) tier, submitted content may be used to improve Google's products and may be read by human reviewers, and Google asks you not to submit confidential information. Use the free key with sample or non-confidential documents. For client RFPs, link the key to a billed Google Cloud project and set `LLM_PAID=true`. Free keys are rate-limited; `LLM_RPM=8` keeps RevenueForge under the limit, so a large RFP takes a few minutes.
 
+### Maahi, the landing-page assistant
+
+Visitors can chat with Maahi about RevenueForge's features and workflow. Maahi uses the AI provider configured above and answers from product information; it cannot access workspace or deal data. The chat is limited to 10 messages per IP address per minute, and conversation history is kept in the browser only for that visit. Messages are sent to the configured AI provider to generate replies, so visitors should not share confidential information. Maahi is unavailable until an AI provider is configured.
+
 ## Sign in with Google
 
 Works out of the box: the team's Google client ID is in `backend/team.env`, which comes with the code. Each person signing in must be added as a **test user** in Google Cloud Console (Google Auth Platform → Audience) until the app is published there. To run the app on another address (a server, a different port), add that address under *Authorised JavaScript origins* for the client. `team.env` is only for shared, non-secret settings; API keys always go in your own `backend/.env`.
+
+### Import from Google Drive
+
+From the **Knowledge library** page, use **Import from Google Drive** to connect to Drive, browse to a folder and import supported files into the normal review flow. The Google Cloud project for `GOOGLE_CLIENT_ID` must have the **Google Drive API** enabled, and the app's exact web origin (for local development, `http://localhost:5173`) must be listed under **Google Auth Platform → Clients → OAuth client → Authorized JavaScript origins**. The Drive button also opens Drive in a new tab. Google Docs, Sheets and Slides are exported as Word, Excel and PowerPoint files.
 
 ## Solution video for the client
 
