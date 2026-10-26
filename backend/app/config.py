@@ -64,6 +64,9 @@ class Settings:
     # Banner shown to every user (sign-in page and app). Empty = automatic: a "sample data only" warning while the AI
     # runs on a free key. Set to "off" to hide it, or to your own text.
     public_notice = os.getenv("PUBLIC_NOTICE", "").strip()
+    # People who may change the server's AI provider and keys from Settings (comma-separated emails). The AI setup is
+    # shared by every company on this server, so this is deliberately separate from each company's own admins.
+    platform_admins = [e.strip().lower() for e in os.getenv("PLATFORM_ADMINS", "").split(",") if e.strip()]
     anthropic_api_key = os.getenv("ANTHROPIC_API_KEY", "")
     anthropic_model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5")
     openai_api_key = os.getenv("OPENAI_API_KEY", "")

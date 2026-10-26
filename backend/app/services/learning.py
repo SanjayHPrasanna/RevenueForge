@@ -32,7 +32,11 @@ MIN_TRAIN = 30
 
 # --------------------------------------------------------------------------- embeddings with cache
 def _key(text: str, task: str) -> str:
-    return hashlib.sha1(f"{task}|{text}".encode("utf-8", "ignore")).hexdigest()
+    # Vectors from different embedding models can't be compared, so the cache is kept per model. The original
+    # default (Gemini's embedding model) keeps its old keys, so existing caches stay valid.
+    model = llm.embed_id()
+    prefix = "" if model == "gemini:gemini-embedding-001" else f"{model}|"
+    return hashlib.sha1(f"{prefix}{task}|{text}".encode("utf-8", "ignore")).hexdigest()
 
 
 def embed_cached(db: Session, tid: str, texts: list[str], task: str = "SEMANTIC_SIMILARITY") -> list[list[float]] | None:

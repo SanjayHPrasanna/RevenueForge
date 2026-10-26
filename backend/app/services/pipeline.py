@@ -326,6 +326,7 @@ def run_pipeline(deal_id: str, from_stage: str = "requirements", until: str | No
         deal = db.get(Deal, deal_id)
         if not deal:
             return
+        llm.set_tenant(deal.tenant_id)  # this thread's AI calls use the deal's company's AI settings
         start = STAGES.index(from_stage)
         end = STAGES.index(until) + 1 if until else len(STAGES)
         for s in STAGES[start:end]:

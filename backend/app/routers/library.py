@@ -72,7 +72,34 @@ def get_company(ctx: Ctx = Depends(current_ctx)):
     t = ctx.tenant
     return {"id": t.id, "name": t.name, "slug": t.slug, "industry": t.industry, "website": t.website, "about": t.about,
             "headquarters": t.headquarters, "headcount": t.headcount, "founded": t.founded, "currency": t.currency,
-            "settings": t.settings or {}, "onboarding": _onboarding_status(ctx), "llm": llm.status()}
+            "settings": {k: v for k, v in (t.settings or {}).items() if k != "ai"}, "onboarding": _onboarding_status(ctx),
+            "llm": llm.status(), "notice": llm.notice()}
+
+
+# --------------------------------------------------------------------------- the company's own AI provider and key
+@router.get("/company/ai")
+def get_company_ai(ctx: Ctx = Depends(current_ctx)):
+    from ..services import company_ai
+    return company_ai.view(ctx.tenant)
+
+
+@router.put("/company/ai")
+def save_company_ai(body: dict, ctx: Ctx = Depends(current_ctx)):
+    """Anyone in the company may change it; it applies to this company only."""
+    from ..services import company_ai
+    try:
+        company_ai.save(ctx.db, ctx.tenant, body, ctx.user.email)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    ctx.audit("company.ai.update", str(body.get("provider", "")))
+    ctx.db.commit()
+    return company_ai.view(ctx.tenant)
+
+
+@router.post("/company/ai/test")
+def test_company_ai(ctx: Ctx = Depends(current_ctx)):
+    from ..services import company_ai
+    return company_ai.test(ctx.tenant_id)
 
 
 @router.put("/company")
@@ -89,6 +116,8 @@ def update_company(body: dict, ctx: Ctx = Depends(require_roles())):
     if isinstance(body.get("settings"), dict):
         s = dict(t.settings or {})
         for k, v in body["settings"].items():
+            if k == "ai":
+                continue  # the company's AI provider and key are changed only through /company/ai
             if k in ("target_margin", "min_margin", "travel_pct"):
                 v = float(v)
             s[k] = v

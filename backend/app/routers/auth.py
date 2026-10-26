@@ -100,13 +100,51 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
 def auth_config():
     """What the sign-in page offers. The client ID is public by design (it is embedded in every Google button)."""
     from ..services import llm
-    notice = settings.public_notice
-    if notice.lower() in ("off", "none", "false", "0"):
-        notice = ""
-    elif not notice and llm.provider_name() == "gemini" and not settings.llm_paid:
-        notice = ("Test version: use sample or dummy documents only. The AI runs on a free Google key, "
-                  "so please don't upload confidential client RFPs or company data.")
+    notice = llm.notice()  # the signed-in company's own AI key decides; signed out, the server default does
     return {"google_client_id": settings.google_client_id or None, "google_domains": settings.google_allowed_domains, "notice": notice}
+
+
+# --------------------------------------------------------------------------- AI engine (server-wide)
+@router.get("/ai-config")
+def get_ai_config(ctx: Ctx = Depends(current_ctx)):
+    from ..services import ai_settings
+    return ai_settings.view(ai_settings.is_platform_admin(ctx.user.email))
+
+
+def _platform_admin(ctx: Ctx) -> None:
+    from ..services import ai_settings
+    if not ai_settings.is_platform_admin(ctx.user.email):
+        raise HTTPException(403, "Only the server's platform admins (PLATFORM_ADMINS) can change the AI engine: it is shared by every company here.")
+
+
+@router.put("/ai-config")
+def save_ai_config(body: dict, ctx: Ctx = Depends(current_ctx)):
+    from ..services import ai_settings
+    _platform_admin(ctx)
+    try:
+        ai_settings.save(body, ctx.user.email)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    ctx.audit("ai.config.update", str(body.get("provider", "")))
+    ctx.db.commit()
+    return ai_settings.view(True)
+
+
+@router.delete("/ai-config")
+def reset_ai_config(ctx: Ctx = Depends(current_ctx)):
+    from ..services import ai_settings
+    _platform_admin(ctx)
+    ai_settings.reset()
+    ctx.audit("ai.config.reset", "")
+    ctx.db.commit()
+    return ai_settings.view(True)
+
+
+@router.post("/ai-config/test")
+def test_ai_config(ctx: Ctx = Depends(current_ctx)):
+    from ..services import ai_settings
+    _platform_admin(ctx)
+    return ai_settings.test()
 
 
 def verify_google(credential: str) -> dict:
