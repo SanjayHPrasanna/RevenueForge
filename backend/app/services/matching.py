@@ -188,6 +188,8 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
 
     similarity: optional callable(queries, docs) -> (matrix, method) supplying semantic (embedding) similarity.
     """
+    if not reqs:
+        return reqs
     inv = kb.tech_inventory()
     company_techs = {t for t, v in inv.items() if v["people"] or v["capabilities"]}
     caps, css = kb.capabilities, kb.case_studies

@@ -190,6 +190,16 @@ def rules_extract(doc: ParsedDocument) -> tuple[list[dict], dict]:
                 elif in_req and len(s) < 90 and not s.endswith(":") and K.ACTION_START_RE.search(s):
                     add(s, b)  # short spec items rendered as paragraphs
 
+    if not reqs:
+        # A short scope (e.g. a published tender notice) with no "shall"/"must" sentences: each scope sentence is taken
+        # as one requirement, so the deal still has something to match and estimate. Low confidence, for review.
+        for b in doc.blocks:
+            if b.kind in ("para", "bullet") and REQ_SECTION_RE.search(b.section or ""):
+                for s in _sentences(b.text):
+                    if len(s) >= 30:
+                        add(s, b)
+        for r in reqs:
+            r["class_confidence"] = min(r["class_confidence"], 0.5)
     meta = {"out_of_scope": out_of_scope[:40], "deliverables": deliverables[:40], "evaluation_criteria": evaluation, "slas": slas[:40],
             "workstreams": workstreams[:12], "objectives": objectives[:12]}
     return reqs, meta

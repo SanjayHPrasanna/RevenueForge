@@ -23,6 +23,7 @@ const Library = React.lazy(() => import("./pages/Library"));
 const Onboarding = React.lazy(() => import("./pages/Onboarding"));
 const SettingsPage = React.lazy(() => import("./pages/Settings"));
 const WinLoss = React.lazy(() => import("./pages/WinLoss"));
+const RadarPage = React.lazy(() => import("./pages/Radar"));
 
 /** Shown for addresses that don't exist, instead of silently jumping to the home page. */
 function NotFound() {
@@ -82,6 +83,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="graph" element={<GraphPage />} />
                 <Route path="learning" element={<Learning />} />
                 <Route path="winloss" element={<WinLoss />} />
+                <Route path="opportunities" element={<RadarPage />} />
                 <Route path="settings" element={<SettingsPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />

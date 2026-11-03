@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { NoticeBar } from "./GoogleButton";
-import { BookOpen, Brain, Briefcase, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, Network, Settings, Sparkles, Trophy, X } from "lucide-react";
+import { BookOpen, Brain, Briefcase, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, Network, Radar, Settings, Sparkles, Trophy, X } from "lucide-react";
 import { Suspense, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -11,6 +11,7 @@ import LandingAssistant from "./LandingAssistant";
 
 const NAV = [
   { to: "/app", label: "Home", icon: LayoutDashboard, end: true },
+  { to: "/app/opportunities", label: "Opportunities", icon: Radar },
   { to: "/app/deals", label: "Deals", icon: Briefcase },
   { to: "/app/winloss", label: "Win/loss", icon: Trophy },
   { to: "/app/library", label: "Knowledge library", icon: BookOpen },

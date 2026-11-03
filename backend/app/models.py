@@ -344,3 +344,51 @@ class ModelState(Base):
     blob: Mapped[str] = mapped_column(Text, default="")  # base64 pickle
     meta: Mapped[dict] = mapped_column(JSON, default=dict)
     trained_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+# --------------------------------------------------------------------------- opportunity radar
+class Tender(Base):
+    """A public tender notice read from an open-data source (shared by every company; it is public information)."""
+    __tablename__ = "tenders"
+    __table_args__ = (UniqueConstraint("source", "source_id"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    source: Mapped[str] = mapped_column(String(20), index=True)  # ted, uk_fts, worldbank, canadabuys, sam
+    source_id: Mapped[str] = mapped_column(String(120))
+    title: Mapped[str] = mapped_column(String(600), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    language: Mapped[str] = mapped_column(String(8), default="en")  # language of the description
+    buyer: Mapped[str] = mapped_column(String(300), default="")
+    country: Mapped[str] = mapped_column(String(80), default="")
+    region: Mapped[str] = mapped_column(String(40), default="", index=True)
+    categories: Mapped[list] = mapped_column(JSON, default=list)  # [{"code", "label"}]
+    notice_type: Mapped[str] = mapped_column(String(80), default="")
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), default="")
+    published: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    url: Mapped[str] = mapped_column(String(600), default="")
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class TenderSource(Base):
+    """When each source was last read, and whether it worked."""
+    __tablename__ = "tender_sources"
+    key: Mapped[str] = mapped_column(String(20), primary_key=True)
+    last_run: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_ok: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fetched: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(Text, default="")
+
+
+class TenderFit(Base):
+    """How well one company fits one tender, and what the company decided about it."""
+    __tablename__ = "tender_fits"
+    __table_args__ = (UniqueConstraint("tenant_id", "tender_id"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tenant_id: Mapped[str] = mapped_column(String(32), index=True)
+    tender_id: Mapped[str] = mapped_column(String(32), ForeignKey("tenders.id", ondelete="CASCADE"), index=True)
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="new")  # new, saved, dismissed, deal
+    deal_id: Mapped[str] = mapped_column(String(32), default="")
+    scored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

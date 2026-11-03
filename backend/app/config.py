@@ -56,6 +56,10 @@ class Settings:
     # Failed sign-ins allowed per email and per address in LOGIN_WINDOW_MINUTES before sign-in is paused.
     login_max_failures = int(os.getenv("LOGIN_MAX_FAILURES", "5"))
     login_window_minutes = int(os.getenv("LOGIN_WINDOW_MINUTES", "15"))
+    # Opportunity radar: how often public tender sources are read (hours; 0 = only when someone clicks Refresh),
+    # and an optional free SAM.gov API key to include US federal opportunities.
+    radar_refresh_hours = float(os.getenv("RADAR_REFRESH_HOURS", "12"))
+    sam_api_key = os.getenv("SAM_API_KEY", "").strip()
     cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]
 
     # LLM: gemini | anthropic | openai | azure | none

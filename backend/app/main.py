@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import BASE_DIR, settings
 from .db import init_db
-from .routers import assistant, auth, deals, insights, learning, library
+from .routers import assistant, auth, deals, insights, learning, library, radar
 from .services import company_ai, llm  # noqa: F401  (company_ai registers the per-company AI settings)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -76,6 +76,8 @@ def _startup():
     ai_settings.apply_saved()  # AI engine settings saved from Settings → AI engine
     from .services import notify
     notify.start_deadline_watch()  # "due in 3 days / tomorrow" reminder emails
+    from .services import tender_feeds
+    tender_feeds.start_schedule()  # opportunity radar: read public tender sources every few hours
     # Any deal left mid-run by a restart is marked so the user can re-run it.
     from sqlalchemy import select
     from .db import SessionLocal
@@ -117,6 +119,7 @@ app.include_router(deals.router)
 app.include_router(insights.router)
 app.include_router(learning.router)
 app.include_router(assistant.router)
+app.include_router(radar.router)
 
 # Serve the built frontend (frontend/dist) when present, so one process runs everything.
 DIST = BASE_DIR.parent / "frontend" / "dist"
