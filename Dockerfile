@@ -24,4 +24,4 @@ WORKDIR /app/backend
 ENV RF_DATA_DIR=/home/data SQLITE_JOURNAL_MODE=DELETE
 EXPOSE 8000
 # --proxy-headers: Azure terminates HTTPS in front of the container.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*' --no-server-header"]

@@ -154,7 +154,8 @@ def is_enabled() -> bool:
     return _usable(p) != "none" and not _st(p)["disabled_reason"]
 
 
-def status() -> dict:
+def status(usage: bool = True) -> dict:
+    """The AI engine in use. usage=False leaves out call counts and errors (shared server-wide figures)."""
     p = current_profile()
     st = _st(p)
     name = _usable(p)
@@ -162,7 +163,8 @@ def status() -> dict:
              "openai": p.openai_model, "azure": p.azure_deployment}.get(name, "")
     return {"provider": name, "model": model, "enabled": is_enabled(), "configured_provider": p.provider, "source": p.source,
             "paid": p.paid, "rpm": p.rpm, "calls": st["calls"], "failures": st["failures"], "last_error": st["last_error"][:300],
-            "disabled_reason": st["disabled_reason"], "embeddings": name in ("gemini", "openai") and st["embed_ok"] is not False}
+            "disabled_reason": st["disabled_reason"], "embeddings": name in ("gemini", "openai") and st["embed_ok"] is not False,
+            **({} if usage else {"calls": None, "failures": None, "last_error": ""})}
 
 
 def notice() -> str:

@@ -32,6 +32,7 @@ function useMetrics(deal: any) {
   const { data: reqs } = useQuery({ queryKey: ["reqs", deal.id], queryFn: () => api.get<any[]>(`/deals/${deal.id}/requirements`), enabled: deal.status !== "processing" });
   const { data: est } = useQuery({ queryKey: ["stage", deal.id, "estimation"], queryFn: () => api.get(`/deals/${deal.id}/stages/estimation`), enabled: deal.status !== "processing" });
   const gaps = reqs?.filter((r) => r.match_status === "gap").length;
+  const partial = reqs?.filter((r) => r.match_status === "partial").length || 0;
   const answers = reqs?.filter((r) => r.response).length;
   const e = (est as any)?.data;
   return {
@@ -40,7 +41,7 @@ function useMetrics(deal: any) {
       overview: "",
       requirements: deal.requirement_count ? `${deal.requirement_count} found` : "",
       matching: deal.coverage_pct != null ? `${deal.coverage_pct}% covered` : "",
-      gaps: gaps != null ? `${gaps} gap${gaps === 1 ? "" : "s"}` : "",
+      gaps: gaps == null ? "" : gaps ? `${gaps} gap${gaps === 1 ? "" : "s"}` : partial ? `${partial} to mitigate` : "No gaps",
       architecture: "",
       estimation: e?.headcount ? `${e.headcount} people` : "",
       pricing: deal.value ? money(deal.value, deal.value_currency) : "",

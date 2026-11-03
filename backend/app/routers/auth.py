@@ -4,8 +4,11 @@ import jwt
 
 import re
 import secrets
+import threading
+import time
+from collections import deque
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -88,10 +91,47 @@ def register(data: RegisterIn, db: Session = Depends(get_db)):
     return {"token": create_token(u), "user": user_out(u, t)}
 
 
+# --------------------------------------------------------------------------- sign-in attempt limit
+_fail_lock = threading.Lock()
+_failures: dict[str, deque] = {}
+
+
+def _recent_failures(key: str) -> deque:
+    window = settings.login_window_minutes * 60
+    q = _failures.setdefault(key, deque())
+    while q and time.monotonic() - q[0] > window:
+        q.popleft()
+    return q
+
+
+def _check_login_allowed(keys: list[str]) -> None:
+    with _fail_lock:
+        # per email: the configured limit; per network address a looser one, so one office behind a shared address
+        # isn't locked out by a single colleague's typos
+        if any(len(_recent_failures(k)) >= settings.login_max_failures * (5 if k.startswith("ip:") else 1) for k in keys):
+            raise HTTPException(429, f"Too many failed sign-ins. Wait {settings.login_window_minutes} minutes and try again, "
+                                     "or sign in with Google.")
+
+
+def _note_login_failure(keys: list[str]) -> None:
+    with _fail_lock:
+        for k in keys:
+            _recent_failures(k).append(time.monotonic())
+        if len(_failures) > 10000:  # keep memory bounded
+            for k in [k for k, q in _failures.items() if not q][:5000]:
+                _failures.pop(k, None)
+
+
 @router.post("/login")
-def login(data: LoginIn, db: Session = Depends(get_db)):
+def login(data: LoginIn, request: Request, db: Session = Depends(get_db)):
+    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "")
+    if ip.count(":") == 1:  # Azure adds the port: "1.2.3.4:5678"
+        ip = ip.split(":")[0]
+    keys = [f"email:{data.email.lower()}", f"ip:{ip}"]
+    _check_login_allowed(keys)
     u = db.scalar(select(User).where(func.lower(User.email) == data.email.lower()))
     if not u or not verify_password(data.password, u.password_hash):
+        _note_login_failure(keys)
         raise HTTPException(401, "Email or password is incorrect.")
     if not u.is_active:
         raise HTTPException(403, "This account is disabled. Ask your company admin to re-enable it.")
@@ -309,6 +349,13 @@ def update_user(uid: str, body: dict, ctx: Ctx = Depends(require_roles())):
     u = ctx.db.get(User, uid)
     if not u or u.tenant_id != ctx.tenant_id:
         raise HTTPException(404, "User not found.")
+    losing_admin = u.role == "admin" and u.is_active and (
+        ("role" in body and body["role"] != "admin") or ("active" in body and not body["active"]))
+    if losing_admin:
+        others = ctx.db.scalar(select(func.count()).select_from(User).where(
+            User.tenant_id == ctx.tenant_id, User.role == "admin", User.is_active.is_(True), User.id != u.id))
+        if not others:
+            raise HTTPException(400, "Every company needs at least one active admin. Make someone else an admin first.")
     if "role" in body:
         if body["role"] not in ROLES:
             raise HTTPException(400, "Unknown role.")

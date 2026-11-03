@@ -6,11 +6,12 @@ was based on, so proposals can cite real assets rather than invent them.
 """
 from __future__ import annotations
 
+import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import ENGLISH_STOP_WORDS, TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from . import knowledge as K
@@ -83,11 +84,102 @@ SUBCAT_CONTEXT = {
     "Fraud & Risk Analytics": "fraud risk analytics detection scoring",
     "Application Development": "application development engineering build configure",
 }
-PROCESS_RE = re.compile(r"\b(tender(er)?s?|bidders?|proposers?|proposals?|offer|rfp|rfi|documents?|notification|addend|clarification|address|"
-                        r"visit|examine|alteration|value-added|complimentary|methods? statement|aggregates)\b", re.I)
+# Tender-process obligations (how to respond), not delivery work. "The bidder shall provide X" is delivery work, so the
+# words bidder/tenderer alone don't count.
+PROCESS_RE = re.compile(r"\b(tender documents?|proposals?|offer|rfp|rfi|submission|responses?|in their response|notification|addend\w*|"
+                        r"clarification|site visit|visit|examine|alteration|value-added|complimentary|methods? statement|aggregates)\b", re.I)
 
 ISO_RE = re.compile(r"iso\s*/?\s*(?:iec\s*)?(\d{4,5})", re.I)
+# Named standards and attestations checked against the company's certificate register (not by text similarity).
+STANDARDS = [
+    ("SOC 2", re.compile(r"\bsoc\s*-?\s*2\b|\bsoc\s*ii\b", re.I)),
+    ("SOC 1", re.compile(r"\bsoc\s*-?\s*1\b", re.I)),
+    ("PCI DSS", re.compile(r"\bpci(?:[\s-]*dss)?\b", re.I)),
+    ("HITRUST", re.compile(r"\bhitrust\b", re.I)),
+    ("HIPAA", re.compile(r"\bhipaa\b", re.I)),
+    ("CMMI", re.compile(r"\bcmmi\b", re.I)),
+    ("Cyber Essentials", re.compile(r"\bcyber\s+essentials\b", re.I)),
+    ("FedRAMP", re.compile(r"\bfedramp\b", re.I)),
+    ("IRAP", re.compile(r"\birap\b", re.I)),
+    ("CSA STAR", re.compile(r"\bcsa\s+star\b", re.I)),
+    ("TISAX", re.compile(r"\btisax\b", re.I)),
+    ("Essential Eight", re.compile(r"\bessential\s+eight\b", re.I)),
+]
+# Wording that asks the bidder itself to hold a certificate (rather than build a solution that follows a standard).
+HOLD_RE = re.compile(r"\b(hold|holds|held|certif\w*|attest\w*|accredit\w*|audit(?:ed)?\s+report|registered|maintain\s+(?:a\s+)?current)\b", re.I)
+
+
+def standards_in(text: str) -> set[str]:
+    """Named standards in a text: 'ISO 27001', 'SOC 2', 'PCI DSS', ..."""
+    found = {f"ISO {m}" for m in ISO_RE.findall(text or "")}
+    found |= {name for name, rx in STANDARDS if rx.search(text or "")}
+    return found
+
+
+def relevant_accelerators(kb: CompanyKB, reqs: list[dict]) -> list[dict]:
+    """Accelerators whose technologies (or purpose) actually appear in this RFP. An accelerator named after a technology
+    the RFP never mentions (an "FHIR Starter Kit" for a transit bid) is never applied."""
+    text_all = " ".join(r["text"] for r in reqs).lower()
+    req_tech = {K.canonical_tech(t) for r in reqs for t in r.get("technologies", [])}
+    out = []
+    for a in kb.accelerators:
+        if not a.get("effort_saving_pct"):
+            continue
+        techs = [K.canonical_tech(t) for t in a.get("technologies", []) if t]
+        def present(t):
+            return t in req_tech or t.lower() in text_all
+        core = [t for t in techs if any(w in a["name"].lower() for w in re.findall(r"[a-z0-9]{3,}", t.lower()))]
+        if any(not present(t) for t in core):
+            continue
+        hits = [t for t in techs if present(t) and t not in K.COMMODITY_TECH]
+        words = {w for w in re.findall(r"[a-z][a-z0-9]{5,}", (a.get("description", "") + " " + a["name"]).lower())}
+        purpose = sum(1 for w in words if w in text_all)
+        if (techs and len(hits) >= max(1, math.ceil(len(techs) / 2))) or (hits and purpose >= 3):
+            out.append({"name": a["name"], "saving_pct": a["effort_saving_pct"], "matched": hits})
+    return out
+
+
+def _blend_embeddings(tfidf, emb) -> list[list[float]]:
+    """Put embedding cosines on the TF-IDF scale the scorer expects.
+
+    Embedding models give almost any two business texts a high cosine (Gemini: about 0.6-0.9), so a fixed offset
+    over-scores everything. Instead each cosine is placed relative to all pairs in this deal: only pairs in the top
+    quarter count at all, and only the very closest reach the full TF-IDF-equivalent score. The result is averaged with
+    TF-IDF (shared words) rather than taking the higher of the two, so one generous signal can't carry a match alone.
+    """
+    flat = sorted(e for row in emb for e in row)
+    if not flat:
+        return tfidf
+    def pct(q):
+        return flat[min(len(flat) - 1, int(q * (len(flat) - 1)))]
+    lo, hi = pct(0.75), pct(0.995)
+    span = max(1e-6, hi - lo)
+    out = []
+    for trow, erow in zip(tfidf, emb):
+        out.append([0.5 * t + 0.5 * max(0.0, min(1.0, (e - lo) / span)) * 0.34 for t, e in zip(trow, erow)])
+    return out
 CONFIRM_SUBS = {"Pricing & Payment", "Bonds & Guarantees", "Insurance & Liability", "Contract Terms", "Evaluation & Award", "Submission"}
+
+
+_STOP = {"this", "that", "with", "from", "shall", "should", "must", "will", "their", "which", "where", "within", "across"}
+
+
+def _stem(w: str) -> str:
+    """A light English stemmer, so "portals"/"portal" and "migrating"/"migration"/"migrate" meet."""
+    if len(w) <= 4 or w in _STOP:
+        return w
+    for suf, rep in (("ations", "ate"), ("ation", "ate"), ("ities", "ity"), ("ies", "y"), ("ing", ""), ("ed", ""), ("es", ""), ("s", "")):
+        if w.endswith(suf) and len(w) - len(suf) >= 3:
+            w = w[: -len(suf)] + rep
+            break
+    return w[:-1] if w.endswith("e") and len(w) > 5 else w
+
+
+def _stem_text(text: str) -> str:
+    return " ".join(_stem(w) for w in re.findall(r"[a-z0-9]+(?:[./][a-z0-9]+)*", text.lower()))
+
+
+_STEMMED_STOP = sorted({_stem(w) for w in ENGLISH_STOP_WORDS} | {_stem(_stem(w)) for w in ENGLISH_STOP_WORDS} | set(ENGLISH_STOP_WORDS))
 
 
 def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", industry: str = "", similarity=None,
@@ -98,12 +190,14 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
     """
     inv = kb.tech_inventory()
     company_techs = {t for t, v in inv.items() if v["people"] or v["capabilities"]}
-    caps, css, accs = kb.capabilities, kb.case_studies, kb.accelerators
+    caps, css = kb.capabilities, kb.case_studies
+    useful = {a["name"] for a in relevant_accelerators(kb, reqs)}
+    accs = [a for a in kb.accelerators if a["name"] in useful]  # never cite an accelerator built for another domain
     docs = [K.expand(_cap_text(c)) for c in caps] + [K.expand(_cs_text(c)) for c in css] + [K.expand(_acc_text(a)) for a in accs]
     qtexts = [K.expand(f"{r['text']} {r.get('section', '')} {' '.join(r.get('technologies', []))} {SUBCAT_CONTEXT.get(r.get('subcategory', ''), '')}") for r in reqs]
     if not docs:
         docs = ["empty"]
-    vec = TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True, stop_words="english", min_df=1)
+    vec = TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True, stop_words=_STEMMED_STOP, min_df=1, preprocessor=_stem_text)
     vec.fit(docs + qtexts)
     D = vec.transform(docs)
     Q = vec.transform(qtexts)
@@ -114,10 +208,12 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
         raw_q = [f"{r['text']} ({r.get('section', '')})" for r in reqs]
         emb, method = similarity(raw_q, raw_docs)
         if method == "embeddings":
-            # Map embedding cosine onto the same 0..~0.35 scale the scorer expects, and keep the better of the two signals.
-            sims = [[max(t, max(0.0, (e - 0.55)) * 1.1) for t, e in zip(trow, erow)] for trow, erow in zip(sims, emb)]
+            sims = _blend_embeddings(sims, emb)
     nc, ncs = len(caps), len(css)
-    company_iso = {m.group(1) for c in kb.certifications for m in [ISO_RE.search(c["name"])] if m}
+    held_std: dict[str, list[str]] = defaultdict(list)  # standard -> certificate names that evidence it
+    for c in kb.certifications:
+        for sname in standards_in(f"{c['name']} {c.get('description', '')}"):
+            held_std[sname].append(c["name"])
 
     for i, r in enumerate(reqs):
         row = sims[i] if len(reqs) else []
@@ -164,17 +260,24 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
         rationale = []
 
         sub = r.get("subcategory", "")
-        # Certification / standards requirements are checked against the certificate register.
-        isos = set(ISO_RE.findall(r["text"]))
-        if isos:
-            held = sorted(isos & company_iso)
-            lacking = sorted(isos - company_iso)
-            certs = [c["name"] for c in kb.certifications if (m := ISO_RE.search(c["name"])) and m.group(1) in held]
-            evidence = [{"type": "Certification", "name": c, "score": 1.0} for c in certs] + evidence[:1]
+        # Certification / standards requirements are checked against the certificate register, never by text similarity.
+        stds = standards_in(r["text"])
+        if stds:
+            held = sorted(s_ for s_ in stds if s_ in held_std)
+            lacking = sorted(stds - set(held))
+            certs = sorted({n for s_ in held for n in held_std[s_]})
+            evidence = [{"type": "Certification", "name": c, "score": 1.0} for c in certs] + [e for e in evidence if e["type"] != "Certification"][:1]
             if lacking:
-                status, score = ("partial", 0.5) if held else ("gap", 0.15)
-                missing = missing + [f"ISO {x}" for x in lacking]
-                rationale.append(f"Holds {', '.join('ISO ' + h for h in held) or 'none'} of the requested standards; missing {', '.join('ISO ' + x for x in lacking)}.")
+                must_hold = bool(HOLD_RE.search(r["text"]))
+                if held:
+                    status, score = "partial", 0.5
+                elif must_hold:
+                    status, score = "gap", 0.1
+                else:  # build the solution to the standard: possible, but there's no certificate to prove experience
+                    status, score = "partial", 0.4
+                missing = missing + lacking
+                rationale.append(f"Certificate register: holds {', '.join(held) or 'none'} of the named standards; "
+                                 f"no {', '.join(lacking)} {'certificate' if must_hold else 'certificate or audited evidence'}.")
             else:
                 status, score = "strong", 0.95
                 rationale.append(f"Certified: {', '.join(certs)}.")
@@ -194,7 +297,10 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
                        [e for e in evidence if e["type"] != "Case study"]
             status, score = ("strong", 0.85) if len(same_ind) >= 2 else ("partial", 0.55) if css else ("gap", 0.1)
             rationale.append(f"{len(same_ind)} reference projects in {industry or 'this industry'} and {len(kb.employees)} people in the skills register.")
-        elif status == "gap" and not req_techs and not isos and PROCESS_RE.search(r["text"]) and r.get("category") != "Non-functional":
+        elif r["text"].startswith("Deliverable:"):
+            status = "confirm"
+            rationale.append("Contractual deliverable: committed in the delivery plan.")
+        elif status == "gap" and not req_techs and not stds and PROCESS_RE.search(r["text"]) and r.get("category") != "Non-functional":
             status = "confirm"
             rationale.append("Response or tender-process obligation: answer in the proposal; no capability needed.")
 
@@ -213,9 +319,23 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
         r["match_score"] = score if status != "confirm" else 0.0
         r["match"] = {"evidence": evidence[:5], "people": people[:12], "people_count": len(people),
                       "technologies_have": have, "technologies_missing": missing, "rationale": " ".join(rationale),
-                      "retrieval": method, "judged_by": "rules"}
+                      "retrieval": method, "judged_by": "register" if stds else "rules"}
+        if stds:
+            held_c = [c for c in kb.certifications if c.get("kind") == "company" and standards_in(c["name"])]
+            held_c.sort(key=lambda c: not re.search(r"27001|soc|pci", c["name"], re.I))  # security certificates first
+            r["match"]["held_certificates"] = [{"name": c["name"]} for c in held_c][:2]
     if llm.is_enabled():
         ai_judge(reqs, kb, inv, guidance, progress)
+        # Anything the AI was meant to check but couldn't (quota, timeouts) is flagged so reviewers see it, and a
+        # similarity-only "strong" is held at "partial" until a person or the AI confirms it.
+        for r in reqs:
+            m = r["match"]
+            if m.get("judged_by") == "rules" and r["match_status"] in ("strong", "partial", "gap"):
+                m["unverified"] = True
+                if r["match_status"] == "strong":
+                    r["match_status"] = "partial"
+                    r["match_score"] = min(r["match_score"], 0.6)
+                    m["rationale"] = (m.get("rationale", "") + " AI check didn't run: shown as partial until reviewed.").strip()
     return reqs
 
 
@@ -227,7 +347,8 @@ JUDGE_SYSTEM = ("You are the bid director of an IT services company deciding, re
 
 def ai_judge(reqs: list[dict], kb: CompanyKB, inv: dict, guidance: str = "", progress=None) -> None:
     """AI decides strong / partial / gap for every technical and compliance requirement, citing evidence."""
-    todo = [r for r in reqs if r["category"] != "Commercial" and r.get("subcategory") not in CONFIRM_SUBS and r["match_status"] != "confirm"]
+    todo = [r for r in reqs if r["category"] != "Commercial" and r.get("subcategory") not in CONFIRM_SUBS and r["match_status"] != "confirm"
+            and r["match"].get("judged_by") != "register"]  # certificate checks are facts, not judgement
     certs = [c["name"] for c in kb.certifications]
     batches = [todo[i:i + 18] for i in range(0, len(todo), 18)]
     for n, chunk in enumerate(batches, start=1):
@@ -244,10 +365,15 @@ def ai_judge(reqs: list[dict], kb: CompanyKB, inv: dict, guidance: str = "", pro
                   '\n\nReturn a JSON array, one object per requirement: {"i": index, "status": "strong|partial|gap", "score": 0-100, '
                   '"evidence": ["<names copied exactly from that requirement\'s candidate evidence or the certifications>"], '
                   '"rationale": "<one sentence, citing the evidence>"}' + guidance)
-        try:
-            res = llm.complete_json(JUDGE_SYSTEM, prompt, max_tokens=8000)
-        except Exception:
-            return
+        res = None
+        for _ in range(2):  # one retry per batch; a failed batch no longer stops the batches after it
+            try:
+                res = llm.complete_json(JUDGE_SYSTEM, prompt, max_tokens=8000)
+                break
+            except Exception:
+                res = None
+        if res is None:
+            continue
         if isinstance(res, dict):
             res = next((v for v in res.values() if isinstance(v, list)), [])
         for it in res if isinstance(res, list) else []:
@@ -306,12 +432,13 @@ def ai_mitigations(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", g
                   '\n\nFor each gap return the single best way to close it for THIS company. JSON array: [{"i": index, '
                   '"type": "Partner|Upskill|Hire|Certify|Build|Define method", "detail": "<specific action naming the company\'s own adjacent '
                   'skills, partners or capabilities where relevant; one or two sentences>", "effort": "<duration>", "cost": "Low|Medium|High"}]' + guidance)
+        res = None
         try:
             res = llm.complete_json("You are a delivery director planning how an IT services firm closes capability gaps before bidding. "
                                     "Prefer realistic, specific actions. Never invent partners or certifications the company does not have; "
                                     "if a partner is needed and none is listed, say what kind of partner to find.", prompt, max_tokens=8000)
         except Exception:
-            break
+            continue  # the rules engine's options stay for this batch
         if isinstance(res, dict):
             res = next((v for v in res.values() if isinstance(v, list)), [])
         for it in res if isinstance(res, list) else []:
@@ -323,6 +450,13 @@ def ai_mitigations(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", g
                 out[r["code"]] = {"type": it["type"], "detail": str(it["detail"])[:500], "effort": str(it.get("effort", ""))[:40],
                                   "cost": it.get("cost") if it.get("cost") in ("Low", "Medium", "High") else "Medium", "ai": True}
     return out
+
+
+_STD_NAMES = {n for n, _ in STANDARDS}
+
+
+def _is_standard(t: str) -> bool:
+    return t.startswith("ISO ") or t in _STD_NAMES
 
 
 def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_options: dict | None = None) -> dict:
@@ -345,8 +479,8 @@ def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_
             missing_counter[t].append(r["code"])
         for t in missing[:3]:
             fam = K.TECH_FAMILY.get(t)
-            if t.startswith("ISO "):
-                options.append({"type": "Certify", "detail": f"Start {t} certification (typically 6–9 months); in the meantime, propose a partner that holds it or confirm whether it is mandatory for award.",
+            if _is_standard(t):
+                options.append({"type": "Certify", "detail": f"Start {t} certification or audit (typically 6–9 months); in the meantime, propose a partner that holds it or confirm with the client whether it is mandatory for award.",
                                 "effort": "6–9 months", "cost": "Medium"})
             elif t in K.PARTNER_PRODUCTS or engagement_type == "product" and fam == "Fraud & identity intelligence":
                 options.append({"type": "Partner", "detail": f"Partner with a specialist {t} product vendor and lead integration, deployment and support as the system integrator.",
@@ -402,7 +536,7 @@ def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_
     else:
         verdict = "No bid"
     top_missing = sorted(({"technology": t, "requirements": len(v), "codes": v[:8],
-                           "recommendation": ("Partner" if t in K.PARTNER_PRODUCTS else "Certify" if t.startswith("ISO ")
+                           "recommendation": ("Partner" if t in K.PARTNER_PRODUCTS else "Certify" if _is_standard(t)
                                               else "Upskill" if families_have.get(K.TECH_FAMILY.get(t, "")) else "Hire")}
                           for t, v in missing_counter.items()), key=lambda x: -x["requirements"])
     counts = defaultdict(int)

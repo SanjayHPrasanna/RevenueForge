@@ -288,6 +288,8 @@ export function MatchingStage({ deal }: P) {
   const qc = useQueryClient();
   const toast = useToast();
   const { data: reqs } = useReqs(deal.id);
+  const { data: mst } = useStage(deal.id, "matching");
+  const unverified = (mst as any)?.data?.unverified || 0;
   const [params] = useSearchParams();
   const [tab, setTab] = useState(params.get("status") || "all");
   const [cat, setCat] = useState(params.get("cat") || "");
@@ -315,6 +317,12 @@ export function MatchingStage({ deal }: P) {
   return (
     <div className={clsx("grid gap-4", sel ? "lg:grid-cols-[minmax(0,1fr)_440px]" : "")}>
       <div className="min-w-0">
+        {unverified > 0 && (
+          <div role="status" className="mb-4 rounded-xl border border-ember-100 bg-ember-50 px-4 py-3 text-[13px] text-ember-600">
+            <b>The AI check didn't run for {unverified} requirement{unverified === 1 ? "" : "s"}</b> (the AI service was busy or out of quota). Their matches are
+            text-similarity only, so none of them is shown as strong. Review them before approving, or re-run the deal when the AI is available.
+          </div>
+        )}
         <div className={clsx("card p-5 mb-4 grid gap-x-8 gap-y-6", sel ? "" : "xl:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]")}>
           <div className="min-w-0">
             <div className="flex flex-wrap items-baseline gap-x-3 mb-2"><div className="font-bold">Coverage map</div><div className="text-[12.5px] text-ink-muted">Select a tile to open its evidence.</div></div>
@@ -349,6 +357,8 @@ export function MatchingStage({ deal }: P) {
                     <div className="mt-1"><MatchChip status={r.match_status} /></div>
                     {r.match_status !== "confirm" && <div className="num text-[11.5px] text-ink-faint mt-1">{Math.round(r.match_score * 100)}%</div>}
                     {r.match?.judged_by === "ai" && <div className="text-[10.5px] font-semibold text-brand-600 mt-0.5">AI judged</div>}
+                    {r.match?.judged_by === "register" && <div className="text-[10.5px] font-semibold text-brand-600 mt-0.5">Certificate check</div>}
+                    {r.match?.unverified && !r.verified && <div className="text-[10.5px] font-semibold text-ember-600 mt-0.5">Not AI-checked</div>}
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-[13.5px] leading-snug">{r.text}</div>
@@ -519,6 +529,12 @@ export function ArchitectureStage({ deal }: P) {
       <div className="card p-5 text-[14.5px] leading-relaxed text-ink-soft">
         <span className={clsx("chip mr-2", a.engine === "ai" ? "bg-brand-50 text-brand-700" : "bg-line-soft text-ink-muted")}>{a.engine === "ai" ? "AI-designed" : "Rules draft"}</span>{a.summary}
       </div>
+      {a.not_in_library?.length > 0 && (
+        <div role="status" className="rounded-xl border border-ember-100 bg-ember-50 px-4 py-3 text-[13px] text-ember-600">
+          <b>Not backed by your library:</b> {a.not_in_library.join(", ")}. Nobody in your skills matrix, capabilities or case studies covers these, and the RFP
+          doesn't ask for them. The proposal marks those choices "To validate": confirm them with an architect, swap them for technologies you have, or add the evidence to your library.
+        </div>
+      )}
       <div className="card p-4 md:p-5">
         <div className="flex flex-wrap gap-3 mb-4 text-[12px]">
           {Object.entries(SRC_STYLE).filter(([k]) => a.style === "ea-domains" ? k === "Assessment scope" : k !== "Assessment scope").map(([k, v]) => (
@@ -590,42 +606,57 @@ export function EstimationStage({ deal }: P) {
   const { data: st } = useStage(deal.id, "estimation");
   if (!st) return <PageLoader />;
   const e = st.data;
-  const totalWeeks = Math.max(...e.phases.map((p: any) => p.weeks + (p.parallel ? e.phases[0].weeks : 0)), 1);
-  let cursor = 0;
+  // sequential phases follow each other; a parallel phase starts after the first phase
+  const spans = (() => {
+    let c = 0;
+    return e.phases.map((ph: any) => {
+      const start = ph.parallel ? (ph.name === "Service transition" ? Math.max(0, c - ph.weeks) : e.phases[0].weeks) : c;
+      if (!ph.parallel) c += ph.weeks;
+      return { start, end: start + ph.weeks };
+    });
+  })();
+  const totalWeeks = Math.max(...spans.map((x: any) => x.end), 1);
   const isMS = e.engagement_type === "managed_services";
+  const isBR = e.engagement_type === "build_run";
+  const phased = new Set(e.team.map((t: any) => t.phase)).size > 1;
+  const onsite = Math.round((e.onsite_share ?? e.onsite_ratio) * 100);
   return (
     <div className="space-y-4">
       <StatStrip items={[
-        { label: isMS ? "Contract term" : "Duration", value: `${e.contract_months} months`, sub: ENGAGEMENT[e.engagement_type] },
-        { label: "Team", value: `${e.headcount} people`, sub: `${e.fte} FTE, ${Math.round(e.onsite_ratio * 100)}% onsite` },
-        { label: "Effort", value: `${Math.round(e.total_person_days).toLocaleString()}`, sub: "person-days" },
+        isBR && e.build_months
+          ? { label: "Build, then run", value: `${e.build_months} + ${e.run_months} months`, sub: ENGAGEMENT[e.engagement_type] }
+          : { label: isMS ? "Contract term" : "Duration", value: `${e.contract_months} months`, sub: ENGAGEMENT[e.engagement_type] },
+        { label: "Team", value: `${e.headcount} people`, sub: phased && e.fte_by_phase
+            ? `${Object.entries(e.fte_by_phase).map(([k, v]) => `${k} ${v} FTE`).join(", ")}, ${onsite}% onsite`
+            : `${e.fte} FTE, ${onsite}% onsite` },
+        { label: "Effort", value: `${Math.round(e.total_person_days).toLocaleString()}`, sub: "person-days, whole team" },
         { label: "Contingency", value: `${e.contingency_pct}%`, sub: "From gap risk" },
         { label: "Unfilled roles", value: e.unfilled_roles, sub: e.unfilled_roles ? "Hire or contract" : "Every role has a name", tone: e.unfilled_roles ? "gap" : undefined },
       ]} />
       <div className="card p-5">
         <div className="flex flex-wrap items-end gap-3 mb-5">
           <div className="flex-1 min-w-[200px]"><div className="font-bold">Plan</div><div className="text-[12.5px] text-ink-muted">Change the term, onsite share or contingency and everything downstream recalculates.</div></div>
-          <Overrides deal={deal} stage="estimation" current={e.overrides || {}} defaults={{ contract_months: e.contract_months, duration_months: e.duration_months, onsite_ratio: e.onsite_ratio, contingency_pct: e.contingency_pct }} fields={[
-            { key: isMS ? "contract_months" : "duration_months", label: isMS ? "Contract months" : "Duration months" },
+          <Overrides deal={deal} stage="estimation" current={e.overrides || {}} defaults={{ contract_months: isBR ? e.run_months : e.contract_months, duration_months: isBR ? e.build_months : e.duration_months, onsite_ratio: e.onsite_ratio, contingency_pct: e.contingency_pct }} fields={[
+            ...(isBR ? [{ key: "duration_months", label: "Build months" }, { key: "contract_months", label: "Run months" }]
+              : [{ key: isMS ? "contract_months" : "duration_months", label: isMS ? "Contract months" : "Duration months" }]),
             { key: "onsite_ratio", label: "Onsite share (0–1)", step: 0.05 },
             { key: "contingency_pct", label: "Contingency", suffix: "%" },
           ]} />
         </div>
-        <Gantt months={Math.max(1, Math.round(totalWeeks / 4.33))} phases={e.phases.map((ph: any) => {
-          const start = ph.parallel ? e.phases[0].weeks : cursor;
-          if (!ph.parallel) cursor += ph.weeks;
-          return { name: ph.name, detail: ph.detail, start: start / 4.33, end: (start + ph.weeks) / 4.33 };
-        })} />
+        <Gantt months={Math.max(1, Math.round(totalWeeks / 4.33))} phases={e.phases.map((ph: any, i: number) => ({ name: ph.name, detail: ph.detail, start: spans[i].start / 4.33, end: spans[i].end / 4.33 }))} />
       </div>
       <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4">
         <div className="card p-5">
           <div className="font-bold">Team shape</div>
-          <div className="text-[12.5px] text-ink-muted mb-4">Full-time equivalents per role.</div>
+          <div className="text-[12.5px] text-ink-muted mb-4">Full-time equivalents per role{phased ? ", build and run added together" : ""}.</div>
           <TeamBars team={e.team} />
         </div>
         <div className="card p-5">
-          <div className="font-bold">Effort by workstream</div>
-          <div className="text-[12.5px] text-ink-muted mb-4">Person-days to deliver the requirements in each workstream.</div>
+          <div className="font-bold">Requirement effort by workstream</div>
+          <div className="text-[12.5px] text-ink-muted mb-4">
+            Person-days to build what each requirement asks for: {Math.round(e.requirement_effort_days ?? e.workstreams.reduce((a: number, w: any) => a + w.effort_days, 0)).toLocaleString()} in total.
+            The team plan ({Math.round(e.total_person_days).toLocaleString()} person-days) adds project management, architecture and testing{isMS || isBR ? ", plus the run team for the whole service term" : ""}.
+          </div>
           <Bars rows={e.workstreams.map((w: any) => ({ label: w.name, value: w.effort_days, sub: `· ${w.requirements} req`,
             tip: <div><b>{w.name}</b><div>{w.requirements} requirements, {Math.round(w.effort_days)} person-days</div><div className="opacity-70">{Object.entries(w.complexity).map(([k, n]) => `${n} ${String(k).toLowerCase()}`).join(", ")} complexity</div></div> }))}
             format={(v) => `${Math.round(v)} d`} />
@@ -635,10 +666,11 @@ export function EstimationStage({ deal }: P) {
       <div className="card overflow-x-auto">
         <div className="px-5 py-3.5 border-b border-line"><div className="font-bold">Who's on the team</div><div className="text-[12.5px] text-ink-muted">Matched from your skills matrix on role, skills ({e.staffing_skills.slice(0, 4).join(", ")}) and availability. Orange: on another project now.</div></div>
         <table className="w-full min-w-[640px]">
-          <thead><tr><th className="th">Role</th><th className="th text-right">FTE</th><th className="th">Location</th><th className="th">Proposed people</th></tr></thead>
+          <thead><tr>{phased && <th className="th">Phase</th>}<th className="th">Role</th><th className="th text-right">FTE</th><th className="th">Location</th><th className="th">Proposed people</th></tr></thead>
           <tbody>
             {e.team.map((t: any, i: number) => (
               <tr key={i}>
+                {phased && <td className="td text-[13px]">{t.phase}<div className="text-[11.5px] text-ink-faint">{t.months} months</div></td>}
                 <td className="td"><div className="font-semibold text-[13.5px]">{t.role}</div><div className="text-[12px] text-ink-muted">{t.responsibility}</div></td>
                 <td className="td text-right num">{t.fte}</td>
                 <td className="td text-[13px]">{t.location}</td>
@@ -734,7 +766,13 @@ export function PricingStage({ deal }: P) {
         </div>
         <div className="space-y-4">
           <div className="card p-5">
-            <div className="font-bold mb-3">Payment milestones</div>
+            <div className="font-bold mb-1">Payment milestones</div>
+            {p.phase_split && (() => {
+              const sel = p.scenarios.find((x: any) => x.name === (p.selected || "Target")) || p.scenarios[0];
+              const build = (sel.price * p.phase_split.build_pct) / 100;
+              return <div className="text-[12.5px] text-ink-muted mb-3">As the RFP asks: the build is a fixed price of {m(build)} paid by milestone, and the
+                managed service a fixed monthly fee of {m((sel.price - build) / p.phase_split.run_months)} for {p.phase_split.run_months} months.</div>;
+            })()}
             {(() => {
               const sel = p.scenarios.find((x: any) => x.name === (p.selected || "Target")) || p.scenarios[0];
               return <ShareBar fmt={m} parts={p.milestones.map((ms: any, i: number) => ({ label: ms.name, value: (sel.price * ms.pct) / 100, color: ["#0C3D55", "#1A82AE", "#5BA6CC", "#9FC6D9", "#C9DEE9"][i % 5] }))} />;
@@ -751,11 +789,11 @@ export function PricingStage({ deal }: P) {
       <div className="card overflow-x-auto">
         <div className="px-5 py-3.5 border-b border-line font-bold">Cost build-up by role</div>
         <table className="w-full min-w-[640px]">
-          <thead><tr><th className="th">Role</th><th className="th">Location</th><th className="th text-right">Days</th><th className="th text-right">Day rate</th><th className="th text-right">Day cost</th><th className="th text-right">Cost</th></tr></thead>
+          <thead><tr><th className="th">Role</th><th className="th">{p.phase_split ? "Phase · location" : "Location"}</th><th className="th text-right">Days</th><th className="th text-right">Day rate</th><th className="th text-right">Day cost</th><th className="th text-right">Cost</th></tr></thead>
           <tbody>
             {p.lines.map((l: any, i: number) => (
               <tr key={i}>
-                <td className="td text-[13.5px]">{l.role}<div className="text-[11px] text-ink-faint">{l.rate_source}</div></td><td className="td text-[13px]">{l.location}</td>
+                <td className="td text-[13.5px]">{l.role}<div className="text-[11px] text-ink-faint">{l.rate_source}</div></td><td className="td text-[13px]">{l.phase && p.phase_split ? `${l.phase} · ` : ""}{l.location}</td>
                 <td className="td text-right num">{Math.round(l.person_days).toLocaleString()}</td><td className="td text-right num">{m(l.day_rate)}</td>
                 <td className="td text-right num text-ink-muted">{m(l.day_cost)}</td><td className="td text-right num font-semibold">{m(l.cost)}</td>
               </tr>
@@ -832,16 +870,22 @@ export function ProposalStage({ deal }: P) {
           <div className="card p-5">
             <div className="font-bold">Proposal document</div>
             <div className="text-[13px] text-ink-muted mt-1">Written into your Word template: {d.sections} sections and a {d.compliance_rows}-row compliance matrix with page references.</div>
+            <div className="text-[12px] text-ink-muted mt-1">
+              {reqs.length} requirements: {reqs.filter((r) => r.response).length} drafted answers, {reqs.filter((r) => r.match_status === "confirm" && r.category !== "Commercial").length} rules
+              and deliverables acknowledged in the matrix, and {reqs.filter((r) => r.category === "Commercial").length} commercial terms in the appendix.
+            </div>
+            {deal.confidential && <div className="text-[12px] text-ink-muted mt-1">{deal.client_name ? `The document names the client as "${deal.client_name}"; the app and the AI only see "${deal.client_alias || "the Client"}".` : "No real client name was given when the deal was created, so the document says \u201cthe Client\u201d."}</div>}
             <div className="num text-[22px] font-bold mt-3">{money(d.price, d.currency)}</div>
             <div className="text-[12px] text-ink-muted">{d.scenario} pricing scenario</div>
             {edited && <button className="btn-ember w-full mt-4" disabled={rebuild.isPending} onClick={() => rebuild.mutate()}>{rebuild.isPending ? <Spinner /> : <RefreshCw className="h-4 w-4" />} Update document with edits</button>}
             <ProposalDownload dealId={deal.id} />
-            <button className="btn-outline w-full mt-2" onClick={() => download(`/deals/${deal.id}/download/requirements`, "requirements.xlsx").catch((e) => toast("error", e.message))}><Download className="h-4 w-4" /> Compliance matrix .xlsx</button>
+            <button className="btn-outline w-full mt-2" onClick={() => download(`/deals/${deal.id}/download/requirements`, "compliance matrix.xlsx").catch((e) => toast("error", e.message))}><Download className="h-4 w-4" /> Compliance matrix .xlsx</button>
             <button className="btn-ghost w-full mt-2" disabled={regen.isPending} onClick={() => regen.mutate()} title="Re-drafts every answer except the ones your team wrote"><RefreshCw className="h-4 w-4" /> Re-draft with AI</button>
           </div>
           <div className="card p-5 text-[13px]">
             <div className="font-bold text-[14px] mb-2">Where the answers came from</div>
             <ShareBar parts={[["library", "#0C3D55"], ["human", "#F5833A"], ["ai", "#1A82AE"], ["rules", "#9FC6D9"]].map(([k, c]) => ({ label: SRC[k][0], value: counts[k] || 0, color: c }))} />
+            {(counts.rules || 0) > 0 && d.engine === "ai" && <div className="text-[12px] text-ember-600 mt-3">{counts.rules} answer{counts.rules === 1 ? "" : "s"} use the template because the AI couldn't write them (busy or out of quota). Use "Re-draft with AI" to try again; your team's edits are kept.</div>}
             <div className="text-[12px] text-ink-muted mt-3">Approving this stage adds these answers to your library, so the next similar RFP starts from them.</div>
           </div>
         </aside>

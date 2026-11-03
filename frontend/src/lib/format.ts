@@ -21,6 +21,7 @@ export function ago(iso?: string | null): string {
 
 export const ENGAGEMENT: Record<string, string> = {
   managed_services: "Managed services",
+  build_run: "Build + managed service",
   implementation: "Implementation",
   product: "Product + integration",
   consulting: "Advisory",

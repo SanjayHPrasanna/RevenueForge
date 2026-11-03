@@ -56,7 +56,7 @@ export default function SettingsPage() {
           <input type="checkbox" className="h-4 w-4 accent-[#118AC3]" checked={!!s.hide_employee_names} onChange={(e) => setS({ ...s, hide_employee_names: e.target.checked })} disabled={!isAdmin} />
           Show employee codes instead of names everywhere
         </label>
-        <div className="mt-4"><span className="label">About the company (used in proposals)</span><textarea className="input h-24 py-2" value={s.about} onChange={(e) => setS({ ...s, about: e.target.value })} disabled={!isAdmin} /></div>
+        <div className="mt-4"><label className="label" htmlFor="company-about">About the company (used in proposals)</label><textarea id="company-about" className="input h-24 py-2" value={s.about} onChange={(e) => setS({ ...s, about: e.target.value })} disabled={!isAdmin} /></div>
         {isAdmin && <button className="btn-primary mt-4" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending && <Spinner />} Save settings</button>}
       </section>
 
@@ -72,7 +72,7 @@ export default function SettingsPage() {
               <tr key={u.id}>
                 <td className="td"><div className="font-semibold">{u.name}</div><div className="text-[12.5px] text-ink-muted">{u.email}</div></td>
                 <td className="td w-[200px]">
-                  <select className="input h-9" value={u.role} disabled={!isAdmin || u.id === user?.id} onChange={(e) => role.mutate({ id: u.id, body: { role: e.target.value } })}>
+                  <select className="input h-9" aria-label={`Role for ${u.name}`} value={u.role} disabled={!isAdmin || u.id === user?.id} onChange={(e) => role.mutate({ id: u.id, body: { role: e.target.value } })}>
                     {Object.keys(ROLE_HELP).map((r) => <option key={r} value={r} className="capitalize">{r}</option>)}
                   </select>
                 </td>
@@ -171,8 +171,10 @@ function AiEngine({ c }: { c: any }) {
                 <div className="mt-3 grid sm:grid-cols-4 gap-3 text-[12.5px]">
                   <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">Tier</div><div className="font-semibold">{c.llm.paid ? "Paid" : "Free"}</div></div>
                   <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">Rate limit used</div><div className="font-semibold num">{c.llm.rpm}/min</div></div>
-                  <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">AI calls since start</div><div className="font-semibold num">{c.llm.calls}</div></div>
-                  <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">Failed calls</div><div className={`font-semibold num ${c.llm.failures ? "text-fit-gap-ink" : ""}`}>{c.llm.failures}</div></div>
+                  {c.llm.calls != null && <>
+                    <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">AI calls since start</div><div className="font-semibold num">{c.llm.calls}</div></div>
+                    <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">Failed calls</div><div className={`font-semibold num ${c.llm.failures ? "text-fit-gap-ink" : ""}`}>{c.llm.failures}</div></div>
+                  </>}
                 </div>
                 {!c.llm.paid && <div className="mt-3 rounded border border-ember-100 bg-ember-50 px-3 py-2 text-[12.5px] text-ember-600">Free tier: Google may use submitted content to improve its products and reviewers may read it. Don't process confidential client RFPs until the key is on a billed project; then tick "Paid / billed key" below (or set <code>LLM_PAID=true</code> on the server).</div>}
                 {c.llm.last_error && <div className="mt-2 text-[12px] text-fit-gap-ink break-words">Last error: {c.llm.last_error}</div>}
@@ -250,8 +252,10 @@ function AiEngine({ c }: { c: any }) {
   );
 }
 
-/** The company's own AI provider and key: anyone in the company can set it, and it applies to this company only. */
+/** The company's own AI provider and key: company admins set it, and it applies to this company only. */
 function CompanyAi() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const toast = useToast();
   const qc = useQueryClient();
   const { data: cfg } = useQuery({ queryKey: ["company-ai"], queryFn: () => api.get<any>("/company/ai") });
@@ -278,13 +282,13 @@ function CompanyAi() {
   return (
     <section className="card p-5">
       <div className="font-bold">Your company's AI</div>
-      <div className="text-[13px] text-ink-muted mt-0.5">Bring your own provider and key. It applies to your company only: your deals, imports, videos and learning. Anyone in your company can change it.</div>
+      <div className="text-[13px] text-ink-muted mt-0.5">Bring your own provider and key. It applies to your company only: your deals, imports, videos and learning. {isAdmin ? "Only company admins can change it." : "Ask a company admin to change it."}</div>
       <div className="mt-4 grid sm:grid-cols-2 gap-3 max-w-3xl">
         {[["default", "Use the server's default AI", sd?.provider && sd.provider !== "none" ? `Currently ${PROVIDER_LABEL[sd.provider]}${sd.provider === "gemini" && !sd.paid ? " (free key)" : ""}` : "Currently off: rules engine only"],
           ["own", "Use our own key", "Gemini, Claude, OpenAI or Azure OpenAI"]].map(([k, l, d]) => {
           const on = k === "own" ? own : !own;
           return (
-            <button key={k} type="button" onClick={() => setF({ ...f, provider: k === "own" ? (own ? f.provider : "gemini") : "default", api_key: "" })}
+            <button key={k} type="button" disabled={!isAdmin} onClick={() => setF({ ...f, provider: k === "own" ? (own ? f.provider : "gemini") : "default", api_key: "" })}
               className={`text-left rounded-lg border px-4 py-3 transition-colors ${on ? "border-brand-500 bg-brand-50" : "border-line hover:border-brand-200"}`}>
               <div className="flex items-center gap-2 font-semibold text-[14px]"><span className={`h-3.5 w-3.5 rounded-full border-2 ${on ? "border-brand-600 bg-brand-600 shadow-[inset_0_0_0_2px_white]" : "border-ink-faint"}`} />{l}</div>
               <div className="text-[12.5px] text-ink-muted mt-1 pl-[22px]">{d}</div>
@@ -292,7 +296,7 @@ function CompanyAi() {
           );
         })}
       </div>
-      {own && (
+      {own && isAdmin && (
         <div className="grid md:grid-cols-2 gap-4 mt-4">
           <label className="text-[13px]"><span className="label">Provider</span>
             <select className="input" value={f.provider} onChange={(e) => setF({ ...f, provider: e.target.value, api_key: "", model: "" })}>
@@ -322,11 +326,11 @@ function CompanyAi() {
           )}
         </div>
       )}
-      <div className="mt-5 flex flex-wrap items-center gap-3">
+      {isAdmin && <div className="mt-5 flex flex-wrap items-center gap-3">
         <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending && <Spinner />} Save</button>
         <button className="btn-outline" disabled={check.isPending || save.isPending} onClick={() => check.mutate()}>{check.isPending && <Spinner />} Test connection</button>
         {test && <span className={`text-[13px] ${test.ok ? "text-ok" : "text-fit-gap-ink"}`}>{test.message}</span>}
-      </div>
+      </div>}
       <div className="mt-3 text-[12px] text-ink-muted">
         Keys are stored encrypted and never shown again.{cfg.updated_by ? ` Last changed by ${cfg.updated_by}.` : ""} "Test connection" checks the saved settings.
       </div>

@@ -30,7 +30,7 @@ type ChatMessage = {
 function MaahiAvatar({ className = "h-9 w-9" }: { className?: string }) {
   return (
     <span aria-hidden className={`relative inline-block shrink-0 rounded-full bg-brand-50 bg-no-repeat ring-2 ring-white ${className}`}
-      style={{ backgroundImage: "url(/brand/maahi-assistant.png)", backgroundSize: "420% auto", backgroundPosition: "66% 38%" }} />
+      style={{ backgroundImage: "url(/brand/maahi-avatar.webp)", backgroundSize: "cover", backgroundPosition: "center" }} />
   );
 }
 
@@ -39,7 +39,10 @@ function MaahiWelcome({ listening, onSpeak, title, sub }: { listening: boolean; 
     <div className="shrink-0 px-3.5 pt-3">
       <div className="relative isolate aspect-[2.15] overflow-hidden rounded-2xl bg-brand-50 ring-1 ring-black/5">
         <img
-          src="/brand/maahi-assistant.png"
+          src="/brand/maahi-assistant.webp"
+          width={960}
+          height={480}
+          loading="lazy"
           alt="Maahi, your RevenueForge assistant, ready to help with deals, clients, capabilities, and requirements."
           className="maahi-breathe absolute inset-0 z-10 h-full w-full object-cover object-[68%_30%]"
         />
@@ -177,9 +180,11 @@ export default function LandingAssistant({ mode = "public", company }: { mode?: 
       const conversation = history
         .slice(-8)
         .map(({ role, text }) => ({ role, content: text }));
-      const result = await api.post<{ answer: string }>(copy.endpoint, {
-        messages: [...conversation, { role: "user", content: question }],
-      });
+      // The server gives up after about 45 seconds; this guard covers a dropped connection so the chat never spins forever.
+      const result = await Promise.race([
+        api.post<{ answer: string }>(copy.endpoint, { messages: [...conversation, { role: "user", content: question }] }),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new ApiError(504, "Maahi is taking too long to answer. Please try again in a minute.")), 60_000)),
+      ]);
       setMessages((current) => [...current, { role: "assistant", text: result.answer }]);
     } catch (error) {
       const message = error instanceof ApiError
@@ -402,14 +407,15 @@ export default function LandingAssistant({ mode = "public", company }: { mode?: 
           aria-expanded={open}
           aria-controls="landing-assistant-panel"
           onClick={() => setOpen(true)}
-          className="group fixed bottom-5 right-5 z-50 flex h-12 items-center gap-2 rounded-full bg-gradient-to-b from-brand-800 to-brand-950 pl-1.5 pr-4 text-white shadow-[0_12px_30px_-8px_rgba(3,15,23,.55)] ring-1 ring-white/10 transition-all duration-300 ease-apple hover:-translate-y-0.5 hover:shadow-[0_16px_36px_-8px_rgba(3,15,23,.6)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-200"
+          aria-label="Ask Maahi"
+          className="group fixed bottom-4 right-4 sm:bottom-5 sm:right-5 z-50 flex h-12 items-center gap-2 rounded-full bg-gradient-to-b from-brand-800 to-brand-950 pl-1.5 pr-1.5 sm:pr-4 text-white shadow-[0_12px_30px_-8px_rgba(3,15,23,.55)] ring-1 ring-white/10 transition-all duration-300 ease-apple hover:-translate-y-0.5 hover:shadow-[0_16px_36px_-8px_rgba(3,15,23,.6)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-200"
         >
           <span className="relative">
             <MaahiAvatar className="h-9 w-9 ring-white/30" />
             <span aria-hidden className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-ok ring-2 ring-brand-900" />
           </span>
           <MessageCircle className="sr-only" aria-hidden />
-          <span className="text-[13.5px] font-semibold">Ask Maahi</span>
+          <span aria-hidden className="hidden sm:inline text-[13.5px] font-semibold">Ask Maahi</span>
         </button>
       )}
     </>

@@ -5,7 +5,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import BASE_DIR, settings
@@ -15,8 +16,39 @@ from .services import company_ai, llm  # noqa: F401  (company_ai registers the p
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-app = FastAPI(title="RevenueForge API", version="1.0.0", description="AI deal & proposal intelligence")
+# The API reference (/docs, /openapi.json) is only published when API_DOCS=true (e.g. on a developer's machine).
+_docs = settings.api_docs
+app = FastAPI(title="RevenueForge API", version="1.0.0", description="AI deal & proposal intelligence",
+              docs_url="/docs" if _docs else None, redoc_url=None, openapi_url="/openapi.json" if _docs else None)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+# Text files (the app's JavaScript and CSS, JSON) go out compressed: about a third of the size.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+_SECURITY_HEADERS = {
+    "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "camera=(), geolocation=(), microphone=(self)",
+    # Only page-framing and plugin rules: scripts from Google/Microsoft sign-in keep working.
+    "Content-Security-Policy": "frame-ancestors 'self'; object-src 'none'; base-uri 'self'",
+}
+
+
+@app.middleware("http")
+async def _headers(request: Request, call_next):
+    """Security headers on every response, and browser caching for the built web app."""
+    response = await call_next(request)
+    for k, v in _SECURITY_HEADERS.items():
+        response.headers.setdefault(k, v)
+    path = request.url.path
+    if path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"  # file names change on every build
+    elif path.startswith(("/brand/", "/hero/", "/favicon")):
+        response.headers["Cache-Control"] = "public, max-age=86400"
+    elif not path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"  # index.html: always check for a new version
+    return response
 
 
 @app.middleware("http")
@@ -70,7 +102,13 @@ async def _unhandled(request: Request, exc: Exception):
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "llm": llm.status()}
+    """Public liveness check. AI usage and errors are shown to signed-in admins in Settings, not here."""
+    return {"status": "ok"}
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def robots():
+    return PlainTextResponse("User-agent: *\nAllow: /$\nDisallow: /app\nDisallow: /api/\n")
 
 
 app.include_router(auth.router)

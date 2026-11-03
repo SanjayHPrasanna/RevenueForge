@@ -51,6 +51,11 @@ class Settings:
     ms_client_id = os.getenv("MS_CLIENT_ID", "").strip()
     ms_tenant_id = os.getenv("MS_TENANT_ID", "organizations").strip() or "organizations"
     ms_allowed_domains = [d.strip().lower().lstrip("@") for d in os.getenv("MS_ALLOWED_DOMAINS", "").split(",") if d.strip()]
+    # The interactive API reference (/docs, /openapi.json). Off unless API_DOCS=true, so the public site doesn't list every endpoint.
+    api_docs = os.getenv("API_DOCS", "false").lower() in ("1", "true", "yes")
+    # Failed sign-ins allowed per email and per address in LOGIN_WINDOW_MINUTES before sign-in is paused.
+    login_max_failures = int(os.getenv("LOGIN_MAX_FAILURES", "5"))
+    login_window_minutes = int(os.getenv("LOGIN_WINDOW_MINUTES", "15"))
     cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()]
 
     # LLM: gemini | anthropic | openai | azure | none

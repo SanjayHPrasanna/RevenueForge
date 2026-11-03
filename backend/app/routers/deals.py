@@ -92,7 +92,7 @@ async def create_deal(file: UploadFile = File(...), name: str = Form(""), client
     n = ctx.db.scalar(select(func.count()).select_from(Deal).where(Deal.tenant_id == ctx.tenant_id)) or 0
     d = Deal(tenant_id=ctx.tenant_id, name=name.strip() or "Untitled deal", client_name=client_name.strip(),
              client_alias=client_alias.strip() or f"Client {chr(65 + n % 26)}", client_aliases=aliases, confidential=confidential,
-             engagement_type=engagement_type if engagement_type in ("managed_services", "implementation", "product", "consulting") else "",
+             engagement_type=engagement_type if engagement_type in ("managed_services", "build_run", "implementation", "product", "consulting") else "",
              owner_id=ctx.user.id, rfp_document_id=doc.id, status="processing",
              progress={"stage": "requirements", "pct": 0, "message": "Queued"})
     ctx.db.add(d)
@@ -123,7 +123,7 @@ def update_deal(deal_id: str, body: dict, ctx: Ctx = Depends(require_roles("pres
         d.actual_effort_days = float(body["actual_effort_days"] or 0)
     rerun = None
     if "engagement_type" in body and body["engagement_type"] != d.engagement_type:
-        if body["engagement_type"] not in ("managed_services", "implementation", "product", "consulting"):
+        if body["engagement_type"] not in ("managed_services", "build_run", "implementation", "product", "consulting"):
             raise HTTPException(400, "Unknown engagement type.")
         d.engagement_type = body["engagement_type"]
         rerun = "matching"
@@ -479,7 +479,7 @@ def rebuild_proposal(deal_id: str, ctx: Ctx = Depends(require_roles("presales"))
     """Rebuild the Word documents from the current (edited) responses without re-running the AI."""
     d = _deal(ctx, deal_id)
     from ..services import docgen
-    ctxd = pipeline.context(ctx.db, d)
+    ctxd = pipeline.document_context(ctx.db, d)
     st0 = ctx.db.scalar(select(DealStage).where(DealStage.deal_id == d.id, DealStage.stage == "proposal"))
     if st0 and st0.data.get("executive_summary"):
         ctxd["executive_summary"] = st0.data["executive_summary"]
@@ -596,7 +596,7 @@ def download(deal_id: str, what: str, ctx: Ctx = Depends(current_ctx)):
         wb.save(buf)
         buf.seek(0)
         return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                 headers={"Content-Disposition": f'attachment; filename="{safe} - requirements.xlsx"'})
+                                 headers={"Content-Disposition": f'attachment; filename="{safe} - compliance matrix.xlsx"'})
     raise HTTPException(404, "Unknown download.")
 
 

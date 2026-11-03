@@ -46,7 +46,7 @@ Product facts:
 - Each stage is a draft for the appropriate expert to review and approve. Changes update downstream work.
 - Each workspace's company data is isolated. Client-name masking can be enabled per deal; requirements are
   traceable to their RFP source pages.
-- The AI provider can be Gemini, Claude, OpenAI, or Azure OpenAI. Each company can set its own provider and key in Settings.
+- The AI provider can be Gemini, Claude, OpenAI, or Azure OpenAI. A company admin can set the company's own provider and key in Settings.
 - Approved corrections, answer-library entries, and deal outcomes can improve future classifications,
   answers, and estimates.
 - To get started, create a company workspace and add capabilities, a skills matrix, a rate card, and a
@@ -109,14 +109,14 @@ def chat(body: ChatRequest, request: Request):
             max_tokens=500,
             temperature=0.45,
             api_key=key,
-            attempts=3,  # main model, then two lighter stand-ins if Google says it's busy
-            timeout=25,
+            attempts=2,  # main model, then a lighter stand-in if Google says it's busy: about 30 seconds at most
+            timeout=13,
             max_wait=1,
             fast=True,
         )
     except llm.LLMUnavailable as e:
         log.warning("Maahi chat failed: %s", str(e)[:300])
-        raise HTTPException(503, "Maahi couldn't reach the AI service just now. Please try again shortly.")
+        raise HTTPException(503, "Maahi is busy right now (the AI service is overloaded). Please try again in a minute.")
     answer = answer.strip()
     if not answer:
         raise HTTPException(503, "Maahi couldn't create a response just now. Please try again shortly.")
@@ -142,14 +142,14 @@ def workspace_chat(body: ChatRequest, ctx: Ctx = Depends(current_ctx)):
             max_tokens=900,
             temperature=0.2,
             api_key=key,
-            attempts=3,
-            timeout=45,
+            attempts=2,  # at most about 45 seconds, then a clear "try again" instead of a spinner that never ends
+            timeout=20,
             max_wait=1,
             fast=True,
         )
     except llm.LLMUnavailable as e:
         log.warning("Maahi workspace chat failed: %s", str(e)[:300])
-        raise HTTPException(503, "Maahi couldn't reach the AI service just now. Please try again shortly.")
+        raise HTTPException(503, "Maahi is busy right now (the AI service is overloaded). Please try again in a minute.")
     answer = answer.strip()
     if not answer:
         raise HTTPException(503, "Maahi couldn't create a response just now. Please try again shortly.")

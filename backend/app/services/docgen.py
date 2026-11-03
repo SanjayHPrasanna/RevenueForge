@@ -19,9 +19,45 @@ from docx.shared import Pt, RGBColor
 
 from . import llm
 
-ENG_LABEL = {"managed_services": "outcome-based managed service", "product": "product-led solution with full system integration",
+ENG_LABEL = {"managed_services": "outcome-based managed service", "build_run": "platform build and migration followed by an outcome-based managed service",
+             "product": "product-led solution with full system integration",
              "consulting": "enterprise architecture advisory engagement", "implementation": "design-and-build implementation"}
-COMPLIANCE = {"strong": "Fully compliant", "partial": "Compliant (with approach)", "gap": "Partially compliant – mitigation", "confirm": "Noted & accepted"}
+COMPLIANCE = {"strong": "Fully compliant", "partial": "Compliant (with approach)", "gap": "Partially compliant – mitigation", "confirm": "Acknowledged"}
+
+
+def _is_standard_name(t: str) -> bool:
+    from .matching import _is_standard
+    return _is_standard(t)
+
+
+def compliance_label(r: dict) -> str:
+    """The compliance column. "Fully compliant" needs evidence: a held certificate, the AI check, a reviewer, or the rules
+    engine's direct match. A match the AI was meant to check but couldn't is never presented as fully compliant."""
+    st = r.get("match_status")
+    m = r.get("match") or {}
+    if st == "strong" and m.get("unverified") and not r.get("verified"):
+        return COMPLIANCE["partial"]
+    if st == "confirm" and r.get("category") == "Compliance" and r.get("subcategory") != "Submission":
+        return "Will comply"
+    return COMPLIANCE.get(st, "")
+
+
+# "The bidder shall provide X" -> "We will provide X." Used when no AI-written answer is available.
+_SUBJ_RE = re.compile(r"^\s*(?:the\s+)?(bidder|tenderer|supplier|contractor|vendor|service provider|successful bidder|proposer|respondent|"
+                      r"solution|platform|system|service)s?\s+(?:shall|must|should|will|is required to|are required to)\s+(?:be able to\s+)?(.+?)\.?\s*$", re.I)
+
+
+def _commit_sentence(text: str) -> str:
+    m = _SUBJ_RE.match(text.strip())
+    if not m:
+        return ""
+    who, rest = m.group(1).lower(), m.group(2).strip().rstrip(".")
+    rest = re.sub(r"\b(its|their)\b", "our", rest)
+    if len(rest) > 220:
+        return ""
+    if who in ("solution", "platform", "system", "service"):
+        return f"Our {who} will {rest}."
+    return f"We will {rest}."
 
 
 def money(v: float, ccy: str) -> str:
@@ -40,12 +76,27 @@ def response_text(r: dict, company: str) -> str:
     certs = [e["name"] for e in ev if e["type"] == "Certification"]
     st = r.get("match_status")
     if st == "confirm":
-        return f"{company} notes and accepts this condition."
+        dm = re.match(r"Deliverable:\s*(.+?)(?:\s+[—–-]\s+(.+))?$", r.get("text", ""))
+        if dm:
+            due = (dm.group(2) or "").strip()
+            return f"We will deliver the {dm.group(1).strip().rstrip('.')}" + (f" ({due.lower() if due.lower().startswith(('each', 'before')) else 'by ' + due})." if due else ".")
+        if r.get("subcategory") in ("Submission", "Evaluation & Award") or re.search(r"\bin (their|the|your) (response|proposal)\b", r.get("text", ""), re.I):
+            return f"{company} acknowledges this and has prepared the response accordingly."
+        if r.get("category") == "Commercial":
+            return f"{company} acknowledges this condition; our position is confirmed in the commercial response."
+        commit = _commit_sentence(r.get("text", ""))
+        return (commit + " " if commit else "") + "We will comply with this obligation and confirm the specific controls with your security and legal teams during mobilisation."
     parts = []
+    missing_std = [t for t in m.get("technologies_missing", []) if _is_standard_name(t)]
+    # never "commit" to holding a certificate we don't have
+    commit = "" if missing_std or certs else _commit_sentence(r.get("text", ""))
+    if commit:
+        parts.append(commit)
     if certs:
         parts.append(f"{company} holds {', '.join(certs)}.")
-    if caps:
-        parts.append(f"Delivered through our {caps[0]} capability" + (f", accelerated by {acc[0]}" if acc else "") + ".")
+    if caps and not (missing_std and st == "gap"):  # a missing certificate isn't "delivered through" a capability
+        lead = "This is delivered through" if commit else "Delivered through"
+        parts.append(f"{lead} our {caps[0]} capability" + (f", accelerated by {acc[0]}" if acc else "") + ".")
     if m.get("people_count"):
         parts.append(f"{m['people_count']} engineers with {', '.join(m.get('technologies_have', [])[:3])} skills are available to the programme.")
     if cs:
@@ -57,7 +108,9 @@ def response_text(r: dict, company: str) -> str:
             "Partner": f"Delivered together with our specialist {missing} partner, with {company} as prime contractor and integrator.",
             "Upskill": f"Our engineers are completing {missing} certification ahead of mobilisation, backed by our existing integration practice.",
             "Hire": f"Dedicated {missing} specialists will join the team before mobilisation.",
-            "Certify": f"{company} is progressing {missing} certification; we will share the certification plan and interim controls.",
+            "Certify": (f"{company} does not currently hold {', '.join(missing_std) or missing}. We operate certified controls"
+                        + (f" ({', '.join(c['name'] for c in m.get('held_certificates', [])[:2])})" if m.get("held_certificates") else "")
+                        + " and will provide independent assurance evidence; we ask you to confirm whether this is mandatory for award."),
             "Define method": f"{company} will apply its standard delivery method for this, detailed in Section 4 and confirmed with you during mobilisation.",
             "Build": f"{company} will design and validate a dedicated solution component for this requirement during the design phase.",
         }.get(o["type"])
@@ -87,11 +140,16 @@ def ai_responses(reqs: list[dict], company: dict, client: str, guidance: str = "
                   "specific, first person plural (we). Mention the cited capability, reference project or certification by name. For gaps, state "
                   "the approach positively without admitting weakness and without inventing facts. JSON array: "
                   '[{"i": index, "response": "..."}]' + guidance)
-        try:
-            res = llm.complete_json("You are an expert bid writer. Use only the facts provided. Never invent clients, numbers, certifications or products.",
-                                    prompt, max_tokens=9000)
-        except Exception:
-            break
+        res = None
+        for _ in range(2):  # one retry, then move on: a failed batch keeps the rules answer and later batches still run
+            try:
+                res = llm.complete_json("You are an expert bid writer. Use only the facts provided. Never invent clients, numbers, certifications or products.",
+                                        prompt, max_tokens=9000)
+                break
+            except Exception:
+                res = None
+        if res is None:
+            continue
         if isinstance(res, dict):
             res = next((v for v in res.values() if isinstance(v, list)), [])
         for it in res if isinstance(res, list) else []:
@@ -117,22 +175,35 @@ def executive_summary(ctx: dict) -> str:
                 "client": d["client_display"], "rfp_title": d["name"], "engagement": ENG_LABEL.get(d["engagement_type"], ""),
                 "company": company["name"], "company_about": company.get("about", ""), "requirements": len(ctx["requirements"]),
                 "technical_requirements": len(tech), "fully_met": counts.get("strong", 0), "met_with_approach": counts.get("partial", 0),
-                "mitigated": counts.get("gap", 0), "team_size": est["headcount"], "duration_months": est["contract_months"],
+                "gaps_closed_by_mitigation_plan": counts.get("gap", 0), "conditions_and_submission_items_acknowledged": counts.get("confirm", 0),
+                "team_size": est["headcount"], "duration_months": est["contract_months"],
+                "build_months": est.get("build_months") if d["engagement_type"] == "build_run" else None,
+                "managed_service_months": est.get("run_months"),
+                "pricing_structure": [m["name"] for m in pr.get("milestones", [])][:8],
                 "price": money(rfp_price, pr["rfp_currency"]), "references": cs_txt, "architecture": ctx["architecture"]["summary"],
                 "evaluation_criteria": [e["criterion"] for e in ctx["meta"].get("evaluation_criteria", [])],
             }
-            return llm.complete("You write crisp, factual executive summaries for enterprise proposals. Use only the facts given. 3 short paragraphs, no headings, no bullet points.",
+            return llm.complete("You write crisp, factual executive summaries for enterprise proposals. Use only the facts given. 3 short paragraphs, "
+                                "no headings, no bullet points. Don't mention counts that are zero, and don't describe the company as serving "
+                                "industries that aren't in the facts.",
                                 f"Facts (JSON): {facts}", max_tokens=900).strip()
         except Exception:
             pass
     p1 = (f"{d['client_display']} is seeking a partner for {d['name']}. {company['name']} proposes {_a(ENG_LABEL.get(d['engagement_type'], 'engagement'))} "
           f"that answers all {len(ctx['requirements'])} requirements identified in the RFP, including {len(tech)} functional and non-functional requirements.")
-    p2 = (f"{counts.get('strong', 0)} requirements are met by proven, in-house capabilities and {counts.get('partial', 0)} by extending them; "
-          f"the remaining {counts.get('gap', 0)} are covered by the mitigation plan in this proposal. "
-          + (f"Relevant references include {cs_txt}. " if cs_txt else "")
-          + ctx["architecture"]["summary"])
-    p3 = (f"A {est['headcount']}-person team, led by an engagement manager accountable for outcomes, will deliver over {est['contract_months']} months. "
-          f"Our commercial offer is {money(rfp_price, pr['rfp_currency'])}, with payments linked to accepted milestones.")
+    bits = [f"{counts.get('strong', 0)} requirements are met by proven, in-house capabilities"]
+    if counts.get("partial"):
+        bits.append(f"{counts['partial']} by extending them")
+    p2 = "; ".join(bits) + (f", and the remaining {counts['gap']} are covered by the mitigation plan in this proposal. " if counts.get("gap") else ". ") \
+        + (f"Relevant references include {cs_txt}. " if cs_txt else "") + ctx["architecture"]["summary"]
+    if d["engagement_type"] == "build_run" and est.get("build_months"):
+        when = f"build and migrate the platform in {est['build_months']} months and then run it for {est.get('run_months')} months"
+    else:
+        when = f"deliver over {est['contract_months']} months"
+    pay = ("with the build priced by milestone and the managed service as a fixed monthly fee" if pr.get("phase_split")
+           else "with payments linked to accepted milestones")
+    p3 = (f"A {est['headcount']}-person team, led by an engagement manager accountable for outcomes, will {when}. "
+          f"Our commercial offer is {money(rfp_price, pr['rfp_currency'])}, {pay}.")
     return "\n\n".join([p1, p2, p3])
 
 
@@ -399,9 +470,10 @@ class Content:
         g, est = self.g, self.est
         w.table(["At a glance", ""], [
             ["Engagement model", ENG_LABEL.get(self.d["engagement_type"], self.d["engagement_type"]).capitalize()],
-            ["Requirements addressed", f"{len(self.reqs)} ({g['counts'].get('strong', 0)} fully met, {g['counts'].get('partial', 0)} with approach, {g['counts'].get('gap', 0)} mitigated)"],
-            ["Team", f"{est['headcount']} people ({est['fte']} FTE), {round(est['onsite_ratio'] * 100)}% onsite"],
-            ["Duration", f"{est['contract_months']} months"],
+            ["Requirements addressed", _req_breakdown(len(self.reqs), g.get("counts", {}))],
+            ["Team", f"{est['headcount']} people ({est['fte']} FTE at peak), {round(est.get('onsite_share', est['onsite_ratio']) * 100)}% onsite"],
+            ["Duration", (f"{est['build_months']}-month build, then a {est['run_months']}-month managed service"
+                          if self.d["engagement_type"] == "build_run" and est.get("build_months") else f"{est['contract_months']} months")],
             ["Commercial offer", money(self.price, self.ccy)],
         ], widths=[5.0, 11.7])
 
@@ -415,10 +487,16 @@ class Content:
             by_cat[r["category"]] = by_cat.get(r["category"], 0) + 1
         w.p(f"We analysed the {self.d['doc_type']} in full and identified {len(self.reqs)} requirements: "
             + ", ".join(f"{v} {k.lower()}" for k, v in by_cat.items()) + ". Each one is traced to its page in the source document in the compliance matrix.")
-        key = [r for r in self.reqs if r["category"] in ("Functional", "Non-functional") and r.get("priority") == "Mandatory"][:8]
+        ws = self.ctx["meta"].get("workstreams") or []
+        if ws:
+            w.p("The scope covers these workstreams, each answered in this proposal:")
+            w.table(["Workstream", "Summary"], [[x["name"], x.get("summary", "")] for x in ws], widths=[5.0, 11.7])
+        objectives = [o for o in self.ctx["meta"].get("objectives") or [] if not PROCESS_SENTENCE_RE.search(o)]
+        key = objectives[:8] or [r["text"] for r in self.reqs if r["category"] in ("Functional", "Non-functional") and r.get("priority") == "Mandatory"
+                                 and not PROCESS_SENTENCE_RE.search(r["text"])][:8]
         if key:
             w.p("The outcomes we will deliver include:")
-            w.bullets([_clip(r["text"], 220) for r in key])
+            w.bullets([_clip(t, 220) for t in key])
         ev = self.ctx["meta"].get("evaluation_criteria", [])
         if ev:
             w.p("How our response maps to your evaluation criteria:")
@@ -441,10 +519,12 @@ class Content:
 
     def differentiators(self, w):
         g = self.g
-        items = [f"{g['counts'].get('strong', 0) + g['counts'].get('partial', 0)} of the {len(self.reqs)} requirements are met by capabilities we deliver today."]
+        tech = [r for r in self.reqs if r.get("match_status") in ("strong", "partial", "gap")]
+        items = [f"{g['counts'].get('strong', 0) + g['counts'].get('partial', 0)} of the {len(tech)} technical and service requirements are met by capabilities we deliver today."]
         cases = self.ctx.get("case_studies", [])
         if cases:
-            items.append("Proven on comparable work: " + "; ".join(c["title"] for c in cases[:3]) + ".")
+            same = [c for c in cases if self.d.get("industry") and self.d["industry"].lower() in (c.get("industry") or "").lower()]
+            items.append(("Proven in your industry: " if same else "Proven on comparable integration programmes: ") + "; ".join(c["title"] for c in cases[:3]) + ".")
         if self.est.get("accelerators"):
             items.append("Reusable accelerators that cut effort and risk: " + ", ".join(a["name"] for a in self.est["accelerators"]) + ".")
         certs = self.ctx.get("certifications", [])
@@ -465,14 +545,20 @@ class Content:
                    "Change, release and configuration management aligned with the client's change board and quality standards."])
 
     def operating_model(self, w):
-        w.p(f"A single team of {self.est['headcount']} people ({self.est['fte']} FTE), led by an accountable engagement manager:")
+        w.p(f"A single team of {self.est['headcount']} people ({self.est['fte']} FTE at peak), led by an accountable engagement manager:")
         self.team(w)
         self.governance(w)
 
     def team(self, w):
-        w.table(["Role", "FTE", "Location", "Responsibility", "Proposed people"], widths=[3.4, 1.1, 1.8, 6.0, 4.4], rows=[
-            [t["role"], t["fte"], t["location"], t["responsibility"],
-             ", ".join(p["code"] for p in t["assigned"]) + (f" (+{t['unfilled']} to hire)" if t["unfilled"] else "")] for t in self.est["team"]])
+        phased = len({t.get("phase") for t in self.est["team"]}) > 1
+        def people(t):
+            return ", ".join(p["code"] for p in t["assigned"]) + (f" (+{t['unfilled']} to hire)" if t["unfilled"] else "")
+        if phased:
+            w.table(["Phase", "Role", "FTE", "Location", "Responsibility", "Proposed people"], widths=[1.6, 3.0, 1.0, 1.7, 5.4, 4.0], rows=[
+                [t.get("phase", ""), t["role"], t["fte"], t["location"], t["responsibility"], people(t)] for t in self.est["team"]])
+        else:
+            w.table(["Role", "FTE", "Location", "Responsibility", "Proposed people"], widths=[3.4, 1.1, 1.8, 6.0, 4.4], rows=[
+                [t["role"], t["fte"], t["location"], t["responsibility"], people(t)] for t in self.est["team"]])
 
     def security(self, w):
         sec = [r for r in self.reqs if r["category"] == "Compliance" or re.search(r"secur|privacy|encrypt|identity|audit", r.get("subcategory", "") + " " + r["text"], re.I)]
@@ -498,8 +584,19 @@ class Content:
 
     def commercial(self, w):
         pr, est = self.pr, self.est
-        w.p(f"Our offer for the full scope is {money(self.price, self.ccy)}" + (f" ({money(self.sc['price'], pr['currency'])})" if self.ccy != pr["currency"] else "")
-            + f" for {est['contract_months']} months, inclusive of the team, governance and transition.")
+        ps = pr.get("phase_split")
+        if ps:
+            build = self.price * ps["build_pct"] / 100
+            run = self.price - build
+            w.p(f"Our offer for the full scope is {money(self.price, self.ccy)}" + (f" ({money(self.sc['price'], pr['currency'])})" if self.ccy != pr["currency"] else "")
+                + ", priced as you asked:")
+            w.bullets([f"Platform build and migration: {money(build, self.ccy)} fixed price, paid against the milestones below"
+                       + (f" over {ps['build_months']} months." if ps.get("build_months") else "."),
+                       f"Managed service: a fixed monthly fee of {money(run / ps['run_months'], self.ccy)} for {ps['run_months']} months "
+                       f"({money(run, self.ccy)} in total)."])
+        else:
+            w.p(f"Our offer for the full scope is {money(self.price, self.ccy)}" + (f" ({money(self.sc['price'], pr['currency'])})" if self.ccy != pr["currency"] else "")
+                + f" for {est['contract_months']} months, inclusive of the team, governance and transition.")
         w.table(["Milestone", "Share", "Amount"], [[m["name"], f"{m['pct']}%", money(self.price * m["pct"] / 100, self.ccy)] for m in pr["milestones"]],
                 widths=[9.7, 2.5, 4.5])
         if pr.get("partner_note"):
@@ -538,11 +635,12 @@ class Content:
                 w.p(meta_line, italic=True)
             if c.get("summary"):
                 w.p(c["summary"])
-            if c.get("outcomes"):
-                w.bullets(c["outcomes"][:4])
+            outs = [o.strip(" .;,") for o in c.get("outcomes") or [] if o and o.strip(" .;,")]
+            if outs:
+                w.bullets([o[:1].upper() + o[1:] for o in outs[:4]])
 
     def compliance(self, w):
-        rows = [[r.get("source_ref") or r["code"], _clip(r["text"], 300), f"p.{r['page']}", COMPLIANCE.get(r.get("match_status"), ""),
+        rows = [[r.get("source_ref") or r["code"], _clip(r["text"], 300), f"p.{r['page']}", compliance_label(r),
                  _clip(r.get("response") or response_text(r, self.cname), 700)] for r in self.reqs if r["category"] != "Commercial"]
         self.compliance_rows = len(rows)
         w.table(["Ref", "Requirement", "Source", "Compliance", "Our response"], rows, widths=[1.6, 6.0, 1.1, 2.2, 5.8], font=7.5)
@@ -555,21 +653,91 @@ class Content:
             w.bullets(oos)
 
     def risks(self, w):
-        risks = [r for r in self.reqs if r.get("gap", {}).get("risk") in ("High", "Medium") and r["gap"].get("options")][:15]
-        if risks:
-            w.table(["Ref", "Risk", "Level", "Mitigation"], [[_ref(r), _clip(r["text"], 200), r["gap"]["risk"], _clip(r["gap"]["options"][0]["type"] + ": " + r["gap"]["options"][0]["detail"], 260)]
-                                                             for r in risks], widths=[1.8, 7.0, 1.6, 6.3])
-        else:
-            w.p("No material delivery risks were identified against the requirements.")
+        risks = [r for r in self.reqs if r.get("gap", {}).get("risk") in ("High", "Medium") and r["gap"].get("options")
+                 and r["gap"]["options"][0]["type"] != "Strengthen evidence"][:15]  # thin evidence is our homework, not a client risk
+        rows = [[_ref(r), _clip(r["text"], 200), r["gap"]["risk"], _clip(client_mitigation(r, self.cname), 260)] for r in risks]
+        rows += [["Delivery", risk, level, mit] for risk, level, mit in delivery_risks(self.d["engagement_type"], self.ctx["meta"], self.est)]
+        w.table(["Ref", "Risk", "Level", "Mitigation"], rows, widths=[1.8, 7.0, 1.6, 6.3])
 
     def commercial_conditions(self, w):
         commercial = [r for r in self.reqs if r["category"] == "Commercial"]
         if commercial:
-            w.table(["Ref", "Condition", "Source", "Position"], [[r.get("source_ref") or r["code"], _clip(r["text"], 300), f"p.{r['page']}", "Accepted"] for r in commercial],
-                    widths=[1.8, 11.0, 1.4, 2.5], font=7.5)
+            w.table(["Ref", "Condition", "Source", "Position"], [[r.get("source_ref") or r["code"], _clip(r["text"], 300), f"p.{r['page']}",
+                                                                 condition_position(r, self.pr)] for r in commercial],
+                    widths=[1.8, 10.0, 1.4, 3.5], font=7.5)
 
     def appendix(self, w):
         self.commercial_conditions(w)
+
+
+PROCESS_SENTENCE_RE = re.compile(r"\b(bidders?|tenderers?|proposers?|respondents?)\s+(shall|must|should)\s+(address|submit|include|describe|"
+                                 r"provide (?:details|a description)|respond|state|list)\b|\bin their (response|proposal)\b", re.I)
+
+
+def client_mitigation(r: dict, company: str) -> str:
+    """How a gap is closed, worded for the client (the internal plan stays in the app and the handoff)."""
+    o = r["gap"]["options"][0]
+    if o.get("ai"):
+        return o["detail"]
+    missing = ", ".join((r.get("match") or {}).get("technologies_missing", [])[:2]) or "this area"
+    return {
+        "Partner": f"Delivered with a specialist {missing} partner under {company}'s prime contract.",
+        "Upskill": f"Engineers from our existing practice complete {missing} training before mobilisation.",
+        "Hire": f"Specialists in {missing} join the team before mobilisation.",
+        "Certify": f"Independent assurance for {missing} is planned; interim controls are shared during mobilisation.",
+        "Define method": "Our standard delivery method is applied and confirmed with you during mobilisation.",
+        "Build": "A dedicated solution component is designed during the design phase and validated with our architects.",
+    }.get(o["type"], o["detail"])
+
+
+def _req_breakdown(total: int, counts: dict) -> str:
+    parts = [f"{counts.get('strong', 0)} fully met"]
+    if counts.get("partial"):
+        parts.append(f"{counts['partial']} with an approach")
+    if counts.get("gap"):
+        parts.append(f"{counts['gap']} with a mitigation plan")
+    if counts.get("confirm"):
+        parts.append(f"{counts['confirm']} conditions and submission rules acknowledged")
+    return f"{total}: " + ", ".join(parts)
+
+
+def condition_position(r: dict, pr: dict) -> str:
+    """Our position on a commercial condition. Only what our offer actually does is stated as complied."""
+    t = r.get("text", "").lower()
+    sub = r.get("subcategory", "")
+    if sub == "Evaluation & Award":
+        return "Addressed in this proposal"
+    if sub == "Submission":
+        return "Complied"
+    if re.search(r"price|pric", t) and re.search(r"milestone|monthly", t):
+        ps = pr.get("phase_split")
+        want_ms, want_monthly = "milestone" in t, "monthly" in t
+        has_ms = any("Build:" in m["name"] or not m.get("monthly") for m in pr.get("milestones", []))
+        has_monthly = any(m.get("monthly") for m in pr.get("milestones", []))
+        if (not want_ms or has_ms) and (not want_monthly or has_monthly) and (ps or not (want_ms and want_monthly)):
+            return "Complied: see the commercial summary"
+        return "To confirm: our pricing structure differs"
+    if re.search(r"currency|dollars|quoted in|exclusive of|inclusive of", t):
+        return "Complied"
+    return "Accepted, subject to contract"
+
+
+def delivery_risks(eng: str, meta: dict, est: dict) -> list[tuple[str, str, str]]:
+    """Standard risks for the kind of engagement, so the register is never just the requirement gaps."""
+    out = []
+    if eng in ("build_run", "implementation"):
+        out.append(("Migration cut-over disrupts live services.", "Medium",
+                    "Wave-based migration with parallel running, rehearsed rollback and agreed cut-over windows."))
+        if est.get("build_months"):
+            out.append((f"The {est['build_months']}-month timeline slips because of client dependencies (environments, test data, SMEs).", "Medium",
+                        "Dependencies and dates agreed at mobilisation, tracked weekly and escalated through the steering committee."))
+    if eng in ("build_run", "managed_services"):
+        out.append(("Service levels missed in the first months of the run phase.", "Medium",
+                    "Hypercare before service start, runbooks validated in rehearsal, and early-life support from the build team."))
+    if est.get("unfilled_roles"):
+        out.append((f"{est['unfilled_roles']} role(s) still to be filled before mobilisation.", "Medium",
+                    "Recruitment starts at contract award, with named backups from the bench."))
+    return out
 
 
 def _ref(r: dict) -> str:
@@ -699,10 +867,47 @@ def build_proposal(ctx: dict, template_bytes: bytes | None) -> tuple[bytes, dict
         if mode == "marker":
             _remove(marker._p)
         sections = sec.n
+    if ctx.get("unmask"):
+        unmask_document(doc, *ctx["unmask"])
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue(), {"executive_summary": c.summary, "sections": sections, "compliance_rows": c.compliance_rows, "scenario": c.sc["name"],
                             "price": round(c.price, 2), "currency": c.ccy, "template_mode": mode}
+
+
+def unmask_document(doc, alias: str, real: str) -> None:
+    """Put the client's real name back into a finished document (AI prompts and the app only ever saw the alias)."""
+    if not alias or alias == real:
+        return
+    rx = re.compile(re.escape(alias))
+
+    def fix(paragraphs):
+        for p in paragraphs:
+            if alias not in p.text:
+                continue
+            for run in p.runs:
+                if alias in run.text:
+                    run.text = rx.sub(real, run.text)
+            if alias in p.text and p.runs:  # the alias was split across runs
+                full = rx.sub(real, p.text)
+                p.runs[0].text = full
+                for run in p.runs[1:]:
+                    run.text = ""
+
+    def walk(container):
+        fix(container.paragraphs)
+        for t in container.tables:
+            for row in t.rows:
+                for cell in row.cells:
+                    walk(cell)
+
+    walk(doc)
+    for sec in doc.sections:
+        for part in (sec.header, sec.footer, sec.first_page_header, sec.first_page_footer):
+            try:
+                walk(part)
+            except Exception:
+                continue
 
 
 def _a(phrase: str) -> str:
@@ -748,19 +953,23 @@ def build_handoff_data(ctx: dict) -> dict:
     team = _team_rows([{"role": t["role"], "fte": t["fte"], "location": t["location"], "people": [p["code"] for p in t["assigned"]],
                         "unfilled": t["unfilled"], "responsibility": t.get("responsibility", "")} for t in est["team"]])
     open_items = [f"Hire or contract {t['unfilled']} × {t['role']} ({t['location'].lower()}) before mobilisation." for t in team if t["unfilled"]]
-    busy = sorted({(p["code"], p["role"]) for t in est["team"] for p in t["assigned"] if p["status"] != "Available"})
-    open_items += [f"Release {code} ({role}) from their current assignment." for code, role in busy]
+    busy = sorted({(p["code"], t["role"]) for t in est["team"] for p in t["assigned"] if p["status"] != "Available"})
+    open_items += [f"Release {code} from their current assignment to take the {role} role." for code, role in busy]
     for t in g.get("top_missing", [])[:6]:
         open_items.append(f"{t['recommendation']}: {t['technology']} (affects {_plural(t['requirements'], 'requirement')}).")
-    confirm = [r for r in reqs if r.get("match_status") == "confirm" and r["category"] == "Commercial"][:12]
+    confirm = [r for r in reqs if r.get("match_status") == "confirm" and r["category"] == "Commercial"
+               and r.get("subcategory") not in ("Evaluation & Award", "Submission")][:12]
     unfilled = sum(t["unfilled"] for t in team)
     return {
         "summary": f"{ctx['deal']['name']} for {ctx['deal']['client_display']}: {ENG_LABEL.get(ctx['deal']['engagement_type'], 'engagement')}, "
                    f"{est['contract_months']} months, {est['headcount']} people, contract value {money(sc['price'] * pr['fx_to_rfp'], ccy)}.",
         "facts": [["Client", ctx["deal"]["client_display"]], ["Engagement", ENG_LABEL.get(ctx["deal"]["engagement_type"], "").capitalize()],
-                  ["Term", f"{est['contract_months']} months"], ["Team", f"{est['headcount']} people, {est['fte']} FTE" + (f", {unfilled} still to hire" if unfilled else "")],
+                  ["Term", (f"{est['build_months']}-month build, then {est['run_months']} months of managed service"
+                            if ctx["deal"]["engagement_type"] == "build_run" and est.get("build_months") else f"{est['contract_months']} months")],
+                  ["Team", f"{est['headcount']} people, {est['fte']} FTE at peak" + (f", {unfilled} still to hire" if unfilled else "")],
                   ["Contract value", money(sc["price"] * pr["fx_to_rfp"], ccy) + f" ({sc['name'].lower()} price, {sc['margin_pct']}% margin)"],
-                  ["Requirements", f"{len(reqs)}: {g['counts'].get('strong', 0)} strong, {g['counts'].get('partial', 0)} partial, {g['counts'].get('gap', 0)} gaps"]],
+                  ["Requirements", f"{len(reqs)}: {g['counts'].get('strong', 0)} strong, {g['counts'].get('partial', 0)} partial, {g['counts'].get('gap', 0)} gaps, "
+                                   f"{g['counts'].get('confirm', 0)} conditions to honour"]],
         "scope": scope,
         "out_of_scope": ctx["meta"].get("out_of_scope", []),
         "deliverables": [_split_deliverable(x) for x in ctx["meta"].get("deliverables", [])],
@@ -831,6 +1040,8 @@ def build_handoff_docx(ctx: dict, data: dict, template_bytes: bytes | None) -> b
     if data["open_items"]:
         sec("Open items before mobilisation"); w.bullets(data["open_items"])
     sec("First 30 days"); w.bullets(data["first_30_days"])
+    if ctx.get("unmask"):
+        unmask_document(doc, *ctx["unmask"])
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()

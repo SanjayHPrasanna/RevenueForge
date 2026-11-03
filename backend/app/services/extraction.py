@@ -90,6 +90,8 @@ def rules_extract(doc: ParsedDocument) -> tuple[list[dict], dict]:
     deliverables: list[str] = []
     evaluation: list[dict] = []
     slas: list[str] = []
+    workstreams: list[dict] = []
+    objectives: list[str] = []
     header: list[str] | None = None
 
     def add(text: str, b: Block, ref: str = "", kind_hint: str = "", prio: str = ""):
@@ -130,10 +132,16 @@ def rules_extract(doc: ParsedDocument) -> tuple[list[dict], dict]:
         skip_section = bool(K.SKIP_SECTION_RE.search(sec))
         in_req = bool(REQ_SECTION_RE.search(sec)) and not skip_section
 
+        if b.kind in ("bullet", "para") and re.search(r"\bobjectives?\b|\bgoals?\b|\boutcomes\b", sec, re.I) and 12 < len(b.text) < 300:
+            objectives.append(re.sub(r"\s+", " ", b.text).strip(" -–•"))
         if b.kind == "table_row":
             if b.ref == "header":
                 header = [c.strip() for c in b.text.split("|")]
                 continue
+            if header and re.match(r"^(workstreams?|work packages?|lots?|scope areas?)$", header[0], re.I):
+                cells = [c.strip() for c in b.text.split("|")]
+                if cells and cells[0]:
+                    workstreams.append({"name": cells[0][:120], "summary": " ".join(cells[1:])[:300]})
             if DATE_ONLY_RE.match(b.text) or re.fullmatch(r"total\s*\|?\s*100\s?%", b.text.strip(), re.I):
                 continue
             text = _table_row_text(b, header)
@@ -182,7 +190,8 @@ def rules_extract(doc: ParsedDocument) -> tuple[list[dict], dict]:
                 elif in_req and len(s) < 90 and not s.endswith(":") and K.ACTION_START_RE.search(s):
                     add(s, b)  # short spec items rendered as paragraphs
 
-    meta = {"out_of_scope": out_of_scope[:40], "deliverables": deliverables[:40], "evaluation_criteria": evaluation, "slas": slas[:40]}
+    meta = {"out_of_scope": out_of_scope[:40], "deliverables": deliverables[:40], "evaluation_criteria": evaluation, "slas": slas[:40],
+            "workstreams": workstreams[:12], "objectives": objectives[:12]}
     return reqs, meta
 
 
@@ -197,8 +206,10 @@ LLM_SYSTEM = (
 SUBCATS = list(K.SUBCATEGORIES.keys())
 
 
-def llm_extract(doc: ParsedDocument, mask_fn=lambda x: x, guidance: str = "", progress=None) -> list[dict]:
-    """AI extraction in batches of blocks. Each requirement keeps the id of the block it came from (traceability)."""
+def llm_extract(doc: ParsedDocument, mask_fn=lambda x: x, guidance: str = "", progress=None, failed: list | None = None) -> list[dict]:
+    """AI extraction in batches of blocks. Each requirement keeps the id of the block it came from (traceability).
+
+    failed: if given, receives the ids of blocks in parts the AI couldn't read, so the rules engine can fill them in."""
     blocks = [b for b in doc.blocks if b.kind != "heading" and b.ref != "header"]
     out: list[dict] = []
     by_idx = {b.idx: b for b in doc.blocks}
@@ -220,10 +231,18 @@ def llm_extract(doc: ParsedDocument, mask_fn=lambda x: x, guidance: str = "", pr
             "submission rules; Commercial = price, payment, bonds, insurance, contract terms, evaluation and award. "
             "Return [] if the blocks contain no requirements." + guidance
         )
-        try:
-            items = llm.complete_json(LLM_SYSTEM, prompt, max_tokens=12000)
-        except Exception:
+        items = None
+        for attempt in range(2):  # one retry per part before falling back to the rules engine for it
+            try:
+                items = llm.complete_json(LLM_SYSTEM, prompt, max_tokens=12000)
+                break
+            except Exception:
+                if progress and attempt == 0:
+                    progress(f"AI reading the RFP: retrying part {n} of {len(batches)}")
+        if items is None:
             failures += 1
+            if failed is not None:
+                failed.extend(b.idx for b in chunk)
             if failures >= 2 and not out:
                 return []
             continue
@@ -316,13 +335,17 @@ def extract_metadata(doc: ParsedDocument) -> dict:
     meta["due_date"] = due
 
     m = re.search(r"(\d+|one|two|three|four|five)\s*\(?\d*\)?\s*(year|month)s?\s*(contract|term|duration|period)", low) or \
+        re.search(r"(?:contract|initial|service|managed service)?\s*(term|duration|period) of (?:an? )?(?:initial )?(\d+|one|two|three|four|five)\s*\(?\d*\)?\s*(year|month)", low) or \
         re.search(r"contract (term|duration|period) (of )?(\d+)\s*(year|month)", low)
     words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
     term_months = None
     if m:
         g = m.groups()
         try:
-            if g[0] in ("term", "duration", "period"):
+            if g[0] in ("term", "duration", "period") and len(g) == 3:  # "term of three years"
+                n = int(g[1]) if g[1].isdigit() else words[g[1]]
+                unit = g[2]
+            elif g[0] in ("term", "duration", "period"):
                 n, unit = int(g[2]), g[3]
             else:
                 n = int(g[0]) if g[0].isdigit() else words[g[0]]
@@ -340,7 +363,36 @@ def extract_metadata(doc: ParsedDocument) -> dict:
     }
     if meta["doc_type"] == "RFI":
         scores["consulting"] += 3
-    meta["engagement_type"] = max(scores, key=scores.get)
+    # How long the build is meant to take: "complete within 12 months of contract signature", "a 9-month implementation".
+    bm = re.search(r"(?:build|implementation|migration|delivery|deploy\w*)[^.]{0,80}?(?:within|in|over)\s+(\d{1,2})\s+months", low) or \
+        re.search(r"(\d{1,2})[- ]month (?:build|implementation|programme|program|project|migration)", low)
+    meta["build_months"] = int(bm.group(1)) if bm and 2 <= int(bm.group(1)) <= 36 else None
+    # Pricing instructions: "price the build as fixed price by milestone and the managed service as a fixed monthly fee".
+    meta["pricing_model"] = {
+        "milestones": bool(re.search(r"(fixed[- ]price|price)[^.]{0,40}(by|per|against) milestones?|milestone[- ]based (payment|pricing)", low)),
+        "monthly_fee": bool(re.search(r"monthly (fee|charge|service charge)|per month|fixed monthly", low)),
+        "time_and_materials": bool(re.search(r"time[- ]and[- ]materials?|\bt&m\b|daily rates?|day rates?", low)),
+    }
+    # The client's own milestone plan, from a "Milestone | Target" table: [{"name": ..., "month": 4}, ...]
+    ms, on = [], False
+    for line in text.splitlines():
+        cells = [c.strip() for c in line.split("|")]
+        if len(cells) >= 2 and re.match(r"^(key )?milestones?$", cells[0], re.I):
+            on = True
+            continue
+        mm = re.match(r"^(?:month|m)\s*(\d{1,2})$", cells[-1], re.I) if on and len(cells) >= 2 else None
+        if mm:
+            ms.append({"name": cells[0][:120], "month": int(mm.group(1))})
+        elif on and ms:
+            break
+    meta["rfp_milestones"] = ms[:12]
+    eng = max(scores, key=scores.get)
+    # Build and run in one contract: a build or migration with a timeline, plus a managed service to follow.
+    builds = scores["implementation"] >= 3 and (meta["build_months"] or meta["pricing_model"]["milestones"])
+    runs = scores["managed_services"] >= 3 and (meta["pricing_model"]["monthly_fee"] or re.search(r"operate[^.]{0,60}managed service|managed service[^.]{0,80}(term|years)", low))
+    if eng in ("implementation", "managed_services") and builds and runs:
+        eng = "build_run"
+    meta["engagement_type"] = eng
     meta["engagement_scores"] = scores
 
     industries = {
@@ -373,12 +425,16 @@ def extract_requirements(doc: ParsedDocument, use_llm: bool = True, mask_fn=lamb
         r["classified_by"] = "rules"
     reqs, engine = rules_reqs, "rules"
     if use_llm and llm.is_enabled():
-        lreqs = llm_extract(doc, mask_fn, guidance, progress)
-        if len(lreqs) >= max(5, int(len(rules_reqs) * 0.5)):
-            # Safety net: RFP rows with their own requirement ID are never dropped.
+        failed: list[int] = []
+        lreqs = llm_extract(doc, mask_fn, guidance, progress, failed)
+        failed_set = set(failed)
+        expected = sum(1 for r in rules_reqs if r["block_idx"] not in failed_set)
+        if lreqs and len(lreqs) >= max(5, int(expected * 0.5)):
             covered = {r["block_idx"] for r in lreqs}
             for r in rules_reqs:
-                if r.get("source_ref") and r["block_idx"] not in covered:
+                # Parts the AI couldn't read are filled in by the rules engine, and RFP rows with their own
+                # requirement ID are never dropped.
+                if r["block_idx"] not in covered and (r["block_idx"] in failed_set or r.get("source_ref")):
                     lreqs.append(r)
             lreqs.sort(key=lambda r: (r["block_idx"]))
             reqs, engine = lreqs, "ai"

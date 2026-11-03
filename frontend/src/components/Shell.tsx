@@ -1,12 +1,12 @@
 import clsx from "clsx";
 import { NoticeBar } from "./GoogleButton";
 import { BookOpen, Brain, Briefcase, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, Network, Settings, Sparkles, Trophy, X } from "lucide-react";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { ProductMark } from "./ui";
+import { PageLoader, ProductMark } from "./ui";
 import LandingAssistant from "./LandingAssistant";
 
 const NAV = [
@@ -178,7 +178,7 @@ export default function Shell() {
           </div>
         </header>
         <main key={loc.pathname.split("/").slice(0, 3).join("/")} className="flex-1 min-w-0 page-enter pb-20">
-          <Outlet />
+          <Suspense fallback={<PageLoader />}><Outlet /></Suspense>
         </main>
         <LandingAssistant mode="workspace" company={company?.name} />
       </div>

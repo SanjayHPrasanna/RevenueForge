@@ -133,6 +133,18 @@ def context(db: Session, deal: Deal) -> dict:
     }
 
 
+def document_context(db: Session, deal: Deal) -> dict:
+    """Context for a finished document that goes to the client: the app and the AI only ever saw the alias of a
+    confidential client, but the proposal itself names the client properly."""
+    ctx = context(db, deal)
+    if deal.confidential:
+        alias = deal.client_alias or "the Client"
+        real = deal.client_name or "the Client"
+        ctx["deal"]["client_display"] = real
+        ctx["unmask"] = (alias, real)
+    return ctx
+
+
 def _template_bytes(db: Session, tid: str) -> bytes | None:
     doc = db.scalar(select(Document).where(Document.tenant_id == tid, Document.kind == "template", Document.status == "imported")
                     .order_by(Document.created_at.desc()))
@@ -203,7 +215,8 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
         st.data = {"counts": dict(Counter(r["match_status"] for r in reqs)), "kb_size": {"capabilities": len(kb.capabilities), "people": len(kb.employees),
                    "case_studies": len(kb.case_studies), "certifications": len(kb.certifications)},
                    "engine": "ai" if any(r["match"].get("judged_by") == "ai" for r in reqs) else "rules",
-                   "retrieval": reqs[0]["match"].get("retrieval", "tfidf") if reqs else "tfidf"}
+                   "retrieval": reqs[0]["match"].get("retrieval", "tfidf") if reqs else "tfidf",
+                   "unverified": sum(1 for r in reqs if r["match"].get("unverified"))}
 
     elif name == "gaps":
         kb = load_kb(db, tid)
@@ -251,7 +264,7 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
 
     elif name == "proposal":
         draft_responses(db, deal, prog)
-        ctx = context(db, deal)
+        ctx = document_context(db, deal)
         data, info = docgen.build_proposal(ctx, _template_bytes(db, tid))
         out = OUTPUT_DIR / tid / deal.id
         out.mkdir(parents=True, exist_ok=True)
@@ -263,7 +276,7 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
                    "engine": "ai" if llm.is_enabled() else "rules", "response_sources": dict(src)}
 
     elif name == "handoff":
-        ctx = context(db, deal)
+        ctx = context(db, deal)  # internal document: keeps the alias, like the app
         hd = docgen.build_handoff_data(ctx)
         data = docgen.build_handoff_docx(ctx, hd, _template_bytes(db, tid))
         out = OUTPUT_DIR / tid / deal.id

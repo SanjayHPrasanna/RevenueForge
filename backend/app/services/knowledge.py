@@ -9,9 +9,9 @@ CATEGORIES = ["Functional", "Non-functional", "Compliance", "Commercial"]
 # subcategory -> (category, keyword patterns). Order matters: first strong hit wins ties.
 SUBCATEGORIES: dict[str, tuple[str, list[str]]] = {
     # Commercial
-    "Pricing & Payment": ("Commercial", [r"\bpric(e|es|ing)\b", r"\bpayment", r"\binvoice", r"\bcurrency\b", r"\bdirham|\bdinar|\baed\b|\bkwd\b|\busd\b",
-                                         r"\bcost(s)?\b", r"\bfee(s)?\b", r"\bboq\b", r"\bunit rate", r"\bwith ?holding tax|\bvat\b|\btax"]),
-    "Bonds & Guarantees": ("Commercial", [r"\bperformance bond|\bbid bond|\btender bond", r"\bbond\b", r"\bguarantee", r"\bbank guarantee", r"\btender fee"]),
+    "Pricing & Payment": ("Commercial", [r"\bpric(e|es|ing)\b", r"\bpayments?\b(?!\s+card)", r"\binvoice", r"\bcurrency\b", r"\bdirham|\bdinar|\baed\b|\bkwd\b|\busd\b",
+                                         r"\bcost(s)?\b", r"\bfee(s)?\b", r"\brates? (for|of|shall|will|are|must)\b", r"\bboq\b", r"\bunit rate", r"\bwith ?holding tax|\bvat\b|\btax"]),
+    "Bonds & Guarantees": ("Commercial", [r"\bperformance bond|\bbid bond|\btender bond", r"\bbond\b", r"\b(bank|performance|bid|tender|advance payment|parent company|financial) guarantee", r"\btender fee"]),
     "Insurance & Liability": ("Commercial", [r"\binsurance", r"\bindemn", r"\bliabilit", r"\bpenalt", r"\bliquidated damages"]),
     "Contract Terms": ("Commercial", [r"\bcontract (term|terms|duration|period)", r"\bterminat", r"\bwarrant(y|ies)", r"\bsub-?contract", r"\bjoint venture",
                                       r"\bvalidity", r"\bdraft contract", r"\bsignator", r"\bintellectual property|\bownership\b", r"\bterms and conditions"]),
@@ -26,7 +26,7 @@ SUBCATEGORIES: dict[str, tuple[str, list[str]]] = {
     "Standards & Certifications": ("Compliance", [r"\biso\s?\d{4,5}", r"\bcertif", r"\bsoc ?2\b", r"\bpci[- ]?dss", r"\baccredit", r"\bihe\b", r"\bnesa\b", r"\bnist\b"]),
     "Information Security Policy": ("Compliance", [r"\binformation security (policy|policies|standards|article|requirements)", r"\bsecurity governance",
                                                    r"\baudit (and|&) inspection", r"\baudit rights", r"\bconfidential"]),
-    "Accessibility & Sustainability": ("Compliance", [r"\bpeople of determination", r"\baccessibility (for|of|requirements)|\bwcag", r"\bgreen", r"\bsustainab", r"\boccupational health"]),
+    "Accessibility & Sustainability": ("Compliance", [r"\bpeople of determination", r"\baccessibility (for|of|requirements)|\bwcag", r"\bgreen (it|energy|computing|procurement)\b|\bcarbon\b|\bnet[- ]zero", r"\bsustainab", r"\boccupational health"]),
     # Non-functional
     "Availability & Continuity": ("Non-functional", [r"\bavailab", r"\bdisaster recovery|\bdr\b", r"\bfailover", r"\bbackup", r"\bbusiness continuity",
                                                      r"\brto\b|\brpo\b", r"\bhigh[- ]availability|\bclustering", r"\bresilien", r"\buptime"]),
@@ -38,17 +38,17 @@ SUBCATEGORIES: dict[str, tuple[str, list[str]]] = {
                                     r"\bvulnerab", r"\bpenetration", r"\bsecure\b", r"\bspoof", r"\btamper", r"\bcryptograph", r"\bkey management"]),
     "Monitoring & Operations": ("Non-functional", [r"\bmonitor", r"\balert", r"\blogging\b", r"\bobservab", r"\bhealth check", r"\bdashboard",
                                                    r"\bqueue", r"\bpatch", r"\bupgrade", r"\bmaintenance"]),
-    "Maintainability & Quality": ("Non-functional", [r"\bversion control", r"\brollback", r"\benvironment separation|\bdev, test", r"\bdocumentation",
+    "Maintainability & Quality": ("Non-functional", [r"\bversion control", r"\brollback", r"\bblue[- ]green|\bcanary|\bzero[- ]downtime|\bno planned downtime", r"\benvironment separation|\bdev, test", r"\bdocumentation",
                                                      r"\bchange (and|&) release|\brelease management|\bconfiguration management"]),
     # Functional
     "Integration & APIs": ("Functional", [r"\bintegrat", r"\binterface", r"\bapi(s)?\b", r"\bmiddleware", r"\bhl7\b", r"\bfhir\b", r"\bmessag", r"\besb\b",
-                                          r"\bevent[- ]driven", r"\bmllp\b", r"\bsoap\b", r"\brest(ful)?\b", r"\bmapping", r"\binteroperab", r"\bwebhook"]),
+                                          r"\bevent[- ]driven", r"\bat[- ]least[- ]once|\bexactly[- ]once|\bidempoten", r"\bmllp\b", r"\bsoap\b", r"\brest(ful)?\b", r"\bmapping", r"\binteroperab", r"\bwebhook"]),
     "Fraud & Risk Analytics": ("Functional", [r"\bfraud", r"\brisk scor", r"\banomal", r"\bbehavio(u)?ral", r"\bbiometric", r"\bdevice (fingerprint|intelligence|identifier)",
                                               r"\bgeolocat", r"\bbots?\b", r"\bmule", r"\bvpns?\b|\bprox(y|ies)\b|\btor\b|\bip address|\basn\b", r"\breputation",
                                               r"\bscam|\bsocial[- ]engineer|\bcoercion", r"\bmalware|\bremote[- ]access|\bthreat", r"\baccount takeover|\bcredential stuffing", r"\bimpossible travel", r"\bkeystroke", r"\bemulator", r"\bjailbroken|\brooted"]),
     "Data & Analytics": ("Functional", [r"\bdata (platform|warehouse|lake|model|quality|governance|migration)", r"\banalytic", r"\banalytic(al)? report", 
                                         r"\bbi\b", r"\bmachine learning|\bml\b|\b(ml|ai|risk|scoring|analytic(al)?) models?\b", r"\bai\b", r"\bdashboards?\b"]),
-    "Application Development": ("Functional", [r"\bdevelop", r"\bbuild\b", r"\bcustomi[sz]", r"\bconfigur", r"\bworkflow", r"\bscript", r"\bsdk\b",
+    "Application Development": ("Functional", [r"\bdevelop", r"\bbuild\b", r"\benhancements?\b", r"\bcustomi[sz]", r"\bconfigur", r"\bworkflow", r"\bscript", r"\bsdk\b",
                                                r"\bmobile app", r"\bweb app", r"\bportal\b", r"\buser interface|\bui\b"]),
     "Testing & QA": ("Functional", [r"\btest", r"\bvalidat", r"\bquality assurance|\bqa\b", r"\buat\b", r"\bgo-live"]),
     "Transition & Knowledge Transfer": ("Functional", [r"\btransition", r"\bknowledge (transfer|sharing|acquisition)", r"\bonboarding of", r"\bincumbent",
@@ -86,6 +86,13 @@ INFO_ONLY_RE = re.compile(r"^(this (rfp|rfi|document|section)|the following|an o
                           r"duration:|note:?$|in this proposal|all information presented)", re.I)
 
 
+STRONG_COMMERCIAL_RE = re.compile(r"\b(pric(e|es|ing)|invoic\w*|payment (terms|schedule|milestones?)|paid|bonds?|insurance|indemn\w*|liabilit\w*|"
+                                  r"penalt\w*|liquidated|currency|gst|vat|tax(es)?|award\w*|evaluation|contract (term|value|period)|"
+                                  r"terminat\w*|warrant(y|ies)|quoted?|exclusive of|inclusive of|tender fee|rates?)\b", re.I)
+TECHNICAL_RE = re.compile(r"\b(solution|system|platform|interfaces?|apis?|data|consumers?|messages?|delivery|deliver|support|enhancements?|"
+                          r"releases?|monitor\w*|integrat\w*|service levels?|availability|latency|encrypt\w*|cards?)\b", re.I)
+
+
 def classify(text: str, section: str = "") -> tuple[str, str, float]:
     """Return (category, subcategory, confidence) using keyword evidence from text + section."""
     scores: dict[str, float] = {}
@@ -103,6 +110,14 @@ def classify(text: str, section: str = "") -> tuple[str, str, float]:
             scores[sub] = sc
     if not scores:
         return "Functional", "General Scope", 0.45
+    # A requirement is only Commercial when it is about money or contract terms. A lone "fee" or "guarantee" in a
+    # technical sentence ("guarantee at-least-once delivery", "within the managed service fee") is not enough.
+    best_sub = max(scores, key=scores.get)
+    if _COMPILED[best_sub][0] == "Commercial" and not STRONG_COMMERCIAL_RE.search(t) and TECHNICAL_RE.search(t):
+        tech = {k: v for k, v in scores.items() if _COMPILED[k][0] != "Commercial"}
+        if not tech:
+            return "Functional", "General Scope", 0.5
+        scores = tech
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
     best, best_sc = ranked[0]
     second = ranked[1][1] if len(ranked) > 1 else 0

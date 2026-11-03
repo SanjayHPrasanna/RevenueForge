@@ -10,7 +10,7 @@ import re
 from collections import Counter, defaultdict
 
 from . import knowledge as K
-from .matching import CompanyKB
+from .matching import CompanyKB, relevant_accelerators
 
 # =========================================================================== architecture
 LAYER_ORDER = ["Channels & consumers", "Experience & APIs", "Integration & orchestration", "Intelligence & decisioning",
@@ -169,7 +169,8 @@ def build_architecture(reqs: list[dict], kb: CompanyKB, meta: dict) -> dict:
                       for l in LAYER_ORDER if layers.get(l)]
         style = "layered"
 
-    eng_label = {"managed_services": "outcome-based managed service", "product": "product-led solution with system integration",
+    eng_label = {"managed_services": "outcome-based managed service", "build_run": "platform build followed by a managed service",
+                 "product": "product-led solution with system integration",
                  "consulting": "architecture advisory engagement", "implementation": "design-and-build implementation"}.get(eng, eng)
     mandated = [c["name"] for l in layers_out for c in l["components"] if c["source"] == "RFP-mandated"]
     partners = [c["name"] for l in layers_out for c in l["components"] if c["source"] == "Partner product"]
@@ -227,7 +228,34 @@ def ai_architecture(draft: dict, reqs: list[dict], kb: CompanyKB, meta: dict, gu
                             "rationale": str(c.get("rationale", ""))[:300], "requirements": [x for x in (c.get("requirements") or []) if x in codes][:10]})
     if not layers:
         return None
-    return {**draft, "summary": str(out.get("summary") or draft["summary"])[:900], "layers": layers, "choices": choices or draft["choices"], "engine": "ai"}
+    res = {**draft, "summary": str(out.get("summary") or draft["summary"])[:900], "layers": layers, "choices": choices or draft["choices"], "engine": "ai"}
+    return check_against_library(res, reqs, kb)
+
+
+def check_against_library(arch: dict, reqs: list[dict], kb: CompanyKB) -> dict:
+    """Flag technology choices the company has no evidence for (no people, capability or case study) and the RFP doesn't
+    name: the proposal shows them as "to be validated" and the Architecture stage lists them for the architect."""
+    inv = kb.tech_inventory()
+    have = {t for t, v in inv.items() if v["people"] or v["capabilities"] or v["case_studies"]}
+    rfp_text = " ".join(r["text"] for r in reqs)
+    in_rfp = set(K.find_technologies(rfp_text))
+    unbacked = []
+    for c in arch.get("choices", []):
+        techs = [t for t in K.find_technologies(f"{c.get('choice', '')}") if t not in K.COMMODITY_TECH]
+        missing = [t for t in techs if t not in have and t not in in_rfp]
+        if missing and c.get("basis") != "Partner":
+            c["basis"] = "To validate"
+            c["not_in_library"] = missing
+            unbacked.extend(missing)
+    for l in arch.get("layers", []):
+        for comp in l.get("components", []):
+            techs = [t for t in K.find_technologies(comp.get("name", "") + " " + comp.get("detail", "")) if t not in K.COMMODITY_TECH]
+            missing = [t for t in techs if t not in have and t not in in_rfp]
+            if missing and comp.get("source") == "Proposed":
+                comp["not_in_library"] = missing
+                unbacked.extend(missing)
+    arch["not_in_library"] = sorted(set(unbacked))
+    return arch
 
 
 # =========================================================================== estimation
@@ -296,15 +324,96 @@ def _assign_people(kb: CompanyKB, role: str, n: int, skills: list[str], used: se
     return picked, max(0, n - len(picked))
 
 
+VOLUME_RE = re.compile(r"\b(\d{2,4})\s+(?:existing\s+|in-scope\s+|legacy\s+)?(interfaces|integrations|apis|flows|connectors|reports)\b", re.I)
+DAYS_PER_UNIT = {"interfaces": 3.5, "integrations": 3.5, "flows": 3.0, "apis": 4.0, "connectors": 6.0, "reports": 2.0}
+
+
+def _req_days(r: dict, eng: str) -> tuple[str, float]:
+    """Complexity and person-days for one requirement. Volume work ("migrate all 186 interfaces") is sized per unit."""
+    cx = _complexity(r)
+    days = DAYS[cx] * (0.5 if eng == "product" and r.get("gap", {}).get("recommended") == "Partner" else 1.0)
+    m = VOLUME_RE.search(r["text"])
+    if m and re.search(r"migrat|build|deliver|develop|implement|re-?platform|rebuild|convert", r["text"], re.I):
+        n = int(m.group(1))
+        if 10 <= n <= 2000:
+            days = max(days, n * DAYS_PER_UNIT[m.group(2).lower()])
+            cx = "High"
+    return cx, float(days)
+
+
+def _run_roles(text_all: str, ws_reqs: dict, onsite_ratio: float, after_build: bool) -> tuple[list, bool, bool, int]:
+    is_247 = bool(re.search(r"24\s?x\s?7|24/7|round[- ]the[- ]clock", text_all))
+    p1_fast = bool(re.search(r"p1[^.]{0,60}(15|30)\s?min", text_all))
+    enh = re.search(r"(\d{1,3})\s+(?:minor\s+)?(?:enhancements|changes|change requests)\s+per\s+(quarter|month|year)", text_all)
+    if after_build:  # the platform was just built by the same team: the change squad sizes to the enhancement volume
+        per_q = 0
+        if enh:
+            per_q = int(enh.group(1)) * {"quarter": 1, "month": 3, "year": 0.25}[enh.group(2)]
+        change_engineers = 2 if per_q <= 25 else 3 if per_q <= 45 else 4
+    else:
+        change_reqs = sum(len(ws_reqs.get(w, [])) for w in ("Integration engineering", "Application engineering"))
+        change_engineers = 2 if change_reqs < 8 else 3 if change_reqs < 15 else 4
+    ops_fte = 5.0 if is_247 else 2.0
+    roles = [
+        ("Engagement Manager", 1.0, "Onsite" if onsite_ratio >= 0.3 else "Offshore",
+         "Named service delivery manager: outcomes, SLAs and governance" if after_build else "Accountable for outcomes, SLAs and governance"),
+        ("Solution Architect", 0.5, "Offshore", "Platform design authority, upgrades and capacity planning"),
+        ("Support Engineer", ops_fte, "Offshore", f"{'24x7 shift-based' if is_247 else 'Business-hours'} monitoring, L2 incident & request handling"),
+        ("Integration Engineer", float(change_engineers), "Offshore", "Change & enhancement squad: new and modified interfaces"),
+        ("Integration Engineer", 1.0, "Onsite", "Onsite L3 lead: change board (CAB), escalations and business stakeholder liaison"),
+        ("QA Engineer", 1.0 if change_engineers <= 3 else 1.5, "Offshore", "Interface validation, regression and release evidence"),
+        ("DevOps Engineer", 0.5, "Offshore", "Release automation, version control and rollback"),
+        ("Business Analyst", 0.5, "Onsite", "Requirements, data-mapping specifications and documentation"),
+        ("Security Specialist", 0.25, "Offshore", "Security compliance, audits and DR drills"),
+    ]
+    return roles, is_247, p1_fast, change_engineers
+
+
+def _build_roles(workstreams: list[dict], ws_reqs: dict, eng: str, onsite_ratio: float, months_fixed: int | None) -> tuple[list, int, float]:
+    build = sum(w["effort_days"] for w in workstreams)
+    pm = build * 0.10
+    arch_d = build * 0.08
+    qa = build * 0.22 if "Quality engineering" not in ws_reqs else 0
+    total = build + pm + arch_d + qa
+    target_fte = max(4.0, min(16.0, math.sqrt(total) / 3))
+    months = int(months_fixed or max(3, min(18, math.ceil(total / (21 * target_fte)))))
+    fte_days = months * 21
+    role_days = defaultdict(float)
+    for w in workstreams:
+        role_days[w["lead_role"]] += w["effort_days"]
+    role_days["Project Manager"] += pm
+    role_days["Solution Architect"] += arch_d
+    role_days["QA Engineer"] += qa
+    roles = []
+    for role, dd in sorted(role_days.items(), key=lambda kv: -kv[1]):
+        fte = max(0.5, round(dd / fte_days * 2) / 2)
+        if role in ("Project Manager", "Solution Architect"):
+            fte = max(fte, 1.0)  # a dedicated PM and architect for the whole build
+        on = round(fte * onsite_ratio * 4) / 4 if role in ("Project Manager", "Solution Architect", "Business Analyst") else 0
+        if on:
+            roles.append((role, on, "Onsite", "Client-facing lead"))
+        if fte - on > 0:
+            roles.append((role, fte - on, "Offshore", f"Delivers {', '.join(w['name'] for w in workstreams if w['lead_role'] == role)[:90] or 'programme support'}"))
+    if eng == "product":
+        roles.insert(0, ("Engagement Manager", 0.5, "Onsite", "Single point of accountability across partner and integration teams"))
+    return roles, months, build
+
+
+def _build_phases(months: int, offset_weeks: float = 0) -> list[dict]:
+    w = months * 4.33
+    return [{"name": "Mobilise", "weeks": 2, "detail": "Team on-boarding, environments, plan baseline"},
+            {"name": "Design", "weeks": max(2, w * 0.18), "detail": "Solution and integration design"},
+            {"name": "Build & configure", "weeks": max(4, w * 0.45), "detail": "Sprint-based delivery"},
+            {"name": "Test & accept", "weeks": max(2, w * 0.2), "detail": "SIT, UAT, performance and security testing"},
+            {"name": "Deploy & hypercare", "weeks": max(2, w * 0.12), "detail": "Go-live and stabilisation"}]
+
+
 def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides: dict | None = None) -> dict:
     ov = overrides or {}
-    eng = meta.get("engagement_type", "implementation")
+    eng = meta.get("engagement_type", "implementation") or "implementation"
     region = meta.get("region", "")
     text_all = " ".join(r["text"] for r in reqs).lower()
-    savings = []
-    for a in kb.accelerators:
-        if any(t in text_all for t in [x.lower() for x in a.get("technologies", [])]) and a.get("effort_saving_pct"):
-            savings.append({"name": a["name"], "saving_pct": a["effort_saving_pct"]})
+    savings = relevant_accelerators(kb, reqs)
 
     ws_reqs: dict[str, list[dict]] = defaultdict(list)
     for r in reqs:
@@ -312,14 +421,13 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
             r["workstream"], r["complexity"], r["effort_days"] = "Bid & contract", "", 0
             continue
         ws = WORKSTREAM.get(r.get("subcategory", ""), "Programme management")
-        cx = _complexity(r)
-        days = DAYS[cx] * (0.5 if eng == "product" and r.get("gap", {}).get("recommended") == "Partner" else 1.0)
-        r["workstream"], r["complexity"], r["effort_days"] = ws, cx, float(days)
+        cx, days = _req_days(r, eng)
+        r["workstream"], r["complexity"], r["effort_days"] = ws, cx, days
         ws_reqs[ws].append(r)
 
     accel_factor = 1 - min(0.3, sum(s["saving_pct"] for s in savings) / 100 * 0.5)
     onsite_ratio = float(ov.get("onsite_ratio", 0.35 if region in ("UAE", "Kuwait", "Saudi Arabia", "Qatar") else 0.2))
-    term = int(ov.get("contract_months") or meta.get("contract_term_months") or (36 if eng == "managed_services" else 0))
+    term = int(ov.get("contract_months") or meta.get("contract_term_months") or (36 if eng in ("managed_services", "build_run") else 0))
     team: list[dict] = []
     phases: list[dict] = []
     workstreams = []
@@ -329,23 +437,10 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
         workstreams.append({"name": ws, "requirements": len(rs), "codes": [r["code"] for r in rs][:30], "effort_days": round(d, 1),
                             "complexity": dict(Counter(r["complexity"] for r in rs)), "lead_role": WS_ROLE.get(ws, "Software Engineer")})
 
+    plan: list[tuple] = []  # (role, fte, location, responsibility, phase, months)
+    build_months = None
     if eng == "managed_services":
-        is_247 = bool(re.search(r"24\s?x\s?7|24/7|round[- ]the[- ]clock", text_all))
-        p1_fast = bool(re.search(r"p1[^.]{0,60}(15|30)\s?min", text_all))
-        change_reqs = sum(len(ws_reqs.get(w, [])) for w in ("Integration engineering", "Application engineering"))
-        change_engineers = 2 if change_reqs < 8 else 3 if change_reqs < 15 else 4
-        ops_fte = 5.0 if is_247 else 2.0
-        roles = [
-            ("Engagement Manager", 1.0, "Onsite" if onsite_ratio >= 0.3 else "Offshore", "Accountable for outcomes, SLAs and governance"),
-            ("Solution Architect", 0.5, "Offshore", "Platform design authority, upgrades and capacity planning"),
-            ("Support Engineer", ops_fte, "Offshore", f"{'24x7 shift-based' if is_247 else 'Business-hours'} monitoring, L2 incident & request handling"),
-            ("Integration Engineer", float(change_engineers), "Offshore", "Change & enhancement squad: new and modified interfaces"),
-            ("Integration Engineer", 1.0, "Onsite", "Onsite L3 lead: CAB, escalations, clinical stakeholder liaison"),
-            ("QA Engineer", 1.0 if change_engineers <= 3 else 1.5, "Offshore", "Interface validation, regression and go-live evidence"),
-            ("DevOps Engineer", 0.5, "Offshore", "Release automation, version control and rollback"),
-            ("Business Analyst", 0.5, "Onsite", "Requirements, data-mapping specifications and documentation"),
-            ("Security Specialist", 0.25, "Offshore", "Security compliance, audits and DR drills"),
-        ]
+        roles, is_247, p1_fast, _ = _run_roles(text_all, ws_reqs, onsite_ratio, after_build=False)
         transition_weeks = 6 if re.search(r"4\s?[–-]\s?6 weeks|6 weeks", text_all) else 4
         phases = [
             {"name": "Transition & onboarding", "weeks": transition_weeks, "detail": "Knowledge transfer, access, baselining, governance set-up"},
@@ -354,9 +449,26 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
             {"name": "Lifecycle & continuous improvement", "weeks": max(4, term * 4.33 - transition_weeks), "detail": "Quarterly upgrade, patch and improvement cycles", "parallel": True},
         ]
         months = term
-        assumptions_extra = [f"Contract term assumed at {term} months{' (not stated in the RFP)' if not meta.get('contract_term_months') else ''}.",
+        plan = [(*r, "Run", term) for r in roles]
+        assumptions_extra = [f"Contract term of {term} months{' (assumed: not stated in the RFP)' if not meta.get('contract_term_months') else ' as stated in the RFP'}.",
                              f"{'24x7' if is_247 else 'Business-hours'} coverage{' with P1 response within 15–30 minutes' if p1_fast else ''}.",
                              "Volume of change requests is absorbed by the change squad; surges beyond 20% trigger a capacity review."]
+    elif eng == "build_run":
+        build_months = int(ov.get("duration_months") or meta.get("build_months") or 0) or None
+        b_roles, build_months, build = _build_roles(workstreams, ws_reqs, eng, onsite_ratio, build_months)
+        r_roles, is_247, p1_fast, squad = _run_roles(text_all, ws_reqs, onsite_ratio, after_build=True)
+        plan = [(*r, "Build", build_months) for r in b_roles] + [(*r, "Run", term) for r in r_roles]
+        phases = _build_phases(build_months) + [
+            {"name": "Service transition", "weeks": 4, "detail": "Runbooks, monitoring and support handed from the build team to the run team", "parallel": True},
+            {"name": "Managed service (run)", "weeks": term * 4.33, "detail": "SLA-based run services" + (" 24x7" if is_247 else "") + ", enhancements and continuous improvement"},
+        ]
+        months = build_months + term
+        assumptions_extra = [
+            f"Build and migration over {build_months} months{' as required by the RFP' if meta.get('build_months') and not ov.get('duration_months') else ''}, "
+            f"from {round(build)} person-days of requirement-level effort plus project management, architecture and testing.",
+            f"Managed service for {term} months after go-live{' as stated in the RFP' if meta.get('contract_term_months') else ' (assumed: not stated in the RFP)'}.",
+            f"{'24x7' if is_247 else 'Business-hours'} coverage{' with P1 response within 15–30 minutes' if p1_fast else ''}; a {squad}-engineer change squad covers routine enhancements.",
+            "Client provides environments, test data and SME availability per plan."]
     elif eng == "consulting":
         n_deliv = len(meta.get("deliverables", [])) or 6
         weeks = min(36, 8 + n_deliv * 2)
@@ -370,6 +482,7 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
                               "Onsite", f"{d} lead"))
         roles += [("Business Analyst", 1.0, "Onsite", "Current-state discovery and stakeholder interviews"),
                   ("Business Analyst", 1.0, "Offshore", "Portfolio analysis and documentation"), ("Project Manager", 0.5, "Offshore", "Planning, reporting and PMO")]
+        plan = [(*r, "Delivery", months) for r in roles]
         phases = [{"name": "Mobilise & discovery", "weeks": 3, "detail": "Stakeholder interviews, document review"},
                   {"name": "Current-state assessment", "weeks": max(4, weeks * 0.35), "detail": "Business, application, data, technology baselines"},
                   {"name": "Target & interim state", "weeks": max(3, weeks * 0.25), "detail": "Future-state architecture and strategies"},
@@ -378,35 +491,10 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
         assumptions_extra = ["Onsite presence in the client's city for the architecture team, as requested.",
                              "Access to stakeholders and system documentation within the first two weeks."]
     else:
-        build = sum(w["effort_days"] for w in workstreams)
-        pm = build * 0.10
-        arch_d = build * 0.08
-        qa = build * 0.22 if "Quality engineering" not in ws_reqs else 0
-        total = build + pm + arch_d + qa
-        target_fte = max(4.0, min(16.0, math.sqrt(total) / 3))
-        months = int(ov.get("duration_months") or max(3, min(18, math.ceil(total / (21 * target_fte)))))
-        fte_days = months * 21
-        role_days = defaultdict(float)
-        for w in workstreams:
-            role_days[w["lead_role"]] += w["effort_days"]
-        role_days["Project Manager"] += pm
-        role_days["Solution Architect"] += arch_d
-        role_days["QA Engineer"] += qa
-        roles = []
-        for role, dd in sorted(role_days.items(), key=lambda kv: -kv[1]):
-            fte = max(0.5, round(dd / fte_days * 2) / 2)
-            on = round(fte * onsite_ratio * 4) / 4 if role in ("Project Manager", "Solution Architect", "Business Analyst") else 0
-            if on:
-                roles.append((role, on, "Onsite", "Client-facing lead"))
-            if fte - on > 0:
-                roles.append((role, fte - on, "Offshore", f"Delivers {', '.join(w['name'] for w in workstreams if w['lead_role'] == role)[:90] or 'programme support'}"))
-        if eng == "product":
-            roles.insert(0, ("Engagement Manager", 0.5, "Onsite", "Single point of accountability across partner and integration teams"))
-        phases = [{"name": "Mobilise", "weeks": 2, "detail": "Team on-boarding, environments, plan baseline"},
-                  {"name": "Design", "weeks": max(2, months * 4.33 * 0.18), "detail": "Solution and integration design"},
-                  {"name": "Build & configure", "weeks": max(4, months * 4.33 * 0.45), "detail": "Sprint-based delivery"},
-                  {"name": "Test & accept", "weeks": max(2, months * 4.33 * 0.2), "detail": "SIT, UAT, performance and security testing"},
-                  {"name": "Deploy & hypercare", "weeks": max(2, months * 4.33 * 0.12), "detail": "Go-live and stabilisation"}]
+        fixed = int(ov.get("duration_months") or meta.get("build_months") or 0) or None
+        roles, months, build = _build_roles(workstreams, ws_reqs, eng, onsite_ratio, fixed)
+        plan = [(*r, "Build", months) for r in roles]
+        phases = _build_phases(months)
         assumptions_extra = [f"Build effort of {round(build)} person-days from {sum(w['requirements'] for w in workstreams)} scoped requirements, plus PM, architecture and QA overheads.",
                              "Client provides environments, test data and SME availability per plan."]
 
@@ -414,26 +502,47 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
     used: set[str] = set()
     req_skills = [t for r in reqs for t in r.get("technologies", []) if t not in K.COMMODITY_TECH]
     top_skills = [t for t, _ in Counter(req_skills).most_common(6)]
-    for role, fte, loc, resp in roles:
+    by_phase: dict[str, set[str]] = defaultdict(set)
+    for role, fte, loc, resp, phase, m in plan:
         n_people = max(1, math.ceil(fte - 0.01))
-        people, unfilled = _assign_people(kb, role, n_people, top_skills, used)
-        team.append({"role": role, "fte": round(fte, 2), "headcount": n_people, "location": loc, "responsibility": resp,
-                     "months": months, "person_days": round(fte * months * 21, 1), "assigned": people, "unfilled": unfilled})
+        # nobody holds two roles in the same phase; in a build + run deal the build team can stay on for the run
+        pool = by_phase[phase] if eng == "build_run" else used
+        people, unfilled = _assign_people(kb, role, n_people, top_skills, pool)
+        by_phase[phase].update(p["code"] for p in people)
+        used.update(p["code"] for p in people)
+        team.append({"role": role, "fte": round(fte, 2), "headcount": n_people, "location": loc, "responsibility": resp, "phase": phase,
+                     "months": m, "person_days": round(fte * m * 21, 1), "assigned": people, "unfilled": unfilled})
     cal = ov.get("_calibration") or {"factor": 1.0, "deals": 0}
-    if cal.get("deals") and abs(cal["factor"] - 1.0) > 0.01 and eng != "managed_services":
+    if cal.get("deals") and abs(cal["factor"] - 1.0) > 0.01 and eng not in ("managed_services",):
         for t in team:
+            if t["phase"] == "Run":
+                continue
             t["person_days"] = round(t["person_days"] * cal["factor"], 1)
             t["fte"] = round(t["fte"] * cal["factor"], 2)
         assumptions_extra.append(f"Effort calibrated ×{cal['factor']} from actuals on {cal['deals']} delivered deal(s).")
-    headcount = sum(t["headcount"] for t in team)
+    people_codes = {p["code"] for t in team for p in t["assigned"]}
+    headcount = len(people_codes) + sum(t["unfilled"] for t in team)
     total_pd = round(sum(t["person_days"] for t in team), 1)
     risk_items = sum(1 for r in reqs if r.get("gap", {}).get("risk") == "High")
+    unfilled = sum(t["unfilled"] for t in team)
     contingency = float(ov.get("contingency_pct", 8 + min(12, risk_items * 0.8)))
-    return {"engagement_type": eng, "duration_months": months, "contract_months": term or months, "headcount": headcount,
-            "total_person_days": total_pd, "fte": round(sum(t["fte"] for t in team), 2), "onsite_ratio": onsite_ratio,
+    def fte_of(ph):
+        return round(sum(t["fte"] for t in team if t["phase"] == ph), 2)
+    peak_fte = max([fte_of(ph) for ph in {t["phase"] for t in team}] or [0])
+    onsite_fte = sum(t["fte"] for t in team if t["location"] == "Onsite")
+    all_fte = sum(t["fte"] for t in team) or 1
+    req_days = round(sum(w["effort_days"] for w in workstreams), 1)
+    return {"engagement_type": eng, "duration_months": months, "contract_months": (term if eng == "managed_services" else months) or months,
+            "build_months": build_months if eng == "build_run" else (months if eng not in ("managed_services", "consulting") else None),
+            "run_months": term if eng in ("managed_services", "build_run") else None,
+            "headcount": headcount, "total_person_days": total_pd, "fte": peak_fte,
+            "fte_by_phase": {ph: fte_of(ph) for ph in dict.fromkeys(t["phase"] for t in team)},
+            "onsite_ratio": onsite_ratio, "onsite_share": round(onsite_fte / all_fte, 3),
+            "requirement_effort_days": req_days,
             "workstreams": workstreams, "team": team, "phases": phases, "accelerators": savings,
             "accelerator_saving_pct": round((1 - accel_factor) * 100, 1), "contingency_pct": round(contingency, 1),
-            "unfilled_roles": sum(t["unfilled"] for t in team), "assumptions": assumptions_extra, "calibration": cal,
+            "contingency_basis": {"high_risk_gaps": risk_items, "unfilled_roles": unfilled},
+            "unfilled_roles": unfilled, "assumptions": assumptions_extra, "calibration": cal,
             "staffing_skills": top_skills}
 
 
@@ -475,6 +584,14 @@ def _rate_for(kb: CompanyKB, role: str, location: str, overrides: dict) -> tuple
     return float(rate), float(cost), "USD", "Benchmark (no rate card row)"
 
 
+def _contingency_note(pct: float, est: dict) -> str:
+    b = est.get("contingency_basis") or {}
+    risks, unfilled = b.get("high_risk_gaps", 0), b.get("unfilled_roles", est.get("unfilled_roles", 0))
+    why = [x for x in (f"{risks} high-risk gap{'s' if risks != 1 else ''}" if risks else "",
+                       f"{unfilled} unfilled role{'s' if unfilled != 1 else ''}" if unfilled else "") if x]
+    return f"Contingency of {pct:g}%: " + (f"8% base plus an allowance for {' and '.join(why)}." if why else "the standard 8% delivery allowance (no high-risk gaps or unfilled roles).")
+
+
 def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides: dict | None = None) -> dict:
     ov = overrides or {}
     rate_ov = ov.get("rates", {})
@@ -490,7 +607,8 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
         rate, cost = rate * fx, cost * fx
         days = t["person_days"]
         lines.append({"role": t["role"], "location": t["location"], "fte": t["fte"], "person_days": days, "day_rate": round(rate, 2),
-                      "day_cost": round(cost, 2), "cost": round(days * cost, 2), "list_price": round(days * rate, 2), "rate_source": src})
+                      "day_cost": round(cost, 2), "cost": round(days * cost, 2), "list_price": round(days * rate, 2), "rate_source": src,
+                      "phase": t.get("phase", "")})
     labour_cost = sum(l["cost"] for l in lines)
     list_price = sum(l["list_price"] for l in lines)
     onsite_cost = sum(l["cost"] for l in lines if l["location"] == "Onsite")
@@ -512,7 +630,30 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
     fx_to_rfp = FX_PER_USD.get(rfp_ccy, 1) / FX_PER_USD.get(base_ccy, 1)
     eng = est.get("engagement_type")
     target_price = next(s["price"] for s in scenarios if s["name"] == "Target")
-    if eng == "managed_services":
+    phase_split = None
+    if eng == "build_run":
+        # Price follows the RFP's instructions: the build as fixed price by milestone, the run as a fixed monthly fee.
+        build_cost = sum(l["cost"] for l in lines if l["phase"] == "Build")
+        run_cost = sum(l["cost"] for l in lines if l["phase"] == "Run")
+        build_share = build_cost / max(1e-9, build_cost + run_cost)
+        run_months = est.get("run_months") or 36
+        rfp_ms = [m for m in (meta.get("rfp_milestones") or []) if m.get("name")]
+        if rfp_ms:
+            n = len(rfp_ms)
+            w = [1.0] * n
+            w[-1] = 2.0  # final acceptance carries the largest payment
+            names = [f"{m['name']} (month {m['month']})" for m in rfp_ms]
+        else:
+            w = [1, 2, 3, 2, 1.5, 0.5]
+            names = ["Mobilisation", "Design sign-off", "Build complete", "UAT sign-off", "Go-live", "Hypercare exit"]
+        tw = sum(w)
+        milestones = [{"name": f"Build: {nm}", "pct": round(build_share * 100 * x / tw, 1), "phase": "Build"} for nm, x in zip(names, w)]
+        milestones.append({"name": f"Managed service: monthly fee × {run_months}", "pct": round((1 - build_share) * 100, 1), "phase": "Run",
+                           "monthly": round(target_price * (1 - build_share) / run_months, 2)})
+        phase_split = {"build_pct": round(build_share * 100, 1), "build_price": round(target_price * build_share, 2),
+                       "run_price": round(target_price * (1 - build_share), 2), "run_months": run_months,
+                       "monthly_fee": round(target_price * (1 - build_share) / run_months, 2), "build_months": est.get("build_months")}
+    elif eng == "managed_services":
         trans_share = 0.08
         months = est.get("contract_months") or 36
         milestones = [{"name": "Transition & onboarding complete", "pct": round(trans_share * 100, 1)},
@@ -531,8 +672,8 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
             "labour_cost": round(labour_cost, 2), "travel": round(travel, 2), "travel_pct": travel_pct, "contingency": round(cont, 2),
             "contingency_pct": contingency, "total_cost": round(total_cost, 2), "list_price": round(list_price, 2),
             "implied_rate_card_margin": round(implied, 1), "target_margin": target, "min_margin": floor, "scenarios": scenarios,
-            "recommended": "Target", "milestones": milestones, "partner_note": partner_note,
+            "recommended": "Target", "milestones": milestones, "phase_split": phase_split, "partner_note": partner_note,
             "assumptions": [f"Rates from the {kb.name} rate card in {base_ccy}; converted to {rfp_ccy} at an indicative {round(fx_to_rfp, 4)} (confirm the rate with finance)." if rfp_ccy != base_ccy
                             else f"Rates from the {kb.name} rate card in {base_ccy}.",
-                            f"Contingency of {contingency}% reflects {est.get('unfilled_roles', 0)} unfilled roles and high-risk gaps.",
+                            _contingency_note(contingency, est),
                             f"Travel and living at {travel_pct}% of onsite cost."]}

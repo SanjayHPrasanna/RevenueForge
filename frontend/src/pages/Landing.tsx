@@ -158,7 +158,7 @@ function HeroPhoto() {
 const PROOF = [
   "Every requirement traced to its page in the RFP",
   "Eight stages, each approved by the right person",
-  "Client names masked in screens, AI prompts and documents",
+  "Client names masked in screens and AI prompts",
 ];
 
 /** Floating glass cards around the product shot (large screens only), each on its own depth plane. */
@@ -210,7 +210,7 @@ function Hero() {
         <div aria-hidden className="absolute inset-0 grid-lines" />
         <div aria-hidden className="absolute -top-40 left-1/2 -ml-[420px] h-[640px] w-[840px] rounded-full bg-brand-500/25 blur-[120px] drift" />
         <HeroPhoto />
-        <div className={clsx(WRAP, "relative pt-36 pb-24 md:pt-44 md:pb-32")}>
+        <div className={clsx(WRAP, "relative pt-36 pb-28 md:pt-44 md:pb-32")}>
           <div className="max-w-[40rem] stagger">
             <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/[.06] px-3 py-1 text-[12.5px] font-medium text-brand-100 backdrop-blur">
               <Sparkles className="h-3.5 w-3.5 text-ember-400" aria-hidden /> Deal and proposal intelligence for pre-sales teams
@@ -394,7 +394,7 @@ function Learning() {
 
 // ---------------------------------------------------------------- security
 const SECURITY: [typeof EyeOff, string, string][] = [
-  [EyeOff, "Client names masked", "Turn on masking per deal and the client's name never appears in screens, AI prompts or documents."],
+  [EyeOff, "Client names masked", "Turn on masking per deal and the client's name never appears in screens, AI prompts or internal documents. Only the proposal you send names the client."],
   [Lock, "Your workspace only", "Each company's capabilities, people, rates and RFPs are isolated. No one else can see or learn from them."],
   [FileSearch, "Every claim has a source", "Requirements link to their page in the RFP. Responses cite your real capabilities, case studies and people."],
   [ShieldCheck, "Your choice of AI", "Run on Gemini, Claude, OpenAI or Azure OpenAI. With masking on, client names never reach the AI."],

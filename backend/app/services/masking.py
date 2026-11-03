@@ -1,5 +1,5 @@
 """Client-name masking. When a deal is confidential, the client's names are replaced with an
-alias everywhere RevenueForge shows or sends text (UI, LLM prompts, generated documents)."""
+alias everywhere RevenueForge shows or sends text (UI, LLM prompts, internal documents). The proposal sent to the client names it."""
 from __future__ import annotations
 
 import re

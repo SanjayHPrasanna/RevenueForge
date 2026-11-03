@@ -73,7 +73,14 @@ def get_company(ctx: Ctx = Depends(current_ctx)):
     return {"id": t.id, "name": t.name, "slug": t.slug, "industry": t.industry, "website": t.website, "about": t.about,
             "headquarters": t.headquarters, "headcount": t.headcount, "founded": t.founded, "currency": t.currency,
             "settings": {k: v for k, v in (t.settings or {}).items() if k != "ai"}, "onboarding": _onboarding_status(ctx),
-            "llm": llm.status(), "notice": llm.notice()}
+            "llm": _llm_status(ctx), "notice": llm.notice()}
+
+
+def _llm_status(ctx: Ctx) -> dict:
+    """Call counts and errors are shown for the company's own key, or to platform admins for the shared server key."""
+    from ..services import ai_settings
+    own = llm.current_profile().source == "company"
+    return llm.status(usage=own or ai_settings.is_platform_admin(ctx.user.email))
 
 
 # --------------------------------------------------------------------------- the company's own AI provider and key
@@ -84,8 +91,8 @@ def get_company_ai(ctx: Ctx = Depends(current_ctx)):
 
 
 @router.put("/company/ai")
-def save_company_ai(body: dict, ctx: Ctx = Depends(current_ctx)):
-    """Anyone in the company may change it; it applies to this company only."""
+def save_company_ai(body: dict, ctx: Ctx = Depends(require_roles())):
+    """Company admins only: every RFP the company processes afterwards is sent to this provider."""
     from ..services import company_ai
     try:
         company_ai.save(ctx.db, ctx.tenant, body, ctx.user.email)
@@ -97,7 +104,7 @@ def save_company_ai(body: dict, ctx: Ctx = Depends(current_ctx)):
 
 
 @router.post("/company/ai/test")
-def test_company_ai(ctx: Ctx = Depends(current_ctx)):
+def test_company_ai(ctx: Ctx = Depends(require_roles())):
     from ..services import company_ai
     return company_ai.test(ctx.tenant_id)
 

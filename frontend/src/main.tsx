@@ -9,18 +9,37 @@ import "@fontsource-variable/hanken-grotesk";
 import "@fontsource-variable/newsreader";
 import "./index.css";
 import { AuthProvider, useAuth } from "./lib/auth";
-import Dashboard from "./pages/Dashboard";
-import DealWorkspace from "./pages/DealWorkspace";
-import Deals from "./pages/Deals";
-import GraphPage from "./pages/Graph";
 import Landing from "./pages/Landing";
-import Learning from "./pages/Learning";
-import Library from "./pages/Library";
 import { Login, Signup } from "./pages/Auth";
 import { MicrosoftCallback } from "./components/GoogleButton";
-import Onboarding from "./pages/Onboarding";
-import SettingsPage from "./pages/Settings";
-import WinLoss from "./pages/WinLoss";
+
+// The workspace pages load on demand, so the landing page downloads only what it shows.
+const Dashboard = React.lazy(() => import("./pages/Dashboard"));
+const DealWorkspace = React.lazy(() => import("./pages/DealWorkspace"));
+const Deals = React.lazy(() => import("./pages/Deals"));
+const GraphPage = React.lazy(() => import("./pages/Graph"));
+const Learning = React.lazy(() => import("./pages/Learning"));
+const Library = React.lazy(() => import("./pages/Library"));
+const Onboarding = React.lazy(() => import("./pages/Onboarding"));
+const SettingsPage = React.lazy(() => import("./pages/Settings"));
+const WinLoss = React.lazy(() => import("./pages/WinLoss"));
+
+/** Shown for addresses that don't exist, instead of silently jumping to the home page. */
+function NotFound() {
+  return (
+    <main className="min-h-screen grid place-items-center bg-paper px-4">
+      <div className="text-center max-w-md">
+        <div className="eyebrow mb-2">Page not found</div>
+        <h1 className="font-display text-[34px] leading-tight text-brand-950">We couldn't find that page</h1>
+        <p className="text-ink-muted text-[14px] mt-2">The link may be old or mistyped.</p>
+        <div className="mt-6 flex justify-center gap-2">
+          <a href="/" className="btn-outline">Home</a>
+          <a href="/app" className="btn-primary">Open workspace</a>
+        </div>
+      </div>
+    </main>
+  );
+}
 
 const qc = new QueryClient({ defaultOptions: { queries: { refetchOnWindowFocus: false, retry: 1, staleTime: 5_000 } } });
 
@@ -46,6 +65,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
         <ToastProvider>
           <TipProvider>
           <BrowserRouter>
+            <React.Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/auth/microsoft" element={<MicrosoftCallback />} />
@@ -64,8 +84,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="winloss" element={<WinLoss />} />
                 <Route path="settings" element={<SettingsPage />} />
               </Route>
-              <Route path="*" element={<Navigate to="/" replace />} />
+              <Route path="*" element={<NotFound />} />
             </Routes>
+            </React.Suspense>
           </BrowserRouter>
           </TipProvider>
         </ToastProvider>
