@@ -24,6 +24,7 @@ const Onboarding = React.lazy(() => import("./pages/Onboarding"));
 const SettingsPage = React.lazy(() => import("./pages/Settings"));
 const WinLoss = React.lazy(() => import("./pages/WinLoss"));
 const RadarPage = React.lazy(() => import("./pages/Radar"));
+const Market = React.lazy(() => import("./pages/Market"));
 const BuyerRequests = React.lazy(() => import("./pages/Buyer").then((m) => ({ default: m.BuyerRequests })));
 const BuyerRequest = React.lazy(() => import("./pages/Buyer").then((m) => ({ default: m.BuyerRequest })));
 
@@ -86,6 +87,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="learning" element={<Learning />} />
                 <Route path="winloss" element={<WinLoss />} />
                 <Route path="opportunities" element={<RadarPage />} />
+                <Route path="market" element={<Market />} />
                 <Route path="buyer" element={<BuyerRequests />} />
                 <Route path="buyer/:id" element={<BuyerRequest />} />
                 <Route path="settings" element={<SettingsPage />} />

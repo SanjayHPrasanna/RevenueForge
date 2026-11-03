@@ -278,7 +278,7 @@ export default function RadarPage() {
   const [status, setStatus] = useState("active");
   const [sort, setSort] = useState("score");
   const [page, setPage] = useState(0);
-  const [sel, setSel] = useState<string | null>(null);
+  const [sel, setSel] = useState<string | null>(() => new URLSearchParams(window.location.search).get("t"));
   const [starting, setStarting] = useState<Item | null>(null);
   useEffect(() => { const t = setTimeout(() => setQD(q), 300); return () => clearTimeout(t); }, [q]);
   useEffect(() => setPage(0), [qDebounced, region, source, minScore, due, status, sort]);

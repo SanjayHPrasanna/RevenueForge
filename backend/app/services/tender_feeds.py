@@ -413,7 +413,8 @@ def store(db, items: list[dict]) -> int:
     return n
 
 
-def prune(db, keep_days_after_deadline: int = 2) -> int:
+def prune(db, keep_days_after_deadline: int = 120) -> int:
+    """Closed tenders are kept for a few months (they are history for market insights), then removed."""
     from sqlalchemy import delete
 
     from ..models import Tender

@@ -8,7 +8,7 @@ notice written in another language is scored on its title and category only, whi
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -113,7 +113,8 @@ def ensure_scored(db, tid: str, kb_loader) -> int:
     from ..models import Tender, TenderFit
     sig = library_signature(db, tid)
     have = {f.tender_id: f for f in db.scalars(select(TenderFit).where(TenderFit.tenant_id == tid))}
-    tenders = db.scalars(select(Tender)).all()
+    since = datetime.now(timezone.utc) - timedelta(days=1)
+    tenders = db.scalars(select(Tender).where((Tender.deadline.is_(None)) | (Tender.deadline >= since))).all()  # live ones only
     todo = [t for t in tenders if t.id not in have or (have[t.id].detail or {}).get("sig") != sig
             or have[t.id].scored_at.replace(tzinfo=have[t.id].scored_at.tzinfo or timezone.utc) < t.fetched_at.replace(tzinfo=t.fetched_at.tzinfo or timezone.utc)]
     if not todo:

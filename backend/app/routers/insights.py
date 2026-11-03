@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 
 from ..models import Capability, CaseStudy, Deal, DealStage, Employee, GraphEdge, GraphNode, Requirement
@@ -184,3 +184,12 @@ def win_loss(ctx: Ctx = Depends(current_ctx)):
         "by_engagement": breakdown(lambda r: r["engagement_type"]),
         "recent": sorted(decided, key=lambda r: r["updated_at"] or 0, reverse=True)[:10],
     }
+
+
+@router.get("/insights/market")
+def market_insights(ctx: Ctx = Depends(current_ctx)):
+    """Where the company's capabilities and products are in demand, counted from public tenders the radar has read."""
+    if (ctx.tenant.kind or "vendor") == "buyer":
+        raise HTTPException(403, "Market insights are for supplier workspaces.")
+    from ..services import market
+    return market.market(ctx.db, ctx.tenant)
