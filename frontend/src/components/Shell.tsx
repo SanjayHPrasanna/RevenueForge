@@ -1,8 +1,8 @@
 import clsx from "clsx";
 import { NoticeBar } from "./GoogleButton";
-import { BookOpen, Brain, Briefcase, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, LogOut, Menu, Network, Radar, Settings, Sparkles, Trophy, X } from "lucide-react";
+import { BookOpen, Brain, Briefcase, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, FileSearch, LogOut, Menu, Network, Radar, Settings, Sparkles, Trophy, X } from "lucide-react";
 import { Suspense, useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -19,6 +19,12 @@ const NAV = [
   { to: "/app/learning", label: "AI learning", icon: Brain },
   { to: "/app/settings", label: "Settings", icon: Settings },
 ];
+// Buyer workspaces (organisations that issue RFPs) see only their requests and settings.
+const BUYER_NAV = [
+  { to: "/app/buyer", label: "Requests", icon: FileSearch, end: false },
+  { to: "/app/settings", label: "Settings", icon: Settings },
+];
+const BUYER_PATHS = ["/app/buyer", "/app/settings"];
 
 export default function Shell() {
   const { user, logout } = useAuth();
@@ -42,7 +48,9 @@ export default function Shell() {
     });
   const loc = useLocation();
   const { data: company } = useQuery({ queryKey: ["company"], queryFn: () => api.get("/company") });
-  const ob = company?.onboarding;
+  const isBuyer = user?.tenant.kind === "buyer";
+  const ob = isBuyer ? null : company?.onboarding;
+  const nav = isBuyer ? BUYER_NAV : NAV;
 
   const navFor = (mini: boolean) => (
     <nav className="relative flex flex-col h-full overflow-hidden">
@@ -52,7 +60,7 @@ export default function Shell() {
         {mini ? <img src="/brand/revenueforge-mark.png" alt="RevenueForge" className="h-8 w-8" /> : <ProductMark white />}
       </div>
       <div className={clsx("flex-1 space-y-0.5", mini ? "px-2" : "px-3")}>
-        {NAV.map((n) => (
+        {nav.map((n) => (
           <NavLink
             key={n.to}
             to={n.to}
@@ -179,9 +187,12 @@ export default function Shell() {
           </div>
         </header>
         <main key={loc.pathname.split("/").slice(0, 3).join("/")} className="flex-1 min-w-0 page-enter pb-20">
-          <Suspense fallback={<PageLoader />}><Outlet /></Suspense>
+          <Suspense fallback={<PageLoader />}>
+            {isBuyer && !BUYER_PATHS.some((p) => loc.pathname.startsWith(p)) ? <Navigate to="/app/buyer" replace />
+              : !isBuyer && loc.pathname.startsWith("/app/buyer") ? <Navigate to="/app" replace /> : <Outlet />}
+          </Suspense>
         </main>
-        <LandingAssistant mode="workspace" company={company?.name} />
+        {!isBuyer && <LandingAssistant mode="workspace" company={company?.name} />}
       </div>
     </div>
   );

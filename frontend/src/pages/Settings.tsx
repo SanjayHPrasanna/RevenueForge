@@ -42,7 +42,8 @@ export default function SettingsPage() {
     <div className="px-4 lg:px-8 py-6 max-w-[1100px] space-y-4">
       <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Settings</h1>
       <MyEmails />
-      <section className="card p-5">
+      {user?.tenant.kind !== "buyer" && <NetworkListing isAdmin={isAdmin} />}
+      {user?.tenant.kind !== "buyer" && <section className="card p-5">
         <div className="font-bold">Commercial policy</div>
         <div className="text-[13px] text-ink-muted mb-4">Used by every pricing run. Finance can still adjust per deal.</div>
         <div className="flex flex-wrap gap-4">
@@ -58,7 +59,7 @@ export default function SettingsPage() {
         </label>
         <div className="mt-4"><label className="label" htmlFor="company-about">About the company (used in proposals)</label><textarea id="company-about" className="input h-24 py-2" value={s.about} onChange={(e) => setS({ ...s, about: e.target.value })} disabled={!isAdmin} /></div>
         {isAdmin && <button className="btn-primary mt-4" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending && <Spinner />} Save settings</button>}
-      </section>
+      </section>}
 
       <section className="card">
         <div className="px-5 py-3.5 border-b border-line flex items-center">
@@ -129,6 +130,70 @@ function MyEmails() {
           </label>
         ))}
       </div>
+    </section>
+  );
+}
+
+/** "List us in the supplier network": what buyers can find, and the preview of exactly what they'll see. */
+function NetworkListing({ isAdmin }: { isAdmin: boolean }) {
+  const toast = useToast();
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["network-profile"], queryFn: () => api.get<any>("/network/profile") });
+  const [f, setF] = useState<any>(null);
+  const [preview, setPreview] = useState(false);
+  useEffect(() => { if (data && !f) setF({ ...data.settings, industries: (data.settings.industries || []).join(", ") }); }, [data]);
+  const save = useMutation({
+    mutationFn: (body: any) => api.put<any>("/network/profile", body),
+    onSuccess: (r) => { qc.setQueryData(["network-profile"], r); setF({ ...r.settings, industries: (r.settings.industries || []).join(", ") });
+      toast("ok", r.settings.listed ? "Your company is listed in the supplier network." : "Your company is not listed in the supplier network."); },
+    onError: (e: any) => toast("error", e.message),
+  });
+  if (!data || !f) return null;
+  const body = () => ({ ...f, industries: String(f.industries || "").split(",").map((x: string) => x.trim()).filter(Boolean) });
+  const p = data.preview;
+  return (
+    <section className="card p-5">
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="flex-1 min-w-[280px]">
+          <div className="font-bold">Supplier network</div>
+          <div className="text-[13px] text-ink-muted mt-0.5">Let buyers who upload an RFP find you when your proven work matches it, and invite you to bid. Buyers see your capabilities, company certificates, case-study summaries without client names, and how many people have each skill. Never people's names, rates, deals or clients.</div>
+        </div>
+        <span className={`chip ${data.settings.listed ? "bg-[#E4F1F7] text-fit-strong-ink" : "bg-line-soft text-ink-muted"}`}>{data.settings.listed ? "Listed" : "Not listed"}</span>
+      </div>
+      <div className="grid md:grid-cols-2 gap-4 mt-4 text-[13px]">
+        <div>
+          <span className="label">Regions you serve</span>
+          <div className="flex flex-wrap gap-1.5">
+            {data.regions.map((r: string) => {
+              const on = (f.regions || []).includes(r);
+              return <button key={r} type="button" disabled={!isAdmin} onClick={() => setF({ ...f, regions: on ? f.regions.filter((x: string) => x !== r) : [...(f.regions || []), r] })}
+                className={`chip border ${on ? "bg-brand-50 border-brand-300 text-brand-800" : "bg-white border-line text-ink-soft"}`} aria-pressed={on}>{r}</button>;
+            })}
+          </div>
+        </div>
+        <div className="space-y-3">
+          <label className="block"><span className="label">Industries you focus on</span>
+            <input className="input" disabled={!isAdmin} value={f.industries} onChange={(e) => setF({ ...f, industries: e.target.value })} placeholder="e.g. Healthcare, Transportation, Banking" /></label>
+          <label className="block"><span className="label">Short description for buyers</span>
+            <textarea className="input h-20 py-2" disabled={!isAdmin} value={f.summary} onChange={(e) => setF({ ...f, summary: e.target.value })} placeholder="Leave empty to use 'About the company'" /></label>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        {isAdmin && <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate({ ...body(), listed: !data.settings.listed })}>
+          {save.isPending && <Spinner />} {data.settings.listed ? "Remove us from the network" : "List us in the supplier network"}</button>}
+        {isAdmin && data.settings.listed && <button className="btn-outline" disabled={save.isPending} onClick={() => save.mutate(body())}>Save changes</button>}
+        <button className="btn-ghost" onClick={() => setPreview(!preview)}>{preview ? "Hide" : "Preview"} what buyers see</button>
+        {!isAdmin && <span className="text-[12.5px] text-ink-muted">Only company admins can change the listing.</span>}
+      </div>
+      {preview && (
+        <div className="mt-4 rounded-lg border border-line-soft bg-paper p-4 text-[13px] space-y-2 anim-fade-in">
+          <div><b>{p.name}</b> · {p.headquarters || "Headquarters not set"} · {p.headcount} people</div>
+          <div><span className="text-ink-muted">Capabilities:</span> {p.capabilities.map((c: any) => c.name).join(", ") || "none yet"}</div>
+          <div><span className="text-ink-muted">Certificates and partnerships:</span> {p.certifications.map((c: any) => c.name).join(", ") || "none"}</div>
+          <div><span className="text-ink-muted">Case studies:</span> {p.case_studies.map((c: any) => c.title).join("; ") || "none yet"}</div>
+          <div><span className="text-ink-muted">Skills (people):</span> {p.skills.map((s: any) => `${s.technology} ${s.people}`).join(", ") || "none"}</div>
+        </div>
+      )}
     </section>
   );
 }

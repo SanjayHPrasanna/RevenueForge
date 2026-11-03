@@ -24,6 +24,8 @@ const Onboarding = React.lazy(() => import("./pages/Onboarding"));
 const SettingsPage = React.lazy(() => import("./pages/Settings"));
 const WinLoss = React.lazy(() => import("./pages/WinLoss"));
 const RadarPage = React.lazy(() => import("./pages/Radar"));
+const BuyerRequests = React.lazy(() => import("./pages/Buyer").then((m) => ({ default: m.BuyerRequests })));
+const BuyerRequest = React.lazy(() => import("./pages/Buyer").then((m) => ({ default: m.BuyerRequest })));
 
 /** Shown for addresses that don't exist, instead of silently jumping to the home page. */
 function NotFound() {
@@ -84,6 +86,8 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="learning" element={<Learning />} />
                 <Route path="winloss" element={<WinLoss />} />
                 <Route path="opportunities" element={<RadarPage />} />
+                <Route path="buyer" element={<BuyerRequests />} />
+                <Route path="buyer/:id" element={<BuyerRequest />} />
                 <Route path="settings" element={<SettingsPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />

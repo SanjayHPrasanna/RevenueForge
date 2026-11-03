@@ -183,7 +183,7 @@ _STEMMED_STOP = sorted({_stem(w) for w in ENGLISH_STOP_WORDS} | {_stem(_stem(w))
 
 
 def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", industry: str = "", similarity=None,
-                       guidance: str = "", progress=None) -> list[dict]:
+                       guidance: str = "", progress=None, use_ai: bool = True) -> list[dict]:
     """Adds match_status, match_score and match evidence to each requirement dict (in place) and returns them.
 
     similarity: optional callable(queries, docs) -> (matrix, method) supplying semantic (embedding) similarity.
@@ -326,7 +326,7 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
             held_c = [c for c in kb.certifications if c.get("kind") == "company" and standards_in(c["name"])]
             held_c.sort(key=lambda c: not re.search(r"27001|soc|pci", c["name"], re.I))  # security certificates first
             r["match"]["held_certificates"] = [{"name": c["name"]} for c in held_c][:2]
-    if llm.is_enabled():
+    if use_ai and llm.is_enabled():
         ai_judge(reqs, kb, inv, guidance, progress)
         # Anything the AI was meant to check but couldn't (quota, timeouts) is flagged so reviewers see it, and a
         # similarity-only "strong" is held at "partial" until a person or the AI confirms it.

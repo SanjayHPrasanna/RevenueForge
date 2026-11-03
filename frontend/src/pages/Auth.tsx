@@ -129,23 +129,23 @@ export function Signup() {
   const nav = useNavigate();
   const loc = useLocation();
   const [g, setG] = useState<{ credential: string; email: string; name: string; provider?: "google" | "microsoft"; nonce?: string } | null>((loc.state as any)?.google || null);
-  const [f, setF] = useState({ company_name: "", industry: "", headquarters: "", name: "", email: "", password: "" });
+  const [f, setF] = useState({ company_name: "", industry: "", headquarters: "", name: "", email: "", password: "", kind: new URLSearchParams(loc.search).get("as") === "buyer" ? "buyer" : "vendor" });
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
+  const after = (u?: any) => nav(f.kind === "buyer" || u?.tenant?.kind === "buyer" ? "/app/buyer" : u && Object.keys(u.tenant.onboarding || {}).length ? "/app" : "/onboarding");
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setErr("");
     try {
       if (g) {
-        const company = { company_name: f.company_name, industry: f.industry, headquarters: f.headquarters };
+        const company = { company_name: f.company_name, industry: f.industry, headquarters: f.headquarters, kind: f.kind };
         const r = g.provider === "microsoft" ? await microsoft(g.credential, g.nonce || "", company) : await google(g.credential, company);
         if (r.needs_company) throw new Error("Enter your company name.");
-        nav(r.user && Object.keys(r.user.tenant.onboarding || {}).length ? "/app" : "/onboarding");
+        after(r.user);
       } else {
-        await register(f);
-        nav("/onboarding");
+        after(await register(f));
       }
     } catch (e: any) {
       setErr(e.message);
@@ -184,8 +184,19 @@ export function Signup() {
         </div>
       )}
       <form onSubmit={submit} className="space-y-4">
+        <fieldset>
+          <legend className="label">This workspace is for</legend>
+          <div className="grid grid-cols-2 gap-2">
+            {[["vendor", "Winning work", "We bid on RFPs and tenders"], ["buyer", "Buying", "We issue RFPs and find suppliers"]].map(([k, l, d]) => (
+              <label key={k} className={`cursor-pointer rounded-lg border px-3 py-2.5 transition-colors ${f.kind === k ? "border-brand-500 bg-brand-50" : "border-line hover:border-brand-200"}`}>
+                <input type="radio" name="kind" value={k} checked={f.kind === k} onChange={() => setF({ ...f, kind: k })} className="sr-only" />
+                <span className="block font-semibold text-[13.5px]">{l}</span><span className="block text-[12px] text-ink-muted">{d}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
         <div>
-          <label className="label" htmlFor="cn">Company name</label>
+          <label className="label" htmlFor="cn">{f.kind === "buyer" ? "Organisation name" : "Company name"}</label>
           <input id="cn" className="input" required value={f.company_name} onChange={set("company_name")} />
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -216,7 +227,7 @@ export function Signup() {
         </>}
         {err && <div className="text-sm text-fit-gap-ink">{err}</div>}
         <button className="btn-primary w-full h-10" disabled={busy}>{busy && <Spinner />} Create workspace</button>
-        <p className="text-[12px] text-ink-muted">You'll be the admin of this workspace. Next, you'll upload your company pack.</p>
+        <p className="text-[12px] text-ink-muted">You'll be the admin of this workspace. {f.kind === "buyer" ? "Next, you'll upload an RFP and see which suppliers can deliver it." : "Next, you'll upload your company pack."}</p>
       </form>
     </Frame>
   );

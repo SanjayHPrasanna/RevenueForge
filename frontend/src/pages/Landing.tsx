@@ -228,6 +228,9 @@ function Hero() {
               </Link>
               <a href="#how" className="btn btn-lg border border-white/20 bg-white/[.06] text-white backdrop-blur hover:bg-white/[.12]">See how it works</a>
             </div>
+            <p className="mt-4 text-[13.5px] text-brand-100/75">
+              Issuing an RFP instead? <Link to="/signup?as=buyer" className="font-semibold text-white underline underline-offset-4 decoration-white/40 hover:decoration-white">Find suppliers who have proven they can deliver it</Link>.
+            </p>
             <ul className="mt-11 flex flex-col gap-2.5 text-[14.5px] text-brand-100/80">
               {PROOF.map((p) => (
                 <li key={p} className="flex items-start gap-2.5">

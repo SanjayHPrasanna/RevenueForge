@@ -7,7 +7,7 @@ export type User = {
   name: string;
   email: string;
   role: string;
-  tenant: { id: string; name: string; slug: string; onboarding: Record<string, boolean> };
+  tenant: { id: string; name: string; slug: string; onboarding: Record<string, boolean>; kind?: "vendor" | "buyer" };
 };
 
 type AuthState = {

@@ -33,6 +33,8 @@ class Tenant(Base):
     # pricing & delivery policy
     settings: Mapped[dict] = mapped_column(JSON, default=dict)
     onboarding: Mapped[dict] = mapped_column(JSON, default=dict)  # step -> status
+    # "vendor": a company that bids (the original RevenueForge workspace); "buyer": an organisation that issues RFPs
+    kind: Mapped[str] = mapped_column(String(20), default="vendor")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -392,3 +394,36 @@ class TenderFit(Base):
     status: Mapped[str] = mapped_column(String(20), default="new")  # new, saved, dismissed, deal
     deal_id: Mapped[str] = mapped_column(String(32), default="")
     scored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+# --------------------------------------------------------------------------- supplier network
+class NetworkRequest(Base):
+    """A buyer's RFP, read once so suppliers can be shortlisted against it."""
+    __tablename__ = "network_requests"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    tenant_id: Mapped[str] = mapped_column(String(32), index=True)  # the buyer
+    title: Mapped[str] = mapped_column(String(300), default="")
+    region: Mapped[str] = mapped_column(String(60), default="")
+    industry: Mapped[str] = mapped_column(String(120), default="")
+    due_date: Mapped[str] = mapped_column(String(30), default="")
+    document_id: Mapped[str] = mapped_column(String(32), default="")
+    requirements: Mapped[list] = mapped_column(JSON, default=list)
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_by: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class NetworkInvite(Base):
+    """A buyer invited a listed supplier to bid on one request."""
+    __tablename__ = "network_invites"
+    __table_args__ = (UniqueConstraint("request_id", "vendor_tenant_id"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    request_id: Mapped[str] = mapped_column(String(32), index=True)
+    buyer_tenant_id: Mapped[str] = mapped_column(String(32), index=True)
+    vendor_tenant_id: Mapped[str] = mapped_column(String(32), index=True)
+    status: Mapped[str] = mapped_column(String(20), default="invited")  # invited, accepted, declined
+    message: Mapped[str] = mapped_column(Text, default="")
+    fit: Mapped[int] = mapped_column(Integer, default=0)
+    deal_id: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

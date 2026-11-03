@@ -32,6 +32,7 @@ class RegisterIn(BaseModel):
     name: str = Field(min_length=2, max_length=200)
     email: EmailStr
     password: str = Field(min_length=8, max_length=200)
+    kind: str = "vendor"  # vendor: a company that bids; buyer: an organisation that issues RFPs
 
 
 class LoginIn(BaseModel):
@@ -51,11 +52,12 @@ class GoogleIn(BaseModel):
     company_name: str = ""
     industry: str = ""
     headquarters: str = ""
+    kind: str = "vendor"
 
 
 def user_out(u: User, t: Tenant) -> dict:
     return {"id": u.id, "name": u.name, "email": u.email, "role": u.role,
-            "tenant": {"id": t.id, "name": t.name, "slug": t.slug, "onboarding": t.onboarding or {}}}
+            "tenant": {"id": t.id, "name": t.name, "slug": t.slug, "onboarding": t.onboarding or {}, "kind": t.kind or "vendor"}}
 
 
 def _slug(db: Session, name: str) -> str:
@@ -76,7 +78,8 @@ def create_tenant(db: Session, data: RegisterIn) -> tuple[Tenant, User]:
     if db.scalar(select(User).where(func.lower(User.email) == data.email.lower())):
         raise HTTPException(409, "An account with this email already exists. Sign in instead.")
     t = Tenant(name=data.company_name.strip(), slug=_slug(db, data.company_name), industry=data.industry, website=data.website,
-               headquarters=data.headquarters, settings=dict(DEFAULT_SETTINGS), onboarding={})
+               headquarters=data.headquarters, settings=dict(DEFAULT_SETTINGS), onboarding={},
+               kind="buyer" if data.kind == "buyer" else "vendor")
     db.add(t)
     db.flush()
     u = User(tenant_id=t.id, email=data.email.lower(), name=data.name.strip(), role="admin", password_hash=hash_password(data.password))
@@ -266,7 +269,7 @@ def microsoft_sign_in(data: MicrosoftIn, db: Session = Depends(get_db)):
         return {"token": create_token(u), "user": user_out(u, db.get(Tenant, u.tenant_id))}
     if not data.company_name.strip():
         return {"needs_company": True, "email": m["email"], "name": m["name"]}
-    reg = RegisterIn(company_name=data.company_name, industry=data.industry, headquarters=data.headquarters, name=m["name"], email=m["email"],
+    reg = RegisterIn(company_name=data.company_name, industry=data.industry, headquarters=data.headquarters, kind=data.kind, name=m["name"], email=m["email"],
                      password="x" * 8)
     t, u = create_tenant(db, reg)
     u.password_hash, u.ms_oid = _unusable_password(), m["sub"]
@@ -289,7 +292,7 @@ def google_sign_in(data: GoogleIn, db: Session = Depends(get_db)):
         return {"token": create_token(u), "user": user_out(u, db.get(Tenant, u.tenant_id))}
     if not data.company_name.strip():
         return {"needs_company": True, "email": g["email"], "name": g["name"]}
-    reg = RegisterIn(company_name=data.company_name, industry=data.industry, headquarters=data.headquarters, name=g["name"], email=g["email"],
+    reg = RegisterIn(company_name=data.company_name, industry=data.industry, headquarters=data.headquarters, kind=data.kind, name=g["name"], email=g["email"],
                      password="x" * 8)
     t, u = create_tenant(db, reg)
     u.password_hash, u.google_sub = _unusable_password(), g["sub"]

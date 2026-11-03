@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { Bookmark, ChevronDown, ExternalLink, EyeOff, Globe2, Info, RefreshCw, Radar as RadarIcon, Search, Undo2, X } from "lucide-react";
+import { Bookmark, ChevronDown, Mail, ExternalLink, EyeOff, Globe2, Info, RefreshCw, Radar as RadarIcon, Search, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Dropzone, Empty, Modal, PageLoader, Spinner, StatStrip, useToast } from "../components/ui";
@@ -107,6 +107,51 @@ function Sources() {
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+/** Invitations to bid from buyers in the supplier network. */
+function Invitations() {
+  const toast = useToast();
+  const nav = useNavigate();
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ["invitations"], queryFn: () => api.get<any[]>("/network/invitations") });
+  const act = useMutation({
+    mutationFn: ({ id, what }: { id: string; what: "accept" | "decline" }) => api.post<any>(`/network/invitations/${id}/${what}`),
+    onSuccess: (r, v) => {
+      qc.invalidateQueries({ queryKey: ["invitations"] });
+      if (v.what === "accept") { toast("ok", "Deal started from the buyer's RFP."); nav(`/app/deals/${r.deal_id}`); } else toast("ok", "Invitation declined.");
+    },
+    onError: (e: any) => toast("error", e.message),
+  });
+  if (!data?.length) return null;
+  const open = data.filter((i) => i.status === "invited");
+  return (
+    <section className="card mb-4">
+      <div className="px-5 py-3.5 border-b border-line-soft flex items-center gap-2">
+        <Mail className="h-4 w-4 text-ember-600" />
+        <div className="font-bold flex-1">Invitations to bid</div>
+        <span className="text-[12.5px] text-ink-muted">{open.length} waiting · from buyers in the supplier network</span>
+      </div>
+      <ul className="divide-y divide-line-soft">
+        {data.map((i) => (
+          <li key={i.id} className="px-5 py-3 flex flex-wrap items-center gap-3 text-[13.5px]">
+            <div className="flex-1 min-w-[280px]">
+              <div className="font-semibold">{i.request.title}</div>
+              <div className="text-[12.5px] text-ink-muted">{i.buyer.name} · {i.request.requirements} requirements ({i.request.mandatory} mandatory)
+                {i.request.region ? ` · ${i.request.region}` : ""}{i.request.due_date ? ` · due ${i.request.due_date}` : ""} · your coverage {i.fit}%</div>
+              {i.message && <div className="text-[12.5px] text-ink-soft mt-0.5">“{i.message}”</div>}
+            </div>
+            {i.status === "invited" ? <>
+              <button className="btn-primary h-9" disabled={act.isPending} onClick={() => act.mutate({ id: i.id, what: "accept" })}>Accept and start a deal</button>
+              <button className="btn-ghost h-9" disabled={act.isPending} onClick={() => act.mutate({ id: i.id, what: "decline" })}>Decline</button>
+            </> : i.status === "accepted" && i.deal_id
+              ? <Link to={`/app/deals/${i.deal_id}`} className="btn-outline h-9">Open the deal</Link>
+              : <span className="chip bg-line-soft text-ink-muted capitalize">{i.status}</span>}
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
@@ -253,6 +298,7 @@ export default function RadarPage() {
         <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Public tenders you could win</h1>
         <p className="text-ink-muted text-[14px] mt-1">Open tenders from public procurement sources, scored against what your company has actually delivered.</p>
       </div>
+      <Invitations />
       <Sources />
       {data && (
         <div className="mb-4">
