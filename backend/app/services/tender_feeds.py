@@ -439,6 +439,8 @@ def store(db, items: list[dict]) -> int:
                 setattr(row, k, v)
         row.fetched_at = now
         n += 1
+        if n % 200 == 0:
+            db.commit()  # short transactions: the database is never locked for long, and a failure loses little
     db.commit()
     return n
 
@@ -466,8 +468,14 @@ def refresh(sources: list[str] | None = None) -> dict:
     """Read every enabled source once. Safe to call from a thread; only one refresh runs at a time."""
     from ..db import SessionLocal
     from ..models import TenderSource
+    from ..db import DB_STATE
+    if not DB_STATE["ok"]:
+        return {"started": False, "reason": "The database needs repairing first (see DEPLOY.md), so nothing is written."}
     if not _run_lock.acquire(blocking=False):
         return {"started": False, "reason": "A refresh is already running."}
+    if not _take_lease():
+        _run_lock.release()
+        return {"started": False, "reason": "Another copy of the app is refreshing right now."}
     _state.update(running=True, started=datetime.now(timezone.utc).isoformat())
     result = {}
     db = SessionLocal()
@@ -496,6 +504,7 @@ def refresh(sources: list[str] | None = None) -> dict:
         prune(db)
     finally:
         db.close()
+        _release_lease()
         _state.update(running=False, current="")
         _run_lock.release()
     return {"started": True, "result": result}
@@ -508,6 +517,49 @@ def refresh_in_background(sources: list[str] | None = None) -> bool:
     return True
 
 
+LEASE_KEY, LEASE_MINUTES = "_refresh_lease", 45
+
+
+def _take_lease() -> bool:
+    """During a restart Azure briefly runs the old and new copy of the app side by side. Only one of them may refresh:
+    whoever writes a fresh lease row first wins, the other skips this round."""
+    from ..db import SessionLocal
+    from ..models import TenderSource
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        row = db.get(TenderSource, LEASE_KEY)
+        if row and row.last_run:
+            held = row.last_run if row.last_run.tzinfo else row.last_run.replace(tzinfo=timezone.utc)
+            if now - held < timedelta(minutes=LEASE_MINUTES) and row.error != "released":
+                return False
+        row = row or TenderSource(key=LEASE_KEY)
+        row.last_run, row.error = now, ""
+        db.add(row)
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        return False
+    finally:
+        db.close()
+
+
+def _release_lease() -> None:
+    from ..db import SessionLocal
+    from ..models import TenderSource
+    db = SessionLocal()
+    try:
+        row = db.get(TenderSource, LEASE_KEY)
+        if row:
+            row.error = "released"
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
 def start_schedule() -> None:
     """Read the sources a minute after start-up, then every RADAR_REFRESH_HOURS hours (default 12). RADAR_REFRESH_HOURS=0 turns it off."""
     hours = settings.radar_refresh_hours
@@ -515,7 +567,7 @@ def start_schedule() -> None:
         return
 
     def loop():
-        time.sleep(60)
+        time.sleep(300)  # well after start-up, once Azure has stopped the previous copy of the app
         while True:
             try:
                 refresh()

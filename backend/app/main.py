@@ -36,6 +36,15 @@ _SECURITY_HEADERS = {
 
 
 @app.middleware("http")
+async def _no_nul(request: Request, call_next):
+    """A NUL character has no business in a URL; PostgreSQL can't even store one. Refuse it up front."""
+    if "%00" in request.url.query or "\x00" in request.url.query or "%00" in request.url.path:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"detail": "Invalid character in the address."}, status_code=400)
+    return await call_next(request)
+
+
+@app.middleware("http")
 async def _headers(request: Request, call_next):
     """Security headers on every response, and browser caching for the built web app."""
     response = await call_next(request)
@@ -107,7 +116,8 @@ async def _unhandled(request: Request, exc: Exception):
 @app.get("/api/health")
 def health():
     """Public liveness check. AI usage and errors are shown to signed-in admins in Settings, not here."""
-    return {"status": "ok"}
+    from .db import DB_STATE
+    return {"status": "ok"} if DB_STATE["ok"] else {"status": "degraded", "database": "damaged - see DEPLOY.md, 'Repairing the database'"}
 
 
 @app.get("/robots.txt", include_in_schema=False)

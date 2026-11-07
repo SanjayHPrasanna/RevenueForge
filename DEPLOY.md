@@ -101,12 +101,54 @@ Delete the downloaded publish profile file afterwards: it is a password.
 
 - **Data**: the database and files are in `/home/data` on the Web App. To look at or back them up: Web App →
   **Development Tools → Advanced Tools (Kudu)** → **Debug console**. Higher plans (Standard and up) offer scheduled backups.
-- **More users**: the built-in database (SQLite) suits a feedback round on a single instance. For wider use, create
-  an *Azure Database for PostgreSQL – Flexible Server* and set `DATABASE_URL` to
-  `postgresql+psycopg2://USER:PASSWORD@HOST:5432/revenueforge?sslmode=require`. Keep the plan at one instance either way:
-  deals and videos are processed inside the app.
+- **Database**: see the two sections below. The built-in SQLite file is fine for trying the app, but `/home` on App
+  Service is a network drive, and during a restart Azure briefly runs the old and new copy of the app side by side. Both
+  can damage a SQLite file. For a demo or real use, move to PostgreSQL. Keep the plan at one instance either way: deals
+  and videos are processed inside the app.
 - **Video voice**: the server uses the open-source eSpeak voice, which sounds more robotic than Windows' voices.
 - **Logs**: Web App → **Monitoring → Log stream**.
 - **Restart** after changing settings: Web App → **Overview → Restart**. A restart interrupts any deal being processed; it
   shows as interrupted and can be re-run.
 - **Cost control**: **Stop** the Web App when not in use (data is kept); delete the resource group to remove everything.
+
+---
+
+## Repairing the database (SQLite)
+
+Signs of damage: the Opportunities sources show *"database disk image is malformed"*, or `https://<your-app>/api/health`
+says `"status": "degraded"`. While it's damaged, the tender refresh stops writing so the damage can't spread.
+
+1. Web App → **Settings → Environment variables** → add `REPAIR_DATABASE` = `true` → **Apply**. The app restarts.
+2. On start-up the app checks the file, copies every readable row into a new file (`revenueforge-repaired-<time>.db`) and
+   switches to it. The damaged file is kept as it is. Public tenders that couldn't be read come back on the next refresh.
+   Progress shows in **Monitoring → Log stream** (lines starting with `[startup]`).
+3. Check `/api/health` says `"status": "ok"`, then delete the `REPAIR_DATABASE` setting again (**Apply**).
+
+To go back to the old file, delete `/home/data/db-current.txt` (Advanced Tools (Kudu) → Debug console) and restart.
+
+---
+
+## Moving to PostgreSQL (recommended)
+
+1. Azure portal → **Create a resource → Azure Database for PostgreSQL – Flexible Server**:
+   - same resource group and region as the Web App;
+   - **Workload type: Development** (Burstable B1ms is enough to start; check the price shown before creating);
+   - **Authentication: PostgreSQL authentication only**; choose an admin user name and a strong password
+     (letters and numbers only makes the address below simpler);
+   - **Networking: Public access**, and tick **Allow public access from any Azure service within Azure to this server**.
+2. When it's created: the server → **Settings → Databases → Add**, name `revenueforge`.
+3. Web App → **Settings → Environment variables** → add `DATABASE_URL`:
+   ```
+   postgresql+psycopg2://USER:PASSWORD@<server>.postgres.database.azure.com:5432/revenueforge?sslmode=require
+   ```
+   (`<server>` is the *Server name* on the PostgreSQL server's **Overview**.) **Apply**: the app restarts.
+4. On that first start the app finds the PostgreSQL database empty and copies everything from the SQLite file into it
+   (every readable row, even from a damaged file). Watch **Log stream** for `[startup] copied ... rows`.
+5. Check `/api/health`, sign in, and open a deal. The SQLite file stays in `/home/data`; to go back, delete
+   `DATABASE_URL` and restart.
+
+Uploaded and generated files stay in `/home/data`; only the database moves. The PostgreSQL server keeps its own
+automatic backups (7 days by default), restorable to any point in time from its **Backup and restore** page.
+
+From a terminal the same tools are available: `python -m app.tools.repair_db [--apply]` and
+`python -m app.tools.copy_db "<postgresql address>"`.

@@ -36,9 +36,22 @@ _load_env_file(BASE_DIR / ".env")
 _load_env_file(BASE_DIR / "team.env", TEAM_KEYS)
 
 
+def _sqlite_file() -> Path:
+    """The SQLite file in use. After a repair, DATA_DIR/db-current.txt names the new file, so a restart switches to it
+    without renaming a file another copy of the app may still have open."""
+    pointer = DATA_DIR / "db-current.txt"
+    try:
+        name = pointer.read_text(encoding="utf-8").strip()
+        if name and "/" not in name and "\\" not in name and name.endswith(".db") and (DATA_DIR / name).is_file():
+            return DATA_DIR / name
+    except OSError:
+        pass
+    return DATA_DIR / "revenueforge.db"
+
+
 class Settings:
     app_name = "RevenueForge"
-    database_url = os.getenv("DATABASE_URL", f"sqlite:///{(DATA_DIR / 'revenueforge.db').as_posix()}")
+    database_url = os.getenv("DATABASE_URL", f"sqlite:///{_sqlite_file().as_posix()}")
     jwt_secret = os.getenv("JWT_SECRET", "")
     jwt_hours = int(os.getenv("JWT_HOURS", "12"))
     # "Sign in with Google": the OAuth client ID from Google Cloud Console. Empty = the Google button is hidden.

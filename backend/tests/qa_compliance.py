@@ -148,11 +148,13 @@ with TestClient(app, raise_server_exceptions=False) as c:
     ok("admin's token stops working", c.get("/api/auth/me", headers=A).status_code == 401)
     ok("presales' token stops working", c.get("/api/auth/me", headers=AP).status_code == 401)
     ok("can't sign in any more", c.post("/api/auth/login", json={"email": "admin@comp-a.example", "password": PW}).status_code == 401)
-    from sqlalchemy import select, text
+    from sqlalchemy import inspect as sa_inspect, select, text
+    from app.db import engine
     with SessionLocal() as db:
         left = 0
-        for (tbl,) in db.execute(text("SELECT name FROM sqlite_master WHERE type='table'")).all():
-            cols = [r[1] for r in db.execute(text(f"PRAGMA table_info({tbl})")).all()]
+        insp = sa_inspect(engine)
+        for tbl in insp.get_table_names():
+            cols = [col["name"] for col in insp.get_columns(tbl)]
             for col in ("tenant_id", "buyer_tenant_id", "vendor_tenant_id"):
                 if col in cols:
                     left += db.execute(text(f"SELECT count(*) FROM {tbl} WHERE {col} = :t"), {"t": tid_a}).scalar()

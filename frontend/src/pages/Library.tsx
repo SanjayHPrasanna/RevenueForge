@@ -137,7 +137,6 @@ export default function Library() {
         />
         <button className="btn-outline" onClick={() => folderInput.current?.click()}><FolderUp className="h-4 w-4" /> Import a folder</button>
         <button className="btn-outline" onClick={() => {
-          window.open("https://drive.google.com/drive/my-drive", "_blank", "noopener,noreferrer");
           setDrive(true);
         }}>
           <GoogleDriveLogo /> {driveStatus?.connected ? "Connect another Drive folder" : "Connect Google Drive"}
