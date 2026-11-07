@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { NoticeBar } from "./GoogleButton";
-import { BookOpen, Brain, Briefcase, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, FileSearch, LogOut, Menu, Network, Radar, Settings, Sparkles, TrendingUp, Trophy, X } from "lucide-react";
+import { BookOpen, Brain, Briefcase, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, FileSearch, LogOut, Menu, Network, Radar, Settings, ShieldCheck, Sparkles, TrendingUp, Trophy, X } from "lucide-react";
 import { Suspense, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -180,6 +180,9 @@ export default function Shell() {
             {menu && (
               <div className="absolute right-0 mt-1.5 card shadow-lift w-56 py-1 text-sm anim-scale-in origin-top-right" onMouseLeave={() => setMenu(false)}>
                 <div className="px-3 py-2 text-[12px] text-ink-muted border-b border-line-soft">{user?.email}</div>
+                <a className="w-full text-left px-3 py-2 hover:bg-paper flex items-center gap-2" href="/trust" target="_blank" rel="noreferrer">
+                  <ShieldCheck className="h-4 w-4" /> Trust & data
+                </a>
                 <button className="w-full text-left px-3 py-2 hover:bg-paper flex items-center gap-2" onClick={logout}>
                   <LogOut className="h-4 w-4" /> Sign out
                 </button>

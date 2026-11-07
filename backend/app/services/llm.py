@@ -134,6 +134,16 @@ def _usable(p: Profile) -> str:
     return "none"
 
 
+def free_tier() -> bool:
+    """True when this company's AI runs on a free Gemini key: Google may use what is sent to improve its products."""
+    p = current_profile()
+    return _usable(p) == "gemini" and not p.paid
+
+
+FREE_TIER_ACK = ("Your AI runs on a free Google Gemini key. On the free tier Google may use what is sent to improve its products, "
+                 "and people may read it. Confirm the document is a sample or non-confidential, or switch to a paid key in Settings.")
+
+
 # --------------------------------------------------------------------------- status (per key)
 _states: dict[str, dict] = {}
 _state_lock = threading.Lock()

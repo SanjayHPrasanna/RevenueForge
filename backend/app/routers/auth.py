@@ -56,7 +56,7 @@ class GoogleIn(BaseModel):
 
 
 def user_out(u: User, t: Tenant) -> dict:
-    return {"id": u.id, "name": u.name, "email": u.email, "role": u.role,
+    return {"id": u.id, "name": u.name, "email": u.email, "role": u.role, "sso": bool(u.google_sub or u.ms_oid),
             "tenant": {"id": t.id, "name": t.name, "slug": t.slug, "onboarding": t.onboarding or {}, "kind": t.kind or "vendor"}}
 
 

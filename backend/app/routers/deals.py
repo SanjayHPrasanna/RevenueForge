@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from ..models import STAGES, Deal, DealStage, Document, Requirement, RequirementComment, User
 from ..security import Ctx, current_ctx, require_roles
 from ..services import knowledge as K
-from ..services import learning, pipeline
+from ..services import learning, llm, pipeline
 from ..services.masking import deal_masker, guess_client
 from ..services.parsing import parse_document
 from .library import save_upload
@@ -86,7 +86,9 @@ async def detect(file: UploadFile = File(...), ctx: Ctx = Depends(current_ctx)):
 @router.post("")
 async def create_deal(file: UploadFile = File(...), name: str = Form(""), client_name: str = Form(""), client_alias: str = Form(""),
                       client_aliases: str = Form(""), confidential: bool = Form(True), engagement_type: str = Form(""),
-                      ctx: Ctx = Depends(require_roles("presales"))):
+                      ai_ack: bool = Form(False), ctx: Ctx = Depends(require_roles("presales"))):
+    if llm.free_tier() and not ai_ack:
+        raise HTTPException(428, llm.FREE_TIER_ACK)
     doc, data = await save_upload(ctx, file, "rfp")
     aliases = [a.strip() for a in client_aliases.split(",") if a.strip()]
     n = ctx.db.scalar(select(func.count()).select_from(Deal).where(Deal.tenant_id == ctx.tenant_id)) or 0

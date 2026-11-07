@@ -106,6 +106,11 @@ class Settings:
 
     max_upload_mb = int(os.getenv("MAX_UPLOAD_MB", "40"))
 
+    # Shown on the public Trust & data, Privacy and Terms pages.
+    operator_name = os.getenv("OPERATOR_NAME", "RevenueForge").strip()  # who runs this service (legal entity name)
+    contact_email = os.getenv("CONTACT_EMAIL", "").strip()  # privacy questions, data requests and grievances
+    data_location = os.getenv("DATA_LOCATION", "").strip()  # e.g. "Microsoft Azure, Central India (Pune)"
+
 
 settings = Settings()
 

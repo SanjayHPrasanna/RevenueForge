@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Cpu, UserPlus } from "lucide-react";
+import { Cpu, Download, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Modal, PageLoader, Spinner, useToast } from "../components/ui";
-import { api } from "../lib/api";
+import { api, download } from "../lib/api";
 import { useAuth } from "../lib/auth";
 
 const ROLE_HELP: Record<string, string> = {
@@ -85,6 +85,8 @@ export default function SettingsPage() {
       </section>
 
       <AiEngine c={c} />
+
+      {isAdmin && <CompanyData name={c.name} />}
 
       <Modal open={inv} onClose={() => setInv(false)} title="Add a person">
         <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); invite.mutate(); }}>
@@ -399,6 +401,57 @@ function CompanyAi() {
       <div className="mt-3 text-[12px] text-ink-muted">
         Keys are stored encrypted and never shown again.{cfg.updated_by ? ` Last changed by ${cfg.updated_by}.` : ""} "Test connection" checks the saved settings.
       </div>
+    </section>
+  );
+}
+
+/** Download everything, or delete everything. Company admins only. */
+function CompanyData({ name }: { name: string }) {
+  const { user, logout } = useAuth();
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [confirmName, setConfirmName] = useState("");
+  const [pw, setPw] = useState("");
+  const sso = !!(user as any)?.sso;
+  const del = useMutation({
+    mutationFn: () => api.post<any>("/company/delete", { confirm_name: confirmName, password: pw }),
+    onSuccess: () => { setOpen(false); logout(); window.location.href = "/?deleted=1"; },
+    onError: (e: any) => toast("error", e.message),
+  });
+  const exportAll = async () => {
+    setBusy(true);
+    try { await download("/company/export", `${name} - RevenueForge export.zip`); toast("ok", "Export downloaded."); }
+    catch (e: any) { toast("error", e.message); } finally { setBusy(false); }
+  };
+  return (
+    <section className="card p-5">
+      <div className="font-bold flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-brand-600" /> Your company's data</div>
+      <div className="text-[13px] text-ink-muted mb-4">
+        Everything in this workspace belongs to your company. See <a className="underline" href="/trust" target="_blank" rel="noreferrer">Trust & data</a> for
+        where it's stored and which services handle it.
+      </div>
+      <div className="flex flex-wrap gap-3">
+        <button className="btn-outline" disabled={busy} onClick={exportAll}>{busy ? <Spinner /> : <Download className="h-4 w-4" />} Download all company data</button>
+        <button className="btn-ghost text-fit-gap-ink" onClick={() => { setConfirmName(""); setPw(""); setOpen(true); }}><Trash2 className="h-4 w-4" /> Delete company permanently</button>
+      </div>
+      <div className="text-[12px] text-ink-muted mt-2">The download is a zip with your library, every deal, comments, the audit log and all uploaded and generated files. Passwords and AI keys aren't included.</div>
+      <Modal open={open} onClose={() => !del.isPending && setOpen(false)} title="Delete this company permanently">
+        <form className="space-y-3 text-[13.5px]" onSubmit={(e) => { e.preventDefault(); del.mutate(); }}>
+          <p>This deletes <b>{name}</b> straight away: every user's access, the knowledge library, all deals and documents, comments, the audit log,
+            and every uploaded and generated file. It can't be undone. Download the company's data first if you may need it.</p>
+          <p className="text-ink-muted">Copies of an RFP that a supplier already accepted stay in that supplier's workspace.</p>
+          <div><label className="label" htmlFor="del-name">Type the company name to confirm</label>
+            <input id="del-name" className="input" value={confirmName} onChange={(e) => setConfirmName(e.target.value)} placeholder={name} autoComplete="off" /></div>
+          <div><label className="label" htmlFor="del-pw">Your password{sso ? " (leave empty if you only sign in with Google or Microsoft)" : ""}</label>
+            <input id="del-pw" className="input" type="password" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" /></div>
+          <div className="flex gap-3 pt-1">
+            <button className="btn-primary bg-fit-gap-ink hover:bg-fit-gap-ink" disabled={del.isPending || confirmName.trim() !== name.trim()}>
+              {del.isPending && <Spinner />} Delete permanently</button>
+            <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
+          </div>
+        </form>
+      </Modal>
     </section>
   );
 }

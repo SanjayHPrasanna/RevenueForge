@@ -235,6 +235,7 @@ export default function GoogleDriveImport({ onImported, onClose }: { onImported:
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [partialBatch, setPartialBatch] = useState("");
   const [error, setError] = useState("");
+  const [listFailed, setListFailed] = useState(false);  // Drive couldn't be read: don't offer to import a folder we can't see
 
   const close = () => {
     if (busy) return;
@@ -252,7 +253,9 @@ export default function GoogleDriveImport({ onImported, onClose }: { onImported:
       setToken(accessToken);
       setPath([root]);
       setFolders(await listFolders(accessToken, root.id));
+      setListFailed(false);
     } catch (e: any) {
+      setListFailed(true);
       setError(driveSetupError(e));
     } finally {
       setBusy(false);
@@ -266,7 +269,9 @@ export default function GoogleDriveImport({ onImported, onClose }: { onImported:
     try {
       setFolders(await listFolders(token, target.id));
       setPath(nextPath);
+      setListFailed(false);
     } catch (e: any) {
+      setListFailed(true);
       setError(driveSetupError(e));
     } finally {
       setBusy(false);
@@ -334,7 +339,8 @@ export default function GoogleDriveImport({ onImported, onClose }: { onImported:
           </div>
           <div className="max-h-[40vh] min-h-28 overflow-auto border border-line rounded-lg">
             {busy && <div className="py-8 text-center text-[13px] text-ink-muted"><LoaderCircle className="h-5 w-5 animate-spin inline mr-2" />{progress ? `Importing ${progress.done} of ${progress.total} files…` : "Loading folders…"}</div>}
-            {!busy && !folders.length && <div className="py-8 text-center text-[13px] text-ink-muted">No subfolders here. You can import this folder.</div>}
+            {!busy && !listFailed && !folders.length && <div className="py-8 text-center text-[13px] text-ink-muted">No subfolders here. You can import this folder.</div>}
+            {!busy && listFailed && <div className="py-8 text-center text-[13px] text-ink-muted">Google Drive couldn't be read. Fix the problem below, then connect again.</div>}
             {!busy && folders.map((folder) => (
               <button key={folder.id} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-[13px] hover:bg-paper border-b border-line last:border-0"
                 onClick={() => navigateTo([...path, folder])}>
@@ -353,7 +359,7 @@ export default function GoogleDriveImport({ onImported, onClose }: { onImported:
           )}
           <div className="mt-4 flex justify-between gap-3">
             <button className="btn-ghost" disabled={busy || path.length < 2} onClick={() => navigateTo(path.slice(0, -1))}>Back</button>
-            <button className="btn-primary" disabled={busy} onClick={importFolder}>
+            <button className="btn-primary" disabled={busy || listFailed} onClick={importFolder}>
               {busy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <HardDriveDownload className="h-4 w-4" />}
               {busy ? "Importing…" : `Import "${path[path.length - 1]?.name || "folder"}"`}
             </button>

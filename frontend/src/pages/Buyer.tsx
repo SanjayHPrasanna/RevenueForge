@@ -187,6 +187,7 @@ export function BuyerRequest() {
           <div className="flex-1 min-w-[300px]">
             <div className="font-bold">Suppliers who can deliver this</div>
             <div className="text-[12.5px] text-ink-muted mt-0.5 flex gap-1.5"><Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-brand-600" />{sl?.method}</div>
+            <div className="text-[12px] text-ink-faint mt-1">This shortlist is advice to help you find suppliers. It isn't a procurement decision and doesn't replace your own procurement rules.</div>
           </div>
         </div>
         {isLoading ? <PageLoader label="Comparing every listed supplier with your requirements" /> : !sl?.vendors?.length ? (

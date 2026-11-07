@@ -31,18 +31,27 @@ log = logging.getLogger("revenueforge.tenders")
 UA = {"User-Agent": "RevenueForge opportunity radar (open-data reader)", "Accept": "application/json"}
 LOOKBACK_DAYS = 21
 
+# Every source's reuse terms, shown on each tender and on the Sources panel. Summaries are shortened and contact details
+# removed before storing, which the attribution line says (CC BY and the Open Government Licences ask for changes to be noted).
 SOURCES = {
     "ted": {"name": "TED (EU and EEA)", "covers": "European Union, Norway, Iceland, Switzerland and other EEA buyers",
-            "url": "https://ted.europa.eu", "licence": "EU open data, free reuse"},
+            "url": "https://ted.europa.eu", "licence": "Free reuse under Commission Decision 2011/833/EU",
+            "licence_url": "https://ted.europa.eu/en/legal-notice",
+            "attribution": "Source: TED – Tenders Electronic Daily, © European Union. Summary shortened and contact details removed."},
     "uk_fts": {"name": "Find a Tender (UK)", "covers": "United Kingdom public sector, higher-value contracts",
-               "url": "https://www.find-tender.service.gov.uk", "licence": "Open Government Licence v3.0"},
+               "url": "https://www.find-tender.service.gov.uk", "licence": "Open Government Licence v3.0",
+               "licence_url": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
+               "attribution": "Contains public sector information licensed under the Open Government Licence v3.0. Summary shortened and contact details removed."},
     "worldbank": {"name": "World Bank procurement notices", "covers": "World Bank-financed projects in 100+ countries across Africa, Asia, "
                   "Latin America, the Middle East and Europe", "url": "https://projects.worldbank.org/en/projects-operations/procurement",
-                  "licence": "CC BY 4.0"},
+                  "licence": "CC BY 4.0", "licence_url": "https://creativecommons.org/licenses/by/4.0/",
+                  "attribution": "Source: The World Bank, procurement notices dataset, licensed under CC BY 4.0. Summary shortened and contact details removed."},
     "canadabuys": {"name": "CanadaBuys", "covers": "Government of Canada", "url": "https://canadabuys.canada.ca",
-                   "licence": "Open Government Licence – Canada"},
+                   "licence": "Open Government Licence – Canada", "licence_url": "https://open.canada.ca/en/open-government-licence-canada",
+                   "attribution": "Contains information licensed under the Open Government Licence – Canada. Summary shortened and contact details removed."},
     "sam": {"name": "SAM.gov (US federal)", "covers": "United States federal government", "url": "https://sam.gov",
-            "licence": "US public domain", "needs_key": True},
+            "licence": "US federal government data, SAM.gov terms of use", "licence_url": "https://sam.gov/about/terms-of-use",
+            "attribution": "Source: SAM.gov, U.S. General Services Administration. Summary shortened and contact details removed.", "needs_key": True},
 }
 NOT_COVERED = [
     {"where": "India (national portals)", "why": "CPPP and GeM publish no open data feed or API. World Bank-financed projects in India are covered."},

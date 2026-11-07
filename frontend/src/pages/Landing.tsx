@@ -510,6 +510,9 @@ function Footer() {
           <ul className="mt-3 space-y-2 text-[14px] text-ink-muted">
             <li><Link to="/signup" className="hover:text-brand-950">Create workspace</Link></li>
             <li><Link to="/login" className="hover:text-brand-950">Sign in</Link></li>
+            <li><Link to="/trust" className="hover:text-brand-950">Trust & data</Link></li>
+            <li><Link to="/privacy" className="hover:text-brand-950">Privacy</Link></li>
+            <li><Link to="/terms" className="hover:text-brand-950">Terms</Link></li>
           </ul>
         </nav>
       </div>

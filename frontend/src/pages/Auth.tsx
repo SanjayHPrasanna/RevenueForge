@@ -227,7 +227,9 @@ export function Signup() {
         </>}
         {err && <div className="text-sm text-fit-gap-ink">{err}</div>}
         <button className="btn-primary w-full h-10" disabled={busy}>{busy && <Spinner />} Create workspace</button>
-        <p className="text-[12px] text-ink-muted">You'll be the admin of this workspace. {f.kind === "buyer" ? "Next, you'll upload an RFP and see which suppliers can deliver it." : "Next, you'll upload your company pack."}</p>
+        <p className="text-[12px] text-ink-muted">You'll be the admin of this workspace. {f.kind === "buyer" ? "Next, you'll upload an RFP and see which suppliers can deliver it." : "Next, you'll upload your company pack."}{" "}
+          By creating a workspace you agree to the <a className="underline" href="/terms" target="_blank" rel="noreferrer">Terms</a> and{" "}
+          <a className="underline" href="/privacy" target="_blank" rel="noreferrer">Privacy policy</a>.</p>
       </form>
     </Frame>
   );

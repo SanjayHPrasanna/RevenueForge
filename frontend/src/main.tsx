@@ -25,6 +25,9 @@ const SettingsPage = React.lazy(() => import("./pages/Settings"));
 const WinLoss = React.lazy(() => import("./pages/WinLoss"));
 const RadarPage = React.lazy(() => import("./pages/Radar"));
 const Market = React.lazy(() => import("./pages/Market"));
+const TrustPage = React.lazy(() => import("./pages/Trust").then((m) => ({ default: m.TrustPage })));
+const PrivacyPage = React.lazy(() => import("./pages/Trust").then((m) => ({ default: m.PrivacyPage })));
+const TermsPage = React.lazy(() => import("./pages/Trust").then((m) => ({ default: m.TermsPage })));
 const BuyerRequests = React.lazy(() => import("./pages/Buyer").then((m) => ({ default: m.BuyerRequests })));
 const BuyerRequest = React.lazy(() => import("./pages/Buyer").then((m) => ({ default: m.BuyerRequest })));
 
@@ -73,6 +76,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/auth/microsoft" element={<MicrosoftCallback />} />
+              <Route path="/trust" element={<TrustPage />} />
+              <Route path="/privacy" element={<PrivacyPage />} />
+              <Route path="/terms" element={<TermsPage />} />
               <Route path="/login" element={<Public><Login /></Public>} />
               <Route path="/signup" element={<Public><Signup /></Public>} />
               <Route path="/onboarding" element={<Private><Onboarding /></Private>} />

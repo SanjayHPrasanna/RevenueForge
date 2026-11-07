@@ -75,7 +75,8 @@ export async function download(path: string, fallbackName: string) {
     throw new Error(msg);
   }
   const cd = res.headers.get("content-disposition") || "";
-  const m = cd.match(/filename="([^"]+)"/);
+  const star = cd.match(/filename\*=utf-8''([^;]+)/i);
+  const m = star ? [star[0], decodeURIComponent(star[1])] : cd.match(/filename="([^"]+)"/);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

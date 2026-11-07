@@ -9,7 +9,7 @@ import { useAuth } from "../lib/auth";
 import { ago, money } from "../lib/format";
 
 type Item = {
-  id: string; source: string; source_name: string; title: string; buyer: string; country: string; region: string; notice_type: string;
+  id: string; source: string; source_name: string; licence?: string; licence_url?: string; attribution?: string; title: string; buyer: string; country: string; region: string; notice_type: string;
   value: number | null; currency: string; published: string | null; deadline: string | null; url: string; language: string;
   categories: { code: string; label: string }[]; score: number | null; band: string | null; status: string; deal_id: string;
   top_match: string; missing_standards: string[]; summary?: string;
@@ -119,8 +119,16 @@ function Invitations() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const { data } = useQuery({ queryKey: ["invitations"], queryFn: () => api.get<any[]>("/network/invitations") });
+  const { data: company } = useQuery({ queryKey: ["company"], queryFn: () => api.get<any>("/company") });
+  const freeTier = !!(company?.llm?.enabled && !company.llm.paid);
   const act = useMutation({
-    mutationFn: ({ id, what }: { id: string; what: "accept" | "decline" }) => api.post<any>(`/network/invitations/${id}/${what}`),
+    mutationFn: ({ id, what }: { id: string; what: "accept" | "decline" }) => {
+      if (what === "accept" && freeTier && !confirm("Your AI runs on a free Google Gemini key: Google may use what's sent to improve its products, and people may read it. "
+        + "Only accept if the buyer's RFP isn't confidential, or switch to a paid key in Settings first. Accept and start the deal?")) {
+        return Promise.reject(new Error("Not accepted."));
+      }
+      return api.post<any>(`/network/invitations/${id}/${what}`, what === "accept" ? { ai_ack: freeTier } : {});
+    },
     onSuccess: (r, v) => {
       qc.invalidateQueries({ queryKey: ["invitations"] });
       if (v.what === "accept") { toast("ok", "Deal started from the buyer's RFP."); nav(`/app/deals/${r.deal_id}`); } else toast("ok", "Invitation declined.");
@@ -250,6 +258,8 @@ function Detail({ id, onClose, onStart }: { id: string; onClose: () => void; onS
           {t.categories?.length > 0 && <div className="flex flex-wrap gap-1 mb-2">{t.categories.slice(0, 4).map((c: any) => <span key={c.code} className="chip bg-paper border border-line text-ink-soft">{c.label || c.code}</span>)}</div>}
           <p className="text-ink-soft leading-relaxed whitespace-pre-line">{t.description ? (t.description.length > 1800 ? t.description.slice(0, 1800) + "…" : t.description) : "The source gives no description."}</p>
           <a href={t.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex items-center gap-1 font-semibold text-brand-700 hover:underline">Open the published notice <ExternalLink className="h-3.5 w-3.5" /></a>
+          {t.attribution && <p className="mt-2 text-[11.5px] text-ink-faint">{t.attribution}{" "}
+            {t.licence_url && <a href={t.licence_url} target="_blank" rel="noreferrer" className="underline">{t.licence}</a>}</p>}
         </div>
       </div>
       <div className="sticky bottom-0 bg-white/95 backdrop-blur border-t border-line-soft px-5 py-3 flex flex-wrap gap-2">

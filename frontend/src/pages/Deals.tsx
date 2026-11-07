@@ -16,6 +16,8 @@ function NewDeal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [detecting, setDetecting] = useState(false);
   const { data: company } = useQuery({ queryKey: ["company"], queryFn: () => api.get("/company") });
   const [f, setF] = useState({ name: "", client_name: "", client_aliases: "", client_alias: "", confidential: true, engagement_type: "" });
+  const [ack, setAck] = useState(false);
+  const freeTier = !!(company?.llm?.enabled && !company.llm.paid);
   useEffect(() => {
     if (!open) {
       setFile(null);
@@ -43,6 +45,7 @@ function NewDeal({ open, onClose }: { open: boolean; onClose: () => void }) {
       const fd = new FormData();
       fd.append("file", file!);
       Object.entries(f).forEach(([k, v]) => fd.append(k, String(v)));
+      if (freeTier) fd.append("ai_ack", String(ack));
       return api.upload("/deals", fd);
     },
     onSuccess: (d) => {
@@ -104,8 +107,15 @@ function NewDeal({ open, onClose }: { open: boolean; onClose: () => void }) {
               {Object.entries(ENGAGEMENT).map(([k, v]) => <option key={k} value={k}>{v}{det?.engagement_type === k ? " (detected)" : ""}</option>)}
             </select>
           </div>
+          {freeTier && (
+            <label className="flex items-start gap-3 cursor-pointer rounded-md border border-ember-100 bg-ember-50 p-3.5 text-[13px] text-ember-600">
+              <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[#118AC3]" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+              <span>This document is a sample or isn't confidential. I understand it goes to a free Google AI key, where Google may use it to improve
+                its products and people may read it.</span>
+            </label>
+          )}
           <div className="flex items-center gap-3 pt-2">
-            <button className="btn-primary" disabled={create.isPending}>{create.isPending && <Spinner />} Analyse RFP</button>
+            <button className="btn-primary" disabled={create.isPending || (freeTier && !ack)}>{create.isPending && <Spinner />} Analyse RFP</button>
             <button type="button" className="btn-ghost" onClick={() => setFile(null)}>Choose another file</button>
           </div>
         </form>

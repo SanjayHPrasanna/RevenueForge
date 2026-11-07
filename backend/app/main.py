@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import BASE_DIR, settings
 from .db import init_db
-from .routers import assistant, auth, deals, insights, learning, library, network, radar
+from .routers import assistant, auth, company_data, deals, insights, learning, library, network, radar, trust
 from .services import company_ai, llm  # noqa: F401  (company_ai registers the per-company AI settings)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -123,6 +123,8 @@ app.include_router(learning.router)
 app.include_router(assistant.router)
 app.include_router(radar.router)
 app.include_router(network.router)
+app.include_router(trust.router)
+app.include_router(company_data.router)
 
 # Serve the built frontend (frontend/dist) when present, so one process runs everything.
 DIST = BASE_DIR.parent / "frontend" / "dist"

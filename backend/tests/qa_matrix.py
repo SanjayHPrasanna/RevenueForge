@@ -13,7 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, os.path.join(ROOT, "backend"))
 from fastapi.testclient import TestClient
 from app.main import app
-from app.routers import assistant, auth, deals, insights, learning, library, network, radar
+from app.routers import assistant, auth, company_data, deals, insights, learning, library, network, radar, trust
 
 PW = os.environ.get("QA_PASSWORD") or __import__("secrets").token_urlsafe(18)  # throwaway test accounts
 S = os.path.join(ROOT, "sample-data")
@@ -139,8 +139,8 @@ with TestClient(app, raise_server_exceptions=False) as c:
                    ("POST", "/api/library/uploads/{doc_id}/import"), ("POST", "/api/library/uploads/{doc_id}/remap"), ("DELETE", "/api/learning/answers/{eid}"),
                    ("DELETE", "/api/deals/{deal_id}/comments/{comment_id}"), ("POST", "/api/learning/retrain"), ("DELETE", "/api/auth/ai-config"),
                    ("PUT", "/api/auth/ai-config"), ("POST", "/api/auth/ai-config/test"), ("PUT", "/api/company/ai"), ("POST", "/api/company/ai/test"),
-                   ("POST", "/api/library/folder/{batch}/import"), ("POST", "/api/deals/{deal_id}/clarifications")}
-    PUBLIC = {"/api/auth/register", "/api/auth/login", "/api/auth/config", "/api/auth/microsoft", "/api/auth/google", "/api/assistant/chat"}
+                   ("POST", "/api/library/folder/{batch}/import"), ("POST", "/api/deals/{deal_id}/clarifications"), ("POST", "/api/company/delete"), ("DELETE", "/api/library/drive")}
+    PUBLIC = {"/api/trust", "/api/auth/register", "/api/auth/login", "/api/auth/config", "/api/auth/microsoft", "/api/auth/google", "/api/assistant/chat"}
 
     def call(method, path, h):
         url = path
@@ -152,7 +152,7 @@ with TestClient(app, raise_server_exceptions=False) as c:
         return c.request(method, url, headers=h or {}, **kw)
 
     n_routes = 0
-    for m in (assistant, auth, deals, insights, learning, library, network, radar):
+    for m in (assistant, auth, company_data, deals, insights, learning, library, network, radar, trust):
         for r in m.router.routes:
             for method in r.methods:
                 n_routes += 1

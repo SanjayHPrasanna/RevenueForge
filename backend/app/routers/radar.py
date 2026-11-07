@@ -23,6 +23,8 @@ def tender_out(t: Tender, f: TenderFit | None, full: bool = False) -> dict:
     d = (f.detail if f else {}) or {}
     out = {
         "id": t.id, "source": t.source, "source_name": tender_feeds.SOURCES.get(t.source, {}).get("name", t.source),
+        "licence": tender_feeds.SOURCES.get(t.source, {}).get("licence", ""), "licence_url": tender_feeds.SOURCES.get(t.source, {}).get("licence_url", ""),
+        "attribution": tender_feeds.SOURCES.get(t.source, {}).get("attribution", ""),
         "title": t.title, "buyer": t.buyer, "country": t.country, "region": t.region, "notice_type": t.notice_type,
         "value": t.value, "currency": t.currency, "published": _aware(t.published), "deadline": _aware(t.deadline), "url": t.url,
         "language": t.language, "categories": t.categories or [],

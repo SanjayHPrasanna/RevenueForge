@@ -11,7 +11,7 @@ from sqlalchemy import select
 from ..config import UPLOAD_DIR
 from ..models import Deal, Document, NetworkInvite, NetworkRequest, Tenant
 from ..security import Ctx, current_ctx, require_roles
-from ..services import extraction, network, pipeline
+from ..services import extraction, llm, network, pipeline
 from ..services.tender_feeds import REGIONS
 
 router = APIRouter(prefix="/api", tags=["network"])
@@ -98,11 +98,13 @@ def _vendor_invite(ctx: Ctx, inv_id: str) -> NetworkInvite:
 
 
 @router.post("/network/invitations/{inv_id}/accept")
-def accept(inv_id: str, ctx: Ctx = Depends(vendor_bidder)):
+def accept(inv_id: str, body: dict | None = None, ctx: Ctx = Depends(vendor_bidder)):
     """Accepting starts a deal in this workspace from the buyer's RFP document."""
     inv = _vendor_invite(ctx, inv_id)
     if inv.status == "accepted" and inv.deal_id:
         return {"deal_id": inv.deal_id}
+    if llm.free_tier() and not (isinstance(body, dict) and body.get("ai_ack") is True):
+        raise HTTPException(428, llm.FREE_TIER_ACK.replace("the document is", "the buyer's RFP is"))
     req = ctx.db.get(NetworkRequest, inv.request_id)
     src = ctx.db.get(Document, req.document_id) if req else None
     if not req or not src or not Path(src.path).exists():
