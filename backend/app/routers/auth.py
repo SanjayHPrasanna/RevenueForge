@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..models import Tenant, User
-from ..security import Ctx, create_token, current_ctx, hash_password, require_roles, verify_password
+from ..security import Ctx, create_token, current_ctx, hash_password, require_roles, verify_password, client_ip
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -127,9 +127,7 @@ def _note_login_failure(keys: list[str]) -> None:
 
 @router.post("/login")
 def login(data: LoginIn, request: Request, db: Session = Depends(get_db)):
-    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "")
-    if ip.count(":") == 1:  # Azure adds the port: "1.2.3.4:5678"
-        ip = ip.split(":")[0]
+    ip = client_ip(request)
     keys = [f"email:{data.email.lower()}", f"ip:{ip}"]
     _check_login_allowed(keys)
     u = db.scalar(select(User).where(func.lower(User.email) == data.email.lower()))

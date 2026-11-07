@@ -92,6 +92,11 @@ STRONG_COMMERCIAL_RE = re.compile(r"\b(pric(e|es|ing)|invoic\w*|payment (terms|s
 TECHNICAL_RE = re.compile(r"\b(solution|system|platform|interfaces?|apis?|data|consumers?|messages?|delivery|deliver|support|enhancements?|"
                           r"releases?|monitor\w*|integrat\w*|service levels?|availability|latency|encrypt\w*|cards?)\b", re.I)
 
+# A tender-process instruction talks about the bid itself. "Upload", "portal", "format" or "password" in a sentence about the
+# system ("users shall upload documents", "return data in JSON format") is a product requirement, not a submission rule.
+SUBMISSION_RE = re.compile(r"\b(submi(t|ts|tted|ssions?)|closing date|deadline|proposals?|bids?|bidders?|tenders?|tenderers?|responses?|"
+                           r"respondents?|e-?tendering|clarifications?|pages?|appendi(x|ces)|trade licen[cs]e|vendor profile)\b", re.I)
+
 
 def classify(text: str, section: str = "") -> tuple[str, str, float]:
     """Return (category, subcategory, confidence) using keyword evidence from text + section."""
@@ -118,6 +123,10 @@ def classify(text: str, section: str = "") -> tuple[str, str, float]:
         if not tech:
             return "Functional", "General Scope", 0.5
         scores = tech
+    if max(scores, key=scores.get) == "Submission" and not SUBMISSION_RE.search(t):
+        scores = {k: v for k, v in scores.items() if k != "Submission"}
+        if not scores:
+            return "Functional", "General Scope", 0.5
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
     best, best_sc = ranked[0]
     second = ranked[1][1] if len(ranked) > 1 else 0

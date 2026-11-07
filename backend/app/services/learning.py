@@ -67,7 +67,13 @@ def _tfidf_sims(queries: list[str], docs: list[str]):
     from sklearn.feature_extraction.text import TfidfVectorizer
     from sklearn.metrics.pairwise import cosine_similarity
 
-    vec = TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True, stop_words="english").fit(queries + docs)
+    import numpy as np
+    if not queries or not docs:
+        return np.zeros((len(queries), len(docs)))
+    try:
+        vec = TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True, stop_words="english").fit(queries + docs)
+    except ValueError:  # only stop words / empty text: nothing to compare
+        return np.zeros((len(queries), len(docs)))
     return cosine_similarity(vec.transform(queries), vec.transform(docs))
 
 
@@ -188,6 +194,8 @@ def _load_model(db: Session, tid: str, kind: str):
 
 
 def classify_with_company_model(db: Session, tid: str, items: list[dict]) -> list[tuple[str, float]] | None:
+    if not items:
+        return []
     model, meta = _load_model(db, tid, "classifier")
     if model is None:
         return None

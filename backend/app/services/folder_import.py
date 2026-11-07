@@ -154,7 +154,7 @@ def template_analysis(data: bytes) -> dict:
 
 def analyse_as(doc: Document, kind: str | None, data: bytes, parsed: ParsedDocument | None) -> None:
     """Fill doc.parsed with the preview for the chosen type (keeps the folder-import bookkeeping)."""
-    keep = {k: v for k, v in (doc.parsed or {}).items() if k in ("batch", "path", "detected", "confidence", "reason")}
+    keep = {k: v for k, v in (doc.parsed or {}).items() if k in ("batch", "path", "detected", "confidence", "reason", "drive", "drive_folder")}
     keep.pop("ai", None)
     doc.kind = kind or "unsorted"
     doc.error = ""

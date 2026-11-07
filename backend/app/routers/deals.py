@@ -112,15 +112,23 @@ def update_deal(deal_id: str, body: dict, ctx: Ctx = Depends(require_roles("pres
     d = _deal(ctx, deal_id)
     for f in ("name", "client_name", "client_alias", "industry", "region", "sector", "due_date", "currency", "outcome_notes"):
         if f in body:
-            setattr(d, f, str(body[f] or ""))
+            if not isinstance(body[f], (str, int, float, type(None))):
+                raise HTTPException(400, f"{f.replace('_', ' ').capitalize()} must be text.")
+            setattr(d, f, str(body[f] or "")[:4000 if f == "outcome_notes" else 300])
     if "client_aliases" in body:
-        d.client_aliases = [a.strip() for a in (body["client_aliases"] if isinstance(body["client_aliases"], list) else str(body["client_aliases"]).split(",")) if a.strip()]
+        raw = body["client_aliases"] if isinstance(body["client_aliases"], list) else str(body["client_aliases"] or "").split(",")
+        d.client_aliases = [str(a).strip()[:200] for a in raw[:50] if isinstance(a, (str, int, float)) and str(a).strip()]
     if "confidential" in body:
         d.confidential = bool(body["confidential"])
-    if "final_value" in body:
-        d.final_value = float(body["final_value"] or 0)
-    if "actual_effort_days" in body:
-        d.actual_effort_days = float(body["actual_effort_days"] or 0)
+    for f in ("final_value", "actual_effort_days"):
+        if f in body:
+            try:
+                v = float(body[f] or 0)
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"{f.replace('_', ' ').capitalize()} must be a number.")
+            if v < 0 or v != v or v in (float("inf"),):
+                raise HTTPException(400, f"{f.replace('_', ' ').capitalize()} can't be negative.")
+            setattr(d, f, v)
     rerun = None
     if "engagement_type" in body and body["engagement_type"] != d.engagement_type:
         if body["engagement_type"] not in ("managed_services", "build_run", "implementation", "product", "consulting"):
@@ -260,6 +268,18 @@ def update_requirement(deal_id: str, req_id: str, body: dict, ctx: Ctx = Depends
     r = ctx.db.get(Requirement, req_id)
     if not r or r.deal_id != d.id:
         raise HTTPException(404, "Requirement not found.")
+    for f in ("text", "notes", "subcategory", "response", "priority"):
+        if f in body:
+            if body[f] is None:
+                body[f] = ""
+            if not isinstance(body[f], str):
+                raise HTTPException(400, f"{f.capitalize()} must be text.")
+            if len(body[f]) > 20000:
+                raise HTTPException(400, f"{f.capitalize()} is too long.")
+    if "text" in body and not body["text"].strip():
+        raise HTTPException(400, "A requirement needs some text.")
+    if "priority" in body and body["priority"] not in ("Mandatory", "Desirable", "Optional", "Informational"):
+        raise HTTPException(400, "Priority must be Mandatory, Desirable, Optional or Informational.")
     learn = lambda kind, ai, human: learning.record(ctx.db, ctx.tenant_id, kind, r.text, ai, human, deal_id=d.id, user=ctx.user.name,
                                                     context={"section": r.section, "code": r.code})
     if "category" in body:
@@ -307,14 +327,23 @@ def update_requirement(deal_id: str, req_id: str, body: dict, ctx: Ctx = Depends
 @router.post("/{deal_id}/requirements")
 def add_requirement(deal_id: str, body: dict, ctx: Ctx = Depends(require_roles("presales"))):
     d = _deal(ctx, deal_id)
-    text = (body.get("text") or "").strip()
+    text = str(body.get("text") or "").strip()[:20000]
     if len(text) < 5:
         raise HTTPException(400, "Write the requirement text.")
+    if body.get("category") and body["category"] not in K.CATEGORIES:
+        raise HTTPException(400, f"Category must be one of {', '.join(K.CATEGORIES)}.")
+    if body.get("priority") and body["priority"] not in ("Mandatory", "Desirable", "Optional", "Informational"):
+        raise HTTPException(400, "Priority must be Mandatory, Desirable, Optional or Informational.")
+    try:
+        page = max(1, int(body.get("page") or 1))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "Page must be a number.")
+    body = {**body, "section": str(body.get("section") or "Added manually")[:300], "subcategory": str(body.get("subcategory") or "")[:120]}
     seq = (ctx.db.scalar(select(func.max(Requirement.seq)).where(Requirement.deal_id == d.id)) or 0) + 1
     cat, sub, conf = K.classify(text, body.get("section", ""))
     r = Requirement(tenant_id=ctx.tenant_id, deal_id=d.id, seq=seq, code=f"REQ-{seq:03d}", text=text, category=body.get("category") or cat,
-                    subcategory=body.get("subcategory") or sub, priority=body.get("priority") or K.priority(text), page=int(body.get("page") or 1),
-                    section=body.get("section", "Added manually"), class_confidence=1.0, technologies=K.find_technologies(text),
+                    subcategory=body.get("subcategory") or sub, priority=body.get("priority") or K.priority(text), page=page,
+                    section=body["section"], class_confidence=1.0, technologies=K.find_technologies(text),
                     original_category=body.get("category") or cat, verified=True, edited=True, classified_by="human")
     ctx.db.add(r)
     learning.record(ctx.db, ctx.tenant_id, "added", text, "", r.category, deal_id=d.id, user=ctx.user.name)
@@ -442,6 +471,39 @@ def approve(deal_id: str, stage: str, ctx: Ctx = Depends(current_ctx)):
     return {"stage": stage, "status": st.status, "approved_by": st.approved_by, "approved_at": st.approved_at, "learned": learned}
 
 
+# What a person may change, and the range that keeps the numbers meaningful (a 100% margin would divide by zero).
+OVERRIDE_RANGES = {"target_margin": (0, 80), "contingency_pct": (0, 100), "travel_pct": (0, 100), "onsite_ratio": (0, 1),
+                   "contract_months": (1, 240), "duration_months": (1, 120)}
+
+
+def _check_override(k: str, v):
+    if k == "rates":
+        if not isinstance(v, dict):
+            raise HTTPException(400, "Rates must be an object.")
+        out = {}
+        for key, o in v.items():
+            if not isinstance(o, dict):
+                raise HTTPException(400, "Each rate needs day_rate and day_cost.")
+            try:
+                rate, cost = float(o.get("day_rate", 0)), float(o.get("day_cost", 0))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Rates must be numbers.")
+            if rate < 0 or cost < 0 or rate > 1e6 or cost > 1e6:
+                raise HTTPException(400, "Rates must be between 0 and 1,000,000 a day.")
+            out[str(key)[:200]] = {"day_rate": rate, "day_cost": cost, "currency": str(o.get("currency", "USD"))[:8]}
+        return out
+    if k not in OVERRIDE_RANGES:
+        raise HTTPException(400, f"{k} can't be changed here.")
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        raise HTTPException(400, f"{k.replace('_', ' ')} must be a number.")
+    lo, hi = OVERRIDE_RANGES[k]
+    if not lo <= x <= hi:
+        raise HTTPException(400, f"{k.replace('_', ' ')} must be between {lo:g} and {hi:g}.")
+    return int(x) if k.endswith("_months") else x
+
+
 @router.put("/{deal_id}/stages/{stage}/overrides")
 def overrides(deal_id: str, stage: str, body: dict, ctx: Ctx = Depends(require_roles("architect", "finance", "delivery"))):
     """Save user adjustments (rates, margin, contingency, duration, selected scenario) and recompute downstream."""
@@ -453,13 +515,18 @@ def overrides(deal_id: str, stage: str, body: dict, ctx: Ctx = Depends(require_r
         raise HTTPException(400, "Run the pipeline first.")
     data = dict(st.data or {})
     ov = dict(data.get("overrides", {}))
-    for k, v in (body.get("overrides") or {}).items():
+    incoming = body.get("overrides") or {}
+    if not isinstance(incoming, dict):
+        raise HTTPException(400, "Overrides must be an object.")
+    for k, v in incoming.items():
         if v is None or v == "":
             ov.pop(k, None)
         else:
-            ov[k] = v
+            ov[k] = _check_override(k, v)
     data["overrides"] = ov
     if "selected" in body:
+        if body["selected"] not in ("Aggressive", "Target", "Premium", "Rate card"):
+            raise HTTPException(400, "Choose Aggressive, Target, Premium or Rate card.")
         data["selected"] = body["selected"]
     st.data = data
     ctx.audit("stage.override", f"{d.id}:{stage}", overrides=ov)
@@ -591,6 +658,8 @@ def download(deal_id: str, what: str, ctx: Ctx = Depends(current_ctx)):
         for row in ws.iter_rows(min_row=2):
             for c in row:
                 c.alignment = Alignment(wrap_text=True, vertical="top")
+                if c.data_type == "f":  # text from an RFP that starts with "=" stays text: Excel must never run it as a formula
+                    c.data_type = "s"
         ws.freeze_panes = "C2"
         buf = io.BytesIO()
         wb.save(buf)
@@ -621,7 +690,8 @@ def make_clarifications(deal_id: str, ctx: Ctx = Depends(require_roles("presales
 def save_clarifications(deal_id: str, body: dict, ctx: Ctx = Depends(require_roles("presales", "architect"))):
     d = _deal(ctx, deal_id)
     items = [{"code": str(i.get("code") or "")[:40], "question": str(i.get("question") or "").strip()[:800], "why": str(i.get("why") or "")[:200]}
-             for i in (body.get("items") or [])[:60] if str(i.get("question") or "").strip()]
+             for i in (body.get("items") if isinstance(body.get("items"), list) else [])[:60]
+             if isinstance(i, dict) and str(i.get("question") or "").strip()]
     meta = dict(d.meta or {})
     cur = dict(meta.get("clarifications") or {})
     cur.update({"items": items, "edited_by": ctx.user.name, "edited_at": datetime.now(timezone.utc).isoformat()})

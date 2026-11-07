@@ -4,6 +4,7 @@ import { Download, FileText, FolderUp, Search, Trash2, Upload } from "lucide-rea
 import { useRef, useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import FolderImport from "../components/FolderImport";
+import DriveConnection from "../components/DriveConnection";
 import GoogleDriveImport from "../components/GoogleDriveImport";
 import UploadReview, { KIND_INFO, TemplateUpload } from "../components/UploadReview";
 import { Empty, Modal, PageLoader, useToast } from "../components/ui";
@@ -100,6 +101,8 @@ export default function Library() {
   const [up, setUp] = useState(false);
   const [folder, setFolder] = useState(false);
   const [drive, setDrive] = useState(false);
+  const [driveSync, setDriveSync] = useState<{ remove: string[] } | null>(null);
+  const { data: driveStatus } = useQuery({ queryKey: ["drive"], queryFn: () => api.get<{ connected: boolean }>("/library/drive") });
   const [pickedFiles, setPickedFiles] = useState<File[] | null>(null);
   const qc = useQueryClient();
   const toast = useToast();
@@ -137,9 +140,10 @@ export default function Library() {
           window.open("https://drive.google.com/drive/my-drive", "_blank", "noopener,noreferrer");
           setDrive(true);
         }}>
-          <GoogleDriveLogo /> Import from Google Drive
+          <GoogleDriveLogo /> {driveStatus?.connected ? "Connect another Drive folder" : "Connect Google Drive"}
         </button>
       </div>
+      <DriveConnection onReview={(remove) => { setDriveSync({ remove }); setFolder(true); }} />
       <div className="mt-5 border-b border-line flex gap-1 overflow-x-auto scroll-thin">
         {TABS.map((t) => (
           <NavLink key={t.key} to={`/app/library/${t.key}`} className={() => clsx("px-3 h-10 inline-flex items-center text-[14px] font-medium border-b-2 -mb-px whitespace-nowrap rounded-t-lg transition-all duration-200 ease-apple",
@@ -177,8 +181,9 @@ export default function Library() {
           </div>
         )}
       </div>
-      <Modal open={folder} onClose={() => { setFolder(false); setPickedFiles(null); }} title="Import a folder" xl>
-        <FolderImport onDone={() => setFolder(false)} compact autoStartFiles={pickedFiles} />
+      <Modal open={folder} onClose={() => { setFolder(false); setPickedFiles(null); setDriveSync(null); qc.invalidateQueries({ queryKey: ["drive"] }); }}
+        title={driveSync ? "Refresh from Google Drive" : "Import a folder"} xl>
+        <FolderImport onDone={() => { setFolder(false); setDriveSync(null); qc.invalidateQueries({ queryKey: ["drive"] }); }} compact autoStartFiles={pickedFiles} driveSync={driveSync} />
       </Modal>
       {drive && <GoogleDriveImport onClose={() => setDrive(false)} onImported={() => { setDrive(false); setFolder(true); }} />}
       <Modal open={up} onClose={() => setUp(false)} title={`Upload ${KIND_INFO[kind]?.title.toLowerCase()}`} wide>

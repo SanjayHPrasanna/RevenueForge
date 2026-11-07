@@ -106,7 +106,7 @@ STANDARDS = [
     ("Essential Eight", re.compile(r"\bessential\s+eight\b", re.I)),
 ]
 # Wording that asks the bidder itself to hold a certificate (rather than build a solution that follows a standard).
-HOLD_RE = re.compile(r"\b(hold|holds|held|certif\w*|attest\w*|accredit\w*|audit(?:ed)?\s+report|registered|maintain\s+(?:a\s+)?current)\b", re.I)
+HOLD_RE = re.compile(r"\b(hold|holds|held|certif\w*|attest\w*|accredit\w*|authori[sz]ed|authori[sz]ation|audit(?:ed)?\s+report|registered|maintain\s+(?:a\s+)?current)\b", re.I)
 
 
 def standards_in(text: str) -> set[str]:
@@ -181,6 +181,105 @@ def _stem_text(text: str) -> str:
 
 _STEMMED_STOP = sorted({_stem(w) for w in ENGLISH_STOP_WORDS} | {_stem(_stem(w)) for w in ENGLISH_STOP_WORDS} | set(ENGLISH_STOP_WORDS))
 
+_STEMMED_STOP_SET = set(_STEMMED_STOP)
+
+_MONTHS = {m: i for i, m in enumerate(["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
+
+
+def cert_expiry(c: dict):
+    """The date a certificate stops being valid, or None when the register doesn't say (or says it in a way we can't read)."""
+    import calendar
+    from datetime import date
+    v = str(c.get("valid_until") or "").strip().lower()
+    if not v:
+        return None
+    try:
+        m = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", v)
+        if m:
+            return date(int(m[1]), int(m[2]), int(m[3]))
+        m = re.search(r"(\d{1,2})[/.](\d{1,2})[/.](\d{4})", v)
+        if m:  # day/month/year, the usual order outside the US
+            return date(int(m[3]), int(m[2]), int(m[1]))
+        m = re.search(r"(\d{4})-(\d{1,2})\b", v) or re.search(r"\b(\d{1,2})/(\d{4})\b", v)
+        if m:
+            y, mo = (int(m[1]), int(m[2])) if len(m[1]) == 4 else (int(m[2]), int(m[1]))
+            return date(y, mo, calendar.monthrange(y, mo)[1])
+        m = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{4})\b", v)
+        if m:
+            y, mo = int(m[2]), _MONTHS[m[1]]
+            return date(y, mo, calendar.monthrange(y, mo)[1])
+        m = re.fullmatch(r"(\d{4})", v)
+        if m:
+            return date(int(m[1]), 12, 31)
+    except ValueError:
+        return None
+    return None
+
+
+def current_certs(certs: list[dict]) -> list[dict]:
+    """Certificates that are valid today. One whose 'valid until' date has passed is not evidence of anything."""
+    from datetime import date
+    today = date.today()
+    return [c for c in certs if not ((d := cert_expiry(c)) and d < today)]
+
+
+def squash_repeats(text: str, keep: int = 2) -> str:
+    """Saying a word ten times adds nothing, so only its first couple of uses count ("Azure Azure Azure ..." -> "Azure Azure")."""
+    seen: dict[str, int] = defaultdict(int)
+    out = []
+    for tok in re.findall(r"\S+", text or ""):
+        key = re.sub(r"[^a-z0-9+#]", "", tok.lower())
+        if key:
+            seen[key] += 1
+            if seen[key] > keep:
+                continue
+        out.append(tok)
+    return " ".join(out)
+
+
+# Words every requirement uses ("the supplier shall provide ..."). They say nothing about WHAT is asked, so they never count
+# as evidence that the company covers it.
+_GENERIC = {_stem(w) for w in """supplier suppliers contractor contractors bidder bidders vendor vendors provider providers tenderer tenderers
+respondent respondents proposer solution solutions service services system systems shall must should will may provide provides providing
+deliver delivers delivered design designs designed build builds built implement implements implemented implementation maintain
+maintains support supports supported ensure ensures include includes including use uses using used based able ability capable capability
+capabilities required require requires requirement requirements also new existing current following within across per etc via
+host hosted hosting company client authority customer buyer offer offers proposed propose relevant appropriate suitable full fully
+""".split()}
+
+
+def _vocab(kb: "CompanyKB") -> set[str]:
+    """Every (stemmed) word the company's library uses: capabilities, case studies, accelerators, skills, roles, certificates."""
+    parts = [_cap_text(c) for c in kb.capabilities] + [_cs_text(c) for c in kb.case_studies] + [_acc_text(a) for a in kb.accelerators]
+    for e in kb.employees:
+        parts.append(f"{e.get('role', '')} {e.get('practice', '')} " + " ".join(sk.get("name", "") for sk in e.get("skills", [])))
+    parts += [c.get("name", "") for c in kb.certifications]
+    return set(_stem_text(K.expand(" ".join(parts))).split())
+
+
+def _domain_terms(text: str, techs: list[str]) -> dict[str, str]:
+    """What the requirement is about, beyond product names and boilerplate: distinct content words (stem -> word as written)."""
+    tech_words = set()
+    for t in techs:
+        for alias in [t] + list(K.TECHNOLOGIES.get(t, [])):
+            tech_words |= set(re.findall(r"[a-z0-9]+", str(alias).lower()))
+    out: dict[str, str] = {}
+    for w in re.findall(r"[a-z][a-z0-9]+", text.lower()):
+        if len(w) < 3 or w in tech_words or w in ENGLISH_STOP_WORDS:
+            continue
+        st = _stem(w)
+        if st in _GENERIC or st in _STEMMED_STOP_SET or st in out:
+            continue
+        out[st] = w
+    return out
+
+
+def _covered(term: str, vocab: set[str]) -> bool:
+    if term in vocab:
+        return True
+    syn = K.SYNONYMS.get(term)
+    return bool(syn and any(_stem(x) in vocab for x in syn.split()))
+
 
 def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", industry: str = "", similarity=None,
                        guidance: str = "", progress=None, use_ai: bool = True) -> list[dict]:
@@ -195,8 +294,10 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
     caps, css = kb.capabilities, kb.case_studies
     useful = {a["name"] for a in relevant_accelerators(kb, reqs)}
     accs = [a for a in kb.accelerators if a["name"] in useful]  # never cite an accelerator built for another domain
-    docs = [K.expand(_cap_text(c)) for c in caps] + [K.expand(_cs_text(c)) for c in css] + [K.expand(_acc_text(a)) for a in accs]
-    qtexts = [K.expand(f"{r['text']} {r.get('section', '')} {' '.join(r.get('technologies', []))} {SUBCAT_CONTEXT.get(r.get('subcategory', ''), '')}") for r in reqs]
+    docs = [K.expand(squash_repeats(_cap_text(c))) for c in caps] + [K.expand(squash_repeats(_cs_text(c))) for c in css] + \
+        [K.expand(squash_repeats(_acc_text(a))) for a in accs]
+    qtexts = [K.expand(f"{squash_repeats(r['text'])} {r.get('section', '')} {' '.join(r.get('technologies', []))} "
+                       f"{SUBCAT_CONTEXT.get(r.get('subcategory', ''), '')}") for r in reqs]
     if not docs:
         docs = ["empty"]
     vec = TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True, stop_words=_STEMMED_STOP, min_df=1, preprocessor=_stem_text)
@@ -212,8 +313,15 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
         if method == "embeddings":
             sims = _blend_embeddings(sims, emb)
     nc, ncs = len(caps), len(css)
+    vocab = _vocab(kb)
     held_std: dict[str, list[str]] = defaultdict(list)  # standard -> certificate names that evidence it
+    expired_std: dict[str, str] = {}  # standard -> "SOC 2 Type II (expired 2019-01-01)"
+    live = current_certs(kb.certifications)
     for c in kb.certifications:
+        if c not in live:
+            for sname in standards_in(c["name"]):
+                expired_std[sname] = f"{c['name']} (expired {cert_expiry(c).isoformat()})"
+    for c in live:
         for sname in standards_in(f"{c['name']} {c.get('description', '')}"):
             held_std[sname].append(c["name"])
 
@@ -280,6 +388,9 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
                 missing = missing + lacking
                 rationale.append(f"Certificate register: holds {', '.join(held) or 'none'} of the named standards; "
                                  f"no {', '.join(lacking)} {'certificate' if must_hold else 'certificate or audited evidence'}.")
+                gone = [expired_std[x] for x in lacking if x in expired_std]
+                if gone:
+                    rationale.append(f"The register lists {', '.join(gone)}, which no longer counts.")
             else:
                 status, score = "strong", 0.95
                 rationale.append(f"Certified: {', '.join(certs)}.")
@@ -306,6 +417,25 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
             status = "confirm"
             rationale.append("Response or tender-process obligation: answer in the proposal; no capability needed.")
 
+        coverage_note, coverage = "", None
+        if status in ("strong", "partial") and not rationale:
+            # A shared product name is not a match. Check that the library also covers what the requirement is about;
+            # otherwise "Azure" in a satellite-station requirement would score like an Azure migration.
+            terms = _domain_terms(r["text"], r.get("technologies", []))
+            hit = [t for t in terms if _covered(t, vocab)]
+            cov = len(hit) / len(terms) if terms else 0.0
+            if len(terms) < 2 and req_techs:
+                if status == "strong" or score > 0.45:
+                    status, score = "partial", min(score, 0.45)
+                coverage_note = "The requirement names little beyond a technology, so there's not enough to call it fully covered. Read what's actually asked."
+            elif tech_cov and len(terms) >= 3 and ((cap_s < 0.3 and cov < 0.25) or (cap_s < 0.5 and cov < 0.2)):
+                # The score came from a shared technology name, not from anything the library says about this work.
+                status, score = "gap", min(score, 0.3)
+                missed = [terms[t] for t in terms if t not in hit][:4]
+                coverage_note = f"Only the technology name matches: nothing in the library covers {', '.join(missed)}."
+            coverage = round(cov, 2)
+            if status == "gap":
+                evidence = evidence[:2]
         if status in ("strong", "partial") and not rationale:
             top = evidence[0]["name"] if evidence else "related capabilities"
             bits = [f"Best match: {top}"]
@@ -314,16 +444,19 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
             if missing:
                 bits.append(f"not covered: {', '.join(missing)}")
             rationale.append("; ".join(bits) + ".")
-        elif status == "gap" and not rationale:
+        elif status == "gap" and not rationale and not coverage_note:
             rationale.append(f"No capability or skill covers {', '.join(missing) if missing else 'this requirement'}." )
+        if coverage_note:
+            rationale.append(coverage_note)
 
         r["match_status"] = status
         r["match_score"] = score if status != "confirm" else 0.0
         r["match"] = {"evidence": evidence[:5], "people": people[:12], "people_count": len(people),
                       "technologies_have": have, "technologies_missing": missing, "rationale": " ".join(rationale),
-                      "retrieval": method, "judged_by": "register" if stds else "rules"}
+                      "retrieval": method, "judged_by": "register" if stds else "rules",
+                      **({"term_coverage": coverage} if coverage is not None else {})}
         if stds:
-            held_c = [c for c in kb.certifications if c.get("kind") == "company" and standards_in(c["name"])]
+            held_c = [c for c in live if c.get("kind") == "company" and standards_in(c["name"])]
             held_c.sort(key=lambda c: not re.search(r"27001|soc|pci", c["name"], re.I))  # security certificates first
             r["match"]["held_certificates"] = [{"name": c["name"]} for c in held_c][:2]
     if use_ai and llm.is_enabled():
@@ -387,12 +520,21 @@ def ai_judge(reqs: list[dict], kb: CompanyKB, inv: dict, guidance: str = "", pro
             st = it.get("status")
             if st not in ("strong", "partial", "gap"):
                 continue
-            cited = [e for e in (it.get("evidence") or []) if e in allowed[k]]
+            cited = [e for e in (it.get("evidence") or []) if isinstance(e, str) and e in allowed[k]]
+            # The AI's opinion never outranks the facts: "strong" needs evidence it can name from the library, and a
+            # technology the company doesn't have can't be strong (the same rule the scorer follows).
+            caps_note = ""
+            if st == "strong" and not cited:
+                st, caps_note = "partial", " (Kept at partial: the AI named no library evidence.)"
+            elif st == "strong" and r["match"].get("technologies_missing"):
+                st, caps_note = "partial", f" (Kept at partial: no {', '.join(r['match']['technologies_missing'][:3])} in the library.)"
             r["match_status"] = st
             try:
-                r["match_score"] = round(max(0, min(100, float(it.get("score", 50)))) / 100, 2)
+                sc = max(0, min(100, float(it.get("score", 50)))) / 100
             except (TypeError, ValueError):
-                pass
+                sc = r.get("match_score") or 0.5
+            lo, hi = {"strong": (0.62, 0.99), "partial": (0.35, 0.61), "gap": (0.0, 0.34)}[st]
+            r["match_score"] = round(min(hi, max(lo, sc)), 2)  # the score always agrees with the label
             if cited:
                 order = {name: i for i, name in enumerate(cited)}
                 ev = sorted(r["match"]["evidence"], key=lambda e: order.get(e["name"], 99))
@@ -400,7 +542,7 @@ def ai_judge(reqs: list[dict], kb: CompanyKB, inv: dict, guidance: str = "", pro
                     if c in certs and not any(e["name"] == c for e in ev):
                         ev.insert(0, {"type": "Certification", "name": c, "score": 1.0})
                 r["match"]["evidence"] = ev[:5]
-            r["match"]["rationale"] = str(it.get("rationale") or r["match"]["rationale"])[:400]
+            r["match"]["rationale"] = (str(it.get("rationale") or r["match"]["rationale"])[:400] + caps_note).strip()
             r["match"]["judged_by"] = "ai"
 
 

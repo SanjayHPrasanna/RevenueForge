@@ -18,8 +18,9 @@ const EXPORTS: Record<string, { extension: string; mimeType: string }> = {
 };
 
 type DriveFolder = { id: string; name: string };
-type DriveFile = { id: string; name: string; mimeType: string; size?: string };
-type DriveEntry = DriveFile & { path: string };
+type DriveFile = { id: string; name: string; mimeType: string; size?: string; modifiedTime?: string; version?: string };
+export type DriveEntry = DriveFile & { path: string };
+export type DriveFolderRef = { id: string; name: string };
 
 let gisPromise: Promise<void> | null = null;
 
@@ -45,6 +46,26 @@ function loadGis(): Promise<void> {
   return gisPromise;
 }
 
+/** A short-lived, read-only Drive token straight from Google to this browser tab. The server never sees or stores it.
+    `prompt: ""` skips the account picker when this Google account already allowed access (usually a one-click pop-up). */
+export async function getDriveToken(clientId: string, prompt: "" | "select_account" = "select_account"): Promise<string> {
+  await loadGis();
+  return new Promise<string>((resolve, reject) => {
+    const client = window.google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: "https://www.googleapis.com/auth/drive.readonly",
+      callback: (response: any) => {
+        if (response.error || !response.access_token) reject(new Error(response.error_description || response.error || "Google didn't provide a Drive access token."));
+        else resolve(response.access_token);
+      },
+      error_callback: (response: any) => reject(new Error(response.message || "Google Drive authorization was cancelled.")),
+    });
+    client.requestAccessToken({ prompt });
+  });
+}
+
+export function preloadGoogle() { loadGis().catch(() => { /* shown when the person clicks */ }); }
+
 async function driveRequest<T>(token: string, url: string): Promise<T> {
   const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   const body = await response.json().catch(() => null);
@@ -52,7 +73,7 @@ async function driveRequest<T>(token: string, url: string): Promise<T> {
   return body as T;
 }
 
-function driveSetupError(error: unknown): string {
+export function driveSetupError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error || "");
   if (/origin[_ ]mismatch|origin.*not allowed|unauthorized.client/i.test(message)) {
     return `Google rejected this app's origin (${window.location.origin}). Add that exact origin under Google Cloud Console → Google Auth Platform → Clients → your OAuth client → Authorized JavaScript origins, then retry.`;
@@ -91,7 +112,7 @@ function exportedName(file: DriveFile): string {
     : file.name;
 }
 
-async function listSupportedFiles(token: string, folderId: string, prefix: string, depth = 0, visited = new Set<string>()): Promise<DriveEntry[]> {
+export async function listSupportedFiles(token: string, folderId: string, prefix: string, depth = 0, visited = new Set<string>()): Promise<DriveEntry[]> {
   if (depth > 30) throw new Error("This Google Drive folder is nested too deeply to import.");
   if (visited.has(folderId)) return [];
   visited.add(folderId);
@@ -101,7 +122,7 @@ async function listSupportedFiles(token: string, folderId: string, prefix: strin
   do {
     const params = new URLSearchParams({
       q: `'${folderId}' in parents and trashed = false`,
-      fields: "nextPageToken,files(id,name,mimeType,size)",
+      fields: "nextPageToken,files(id,name,mimeType,size,modifiedTime,version)",
       pageSize: "1000",
       orderBy: "name",
       supportsAllDrives: "true",
@@ -136,20 +157,34 @@ async function uploadDriveFolder(
   const prefix = folderPath.length > 1 ? `${folderPath.slice(1).map((part) => part.name).join("/")}/` : "";
   const entries = await listSupportedFiles(token, folder.id, prefix);
   if (!entries.length) throw new Error("No supported files were found in this Google Drive folder.");
+  return uploadDriveEntries(token, entries, folder, {}, onProgress, onBatch);
+}
 
+/** Download the given Drive files in this browser and send them to the normal review screen, tagged with their Drive id
+    and version so the folder can be refreshed later. `change` marks each file as "new" or "changed" for a refresh. */
+export async function uploadDriveEntries(
+  token: string,
+  entries: DriveEntry[],
+  folder: DriveFolderRef,
+  change: Record<string, "new" | "changed">,
+  onProgress: (done: number, total: number) => void,
+  onBatch: (batch: string) => void,
+): Promise<string> {
   let batch = "";
   let done = 0;
-  let part: { file: File; path: string }[] = [];
+  let part: { file: File; path: string; entry: DriveEntry }[] = [];
   let size = 0;
   onProgress(0, entries.length);
 
   const send = async () => {
     if (!part.length) return;
     const form = new FormData();
-    part.forEach(({ file, path }) => {
+    part.forEach(({ file, path, entry }) => {
       form.append("files", file, file.name);
       form.append("paths", path);
+      form.append("drive", JSON.stringify({ id: entry.id, modified: entry.modifiedTime || "", version: entry.version || "", change: change[entry.id] || "new" }));
     });
+    form.append("drive_folder", JSON.stringify({ id: folder.id, name: folder.name }));
     if (batch) form.append("batch", batch);
     const response = await api.upload<{ batch: string }>("/library/folder", form);
     batch = response.batch;
@@ -181,7 +216,7 @@ async function uploadDriveFolder(
     const name = entry.path.split("/").pop() || entry.name;
     const file = new File([blob], name, { type: blob.type });
     if (part.length && (part.length >= 8 || size + file.size > 20 * 1024 * 1024)) await send();
-    part.push({ file, path: entry.path });
+    part.push({ file, path: entry.path, entry });
     size += file.size;
     if (part.length >= 8 || size >= 20 * 1024 * 1024) await send();
   }
@@ -212,19 +247,7 @@ export default function GoogleDriveImport({ onImported, onClose }: { onImported:
     setBusy(true);
     setError("");
     try {
-      await loadGis();
-      const accessToken = await new Promise<string>((resolve, reject) => {
-        const client = window.google.accounts.oauth2.initTokenClient({
-          client_id: auth.google_client_id,
-          scope: "https://www.googleapis.com/auth/drive.readonly",
-          callback: (response: any) => {
-            if (response.error || !response.access_token) reject(new Error(response.error_description || response.error || "Google didn't provide a Drive access token."));
-            else resolve(response.access_token);
-          },
-          error_callback: (response: any) => reject(new Error(response.message || "Google Drive authorization was cancelled.")),
-        });
-        client.requestAccessToken({ prompt: "select_account" });
-      });
+      const accessToken = await getDriveToken(auth.google_client_id, "select_account");
       const root = { id: "root", name: "My Drive" };
       setToken(accessToken);
       setPath([root]);
@@ -283,7 +306,9 @@ export default function GoogleDriveImport({ onImported, onClose }: { onImported:
       {!token ? (
         <div>
           <p className="text-[13.5px] text-ink-soft mb-4">
-            Connect to Google Drive and choose a folder. RevenueForge requests read-only access and sends supported files to your normal review screen.
+            Connect to Google Drive and choose a folder. RevenueForge asks Google for read-only access, in this browser only, and sends supported
+            files to your normal review screen. The folder stays connected: use <b>Refresh</b> in the library to pick up new and changed files.
+            RevenueForge doesn't keep any Google key, so each refresh asks Google again.
           </p>
           <p className="text-[12px] text-ink-muted mb-4">
             Setup required: enable the Google Drive API and authorize <code className="font-mono">{window.location.origin}</code> as a JavaScript origin on the Google OAuth client.
@@ -335,6 +360,7 @@ export default function GoogleDriveImport({ onImported, onClose }: { onImported:
           </div>
           <p className="mt-3 text-[11.5px] text-ink-muted">
             Supported files in nested folders are included. Google Docs, Sheets and Slides are exported as Word, Excel and PowerPoint.
+            Importing a folder connects it, and replaces any folder connected before.
           </p>
         </>
       )}

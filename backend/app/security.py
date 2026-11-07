@@ -64,7 +64,7 @@ def current_ctx(creds: HTTPAuthorizationCredentials | None = Depends(bearer), db
     if creds is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Sign in to continue.")
     try:
-        payload = jwt.decode(creds.credentials, settings.jwt_secret, algorithms=["HS256"])
+        payload = jwt.decode(creds.credentials, settings.jwt_secret, algorithms=["HS256"], options={"require": ["exp", "sub", "tid"]})
     except jwt.ExpiredSignatureError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Your session expired. Sign in again.")
     except jwt.PyJWTError:
@@ -83,3 +83,13 @@ def require_roles(*roles: str):
         return ctx
 
     return dep
+
+
+def client_ip(request) -> str:
+    """The caller's address for rate limits. Azure's front end appends the real address as the LAST X-Forwarded-For entry
+    (sometimes with a port); anything to its left was sent by the caller and can be made up, so it isn't trusted."""
+    xff = [p.strip() for p in request.headers.get("x-forwarded-for", "").split(",") if p.strip()]
+    ip = xff[-1] if xff else (request.client.host if request.client else "")
+    if ip.count(":") == 1:  # "1.2.3.4:5678"
+        ip = ip.split(":")[0]
+    return ip.strip("[]") or "unknown"

@@ -29,6 +29,13 @@ def buyer_ctx(ctx: Ctx = Depends(current_ctx)) -> Ctx:
     return ctx
 
 
+def buyer_editor(ctx: Ctx = Depends(buyer_ctx)) -> Ctx:
+    """Viewers on the buyer side can look but not create, delete or invite."""
+    if ctx.user.role == "viewer":
+        raise HTTPException(403, "Viewers can look at requests but not change them. Ask your admin for another role.")
+    return ctx
+
+
 def vendor_admin(ctx: Ctx = Depends(require_roles())) -> Ctx:
     return vendor_ctx(ctx)
 
@@ -167,7 +174,7 @@ def list_requests(ctx: Ctx = Depends(buyer_ctx)):
 
 @router.post("/buyer/requests")
 async def create_request(file: UploadFile = File(...), title: str = Form(""), region: str = Form(""), industry: str = Form(""),
-                         due_date: str = Form(""), ctx: Ctx = Depends(buyer_ctx)):
+                         due_date: str = Form(""), ctx: Ctx = Depends(buyer_editor)):
     from .library import save_upload
     doc, _ = await save_upload(ctx, file, "buyer_rfp")
     parsed = pipeline.get_parsed(ctx.db, doc)
@@ -190,7 +197,7 @@ def get_request(rid: str, ctx: Ctx = Depends(buyer_ctx)):
 
 
 @router.delete("/buyer/requests/{rid}")
-def delete_request(rid: str, ctx: Ctx = Depends(buyer_ctx)):
+def delete_request(rid: str, ctx: Ctx = Depends(buyer_editor)):
     r = _request(ctx, rid)
     if ctx.db.scalar(select(NetworkInvite).where(NetworkInvite.request_id == r.id, NetworkInvite.status == "accepted")):
         raise HTTPException(400, "A supplier has accepted an invitation for this request, so it can't be deleted.")
@@ -222,9 +229,10 @@ def vendor(vid: str, ctx: Ctx = Depends(buyer_ctx)):
 
 
 @router.post("/buyer/requests/{rid}/invite")
-def invite(rid: str, body: dict, ctx: Ctx = Depends(buyer_ctx)):
+def invite(rid: str, body: dict, ctx: Ctx = Depends(buyer_editor)):
     r = _request(ctx, rid)
-    ids = list(dict.fromkeys(str(x) for x in (body.get("vendor_ids") or [])))[:30]
+    raw = body.get("vendor_ids") if isinstance(body.get("vendor_ids"), list) else []
+    ids = list(dict.fromkeys(str(x) for x in raw if isinstance(x, str)))[:30]
     if not ids:
         raise HTTPException(400, "Choose at least one supplier.")
     fits = {x["vendor_id"]: x["score"] for x in network.shortlist(ctx.db, r.requirements or [], r.region, r.industry, ctx.tenant_id)}

@@ -54,6 +54,14 @@ def sources(ctx: Ctx = Depends(current_ctx)):
 
 @router.post("/refresh")
 def refresh(ctx: Ctx = Depends(require_roles())):
+    # The notices are shared by every company, so one company can't make the server re-read the sources every minute.
+    from ..services import ai_settings
+    last = ctx.db.scalar(select(func.max(TenderSource.last_run)))
+    if last and not ai_settings.is_platform_admin(ctx.user.email):
+        last = last if last.tzinfo else last.replace(tzinfo=timezone.utc)
+        wait = 15 - (datetime.now(timezone.utc) - last).total_seconds() / 60
+        if wait > 0:
+            raise HTTPException(429, f"The sources were read {15 - int(wait)} minutes ago. Try again in {int(wait) + 1} minutes.")
     started = tender_feeds.refresh_in_background()
     return {"started": started, "message": "Reading the tender sources. This takes a few minutes." if started else "A refresh is already running."}
 
@@ -102,7 +110,7 @@ def get_tender(tender_id: str, ctx: Ctx = Depends(current_ctx)):
 
 
 @router.patch("/{tender_id}")
-def set_status(tender_id: str, body: dict, ctx: Ctx = Depends(current_ctx)):
+def set_status(tender_id: str, body: dict, ctx: Ctx = Depends(require_roles("presales", "architect", "finance", "delivery"))):
     st = body.get("status")
     if st not in ("new", "saved", "dismissed"):
         raise HTTPException(400, "Status must be new, saved or dismissed.")

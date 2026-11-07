@@ -17,7 +17,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy import func, select
 
 from . import knowledge as K
-from .matching import _STEMMED_STOP, _stem_text
+from .matching import _STEMMED_STOP, _stem_text, squash_repeats
 
 MIN_SIM = 0.10  # below this the overlap is a few shared words, not the same kind of work
 WINDOW_DAYS = 90
@@ -107,8 +107,8 @@ def _compute(db, tenant) -> dict:
         return f"{t.title}. {cats}. {body}"
 
     vec = TfidfVectorizer(ngram_range=(1, 2), sublinear_tf=True, stop_words=_STEMMED_STOP, preprocessor=_stem_text, min_df=1, max_features=80000)
-    docs = [K.expand(o["text"]) for o in offers]
-    texts = [K.expand(ttext(t)) for t in tenders]
+    docs = [K.expand(squash_repeats(o["text"])) for o in offers]
+    texts = [K.expand(squash_repeats(ttext(t))) for t in tenders]
     vec.fit(docs + texts)
     sims = cosine_similarity(vec.transform(texts), vec.transform(docs))
     served_regions, case_countries = _served(db, tenant)

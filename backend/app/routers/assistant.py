@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field, model_validator
 
 from ..config import settings
-from ..security import Ctx, current_ctx
+from ..security import Ctx, client_ip, current_ctx
 from ..services import llm, workspace_ai
 
 router = APIRouter(prefix="/api/assistant", tags=["assistant"])
@@ -99,8 +99,8 @@ def chat(body: ChatRequest, request: Request):
     if not key and not llm.is_enabled():
         raise HTTPException(503, "Maahi's AI service is not configured on this server yet.")
 
-    client_ip = request.client.host if request.client else "unknown"
-    _check_rate_limit(client_ip)
+    ip = client_ip(request)
+    _check_rate_limit(ip)
     conversation = "\n".join(f"{turn.role}: {turn.content}" for turn in body.messages)
     try:
         answer = llm.complete(

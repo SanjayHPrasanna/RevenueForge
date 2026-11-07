@@ -11,6 +11,7 @@ placement: coverage of the buyer's requirements, with missing certificates count
 from __future__ import annotations
 
 import copy
+import hashlib
 import re
 from collections import Counter, defaultdict
 
@@ -18,7 +19,7 @@ from sqlalchemy import select
 
 from ..models import Accelerator, CaseStudy, Capability, Certification, Employee, Tenant
 from . import knowledge as K
-from .matching import match_requirements, standards_in
+from .matching import current_certs, match_requirements, standards_in
 from .tender_feeds import REGIONS
 
 TECH_SUBCATS_EXCLUDED = {"Pricing & Payment", "Bonds & Guarantees", "Insurance & Liability", "Contract Terms", "Evaluation & Award", "Submission"}
@@ -94,7 +95,7 @@ def score_vendor(db, t: Tenant, reqs: list[dict], region: str = "", industry: st
     counted = [r for r in work if r["match_status"] in weight]
     mand = [r for r in counted if r.get("priority") == "Mandatory"] or counted
     score = round(100 * sum(weight[r["match_status"]] for r in mand) / len(mand)) if mand else 0
-    held = {s for c in kb.certifications for s in standards_in(c["name"])}
+    held = {s for c in current_certs(kb.certifications) for s in standards_in(c["name"])}
     asked = set().union(*[standards_in(r["text"]) for r in work]) if work else set()
     missing_std = sorted(asked - held)
     ev: Counter = Counter()
@@ -132,5 +133,8 @@ def shortlist(db, reqs: list[dict], region: str = "", industry: str = "", exclud
         n = network_settings(t)
         out.append({"vendor_id": t.id, "name": t.name, "demo": is_demo(t), "headquarters": t.headquarters, "regions": n["regions"],
                     "industries": n["industries"], **s})
-    out.sort(key=lambda x: (-x["score"], len(x["missing_standards"]), x["name"]))
+    # Ties are broken by evidence (fewer missing certificates, more strong matches), then by a fixed hash of the id, never by
+    # name, so calling a company "AAA ..." doesn't move it up the list.
+    out.sort(key=lambda x: (-x["score"], len(x["missing_standards"]), -x["coverage"].get("strong", 0),
+                            hashlib.sha1(x["vendor_id"].encode()).hexdigest()))
     return out

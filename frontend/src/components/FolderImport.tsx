@@ -17,7 +17,7 @@ const BATCH_KEY = "rf.folderBatch";
 type Picked = { file: File; path: string };
 type Row = {
   id: string; path: string; filename: string; status: string; type: string | null; confidence: string | null; reason: string;
-  records: number; format: string | null; missing: string[]; error: string; how?: string; ai?: string | null;
+  records: number; format: string | null; missing: string[]; error: string; how?: string; ai?: string | null; drive_change?: "new" | "changed" | null;
 };
 
 const readKey = () => { try { return sessionStorage.getItem(BATCH_KEY) || ""; } catch { return ""; } };
@@ -64,10 +64,13 @@ async function uploadPart(part: Picked[], batch: string): Promise<{ batch: strin
   return api.upload("/library/folder", fd);
 }
 
-export default function FolderImport({ onDone, compact, autoStartFiles }: {
+export default function FolderImport({ onDone, compact, autoStartFiles, driveSync }: {
   onDone?: () => void;
   compact?: boolean;
   autoStartFiles?: File[] | null;
+  /** Set when this review is a refresh of the connected Google Drive folder: only the new and changed files are here,
+      and `remove` lists the Drive files (deleted in Drive) whose items the person chose to take out. */
+  driveSync?: { remove: string[] } | null;
 }) {
   const toast = useToast();
   const qc = useQueryClient();
@@ -136,7 +139,7 @@ export default function FolderImport({ onDone, compact, autoStartFiles }: {
     onError: (e: any) => toast("error", e.message),
   });
   const imp = useMutation({
-    mutationFn: () => api.post(`/library/folder/${batch}/import`, { replace }),
+    mutationFn: () => api.post(`/library/folder/${batch}/import`, driveSync ? { sync: true, remove: driveSync.remove } : { replace }),
     onSuccess: (r) => {
       setResult(r);
       writeKey("");
@@ -153,7 +156,9 @@ export default function FolderImport({ onDone, compact, autoStartFiles }: {
     const c = result.counts as Record<string, number>;
     return (
       <div className="rounded-xl border border-ok/30 bg-ok-bg/60 p-5">
-        <div className="flex items-center gap-2 font-semibold text-ok"><CheckCircle2 className="h-5 w-5" /> {result.files} files imported into your knowledge library</div>
+        <div className="flex items-center gap-2 font-semibold text-ok"><CheckCircle2 className="h-5 w-5" /> {driveSync
+          ? `Refreshed from Google Drive: ${result.files} file${result.files === 1 ? "" : "s"} updated${result.removed?.length ? `, ${result.removed.length} removed` : ""}`
+          : `${result.files} files imported into your knowledge library`}</div>
         <div className="mt-3 grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
           {TYPE_ORDER.filter((k) => c[k]).map((k) => (
             <div key={k} className="rounded-lg bg-white border border-line px-3 py-2">
@@ -167,7 +172,7 @@ export default function FolderImport({ onDone, compact, autoStartFiles }: {
         )}
         <div className="mt-4 flex flex-wrap gap-2">
           {onDone && <button className="btn-primary" onClick={onDone}>Continue</button>}
-          <button className="btn-outline" onClick={reset}>Import another folder</button>
+          {!driveSync && <button className="btn-outline" onClick={reset}>Import another folder</button>}
         </div>
       </div>
     );
@@ -225,13 +230,13 @@ export default function FolderImport({ onDone, compact, autoStartFiles }: {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-        <div className="font-semibold text-[15px]">{rows.length} files from your folder</div>
+        <div className="font-semibold text-[15px]">{driveSync ? `${rows.length} new or changed file${rows.length === 1 ? "" : "s"} from Google Drive` : `${rows.length} files from your folder`}</div>
         <Stat n={ready.length} label="ready" cls="text-ok" />
         <Stat n={attention.length} label="to check" cls="text-fit-partial-ink" />
         <Stat n={left.length + skipped.length} label="left out" cls="text-ink-muted" />
         {pending > 0 && <span className="inline-flex items-center gap-1.5 text-[13px] text-brand-700"><Spinner className="h-3.5 w-3.5" /> Reading {pending} more…</span>}
         <div className="flex-1" />
-        <button className="btn-ghost h-8 text-[13px]" onClick={reset}><RefreshCw className="h-3.5 w-3.5" /> Start over</button>
+        {!driveSync && <button className="btn-ghost h-8 text-[13px]" onClick={reset}><RefreshCw className="h-3.5 w-3.5" /> Start over</button>}
       </div>
 
       <div className="card overflow-hidden">
@@ -251,7 +256,9 @@ export default function FolderImport({ onDone, compact, autoStartFiles }: {
                       <div className="flex items-start gap-2.5 min-w-0">
                         <Icon className={clsx("h-4 w-4 mt-0.5 shrink-0", r.type ? "text-brand-600" : "text-ink-faint")} />
                         <div className="min-w-0">
-                          <div className={clsx("font-medium text-[13.5px] break-all", !r.type && r.status === "review" && "text-ink-muted")}>{r.filename}</div>
+                          <div className={clsx("font-medium text-[13.5px] break-all", !r.type && r.status === "review" && "text-ink-muted")}>{r.filename}
+                            {r.drive_change && driveSync && <span className={clsx("chip ml-2 text-[10.5px]", r.drive_change === "new" ? "bg-brand-50 text-brand-700" : "bg-ember-50 text-ember-600")}>
+                              {r.drive_change === "new" ? "New in Drive" : "Changed in Drive"}</span>}</div>
                           {folder && <div className="text-[11.5px] text-ink-faint truncate max-w-[340px]">{folder}</div>}
                         </div>
                       </div>
@@ -291,10 +298,17 @@ export default function FolderImport({ onDone, compact, autoStartFiles }: {
           <button className="btn-primary" disabled={pending > 0 || imp.isPending || !ready.length} onClick={() => imp.mutate()}>
             {imp.isPending && <Spinner />} Import {ready.length} file{ready.length === 1 ? "" : "s"}
           </button>
-          <label className="inline-flex items-center gap-2 text-[13px] text-ink-soft cursor-pointer">
-            <input type="checkbox" className="h-4 w-4 accent-brand-600" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
-            Replace what's already in the library for these sections
-          </label>
+          {driveSync ? (
+            <span className="text-[12.5px] text-ink-muted max-w-[620px]">
+              A changed file replaces only the items it brought in last time. Items from unchanged files, and anything added in the app, stay as they are.
+              {driveSync.remove.length > 0 && ` Items from ${driveSync.remove.length} file${driveSync.remove.length === 1 ? "" : "s"} deleted in Drive will be removed.`}
+            </span>
+          ) : (
+            <label className="inline-flex items-center gap-2 text-[13px] text-ink-soft cursor-pointer">
+              <input type="checkbox" className="h-4 w-4 accent-brand-600" checked={replace} onChange={(e) => setReplace(e.target.checked)} />
+              Replace what's already in the library for these sections
+            </label>
+          )}
           {templates.length > 1 && <span className="text-[12.5px] text-fit-partial-ink">Only the first proposal template is used. Set the others to "Don't import".</span>}
           {pending > 0 && <span className="text-[12.5px] text-ink-muted">You can import once every file has been read.</span>}
         </div>

@@ -193,10 +193,16 @@ def rules_extract(doc: ParsedDocument) -> tuple[list[dict], dict]:
     if not reqs:
         # A short scope (e.g. a published tender notice) with no "shall"/"must" sentences: each scope sentence is taken
         # as one requirement, so the deal still has something to match and estimate. Low confidence, for review.
+        after_heading = False
         for b in doc.blocks:
-            if b.kind in ("para", "bullet") and REQ_SECTION_RE.search(b.section or ""):
+            t = (b.text or "").strip()
+            # plain-text notices have no real headings: a short "Scope of work ..." line starts the scope
+            if b.kind in ("heading", "para") and len(t) < 90 and REQ_SECTION_RE.search(t) and not t.endswith("."):
+                after_heading = True
+                continue
+            if b.kind in ("para", "bullet") and (after_heading or REQ_SECTION_RE.search(b.section or "")):
                 for s in _sentences(b.text):
-                    if len(s) >= 30:
+                    if len(s) >= 30 and not s.startswith("("):  # "(The notice gives no description.)" is not a requirement
                         add(s, b)
         for r in reqs:
             r["class_confidence"] = min(r["class_confidence"], 0.5)

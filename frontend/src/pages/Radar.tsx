@@ -113,6 +113,8 @@ function Sources() {
 
 /** Invitations to bid from buyers in the supplier network. */
 function Invitations() {
+  const { user } = useAuth();
+  const canBid = user?.role === "admin" || user?.role === "presales";
   const toast = useToast();
   const nav = useNavigate();
   const qc = useQueryClient();
@@ -143,7 +145,8 @@ function Invitations() {
                 {i.request.region ? ` · ${i.request.region}` : ""}{i.request.due_date ? ` · due ${i.request.due_date}` : ""} · your coverage {i.fit}%</div>
               {i.message && <div className="text-[12.5px] text-ink-soft mt-0.5">“{i.message}”</div>}
             </div>
-            {i.status === "invited" ? <>
+            {i.status === "invited" && !canBid ? <span className="text-[12px] text-ink-muted">A presales lead or admin can accept or decline.</span>
+            : i.status === "invited" ? <>
               <button className="btn-primary h-9" disabled={act.isPending} onClick={() => act.mutate({ id: i.id, what: "accept" })}>Accept and start a deal</button>
               <button className="btn-ghost h-9" disabled={act.isPending} onClick={() => act.mutate({ id: i.id, what: "decline" })}>Decline</button>
             </> : i.status === "accepted" && i.deal_id
@@ -195,6 +198,9 @@ function StartDeal({ item, onClose }: { item: Item | null; onClose: () => void }
 }
 
 function Detail({ id, onClose, onStart }: { id: string; onClose: () => void; onStart: (it: Item) => void }) {
+  const role = useAuth().user?.role;
+  const canBid = role === "admin" || role === "presales";
+  const canMark = role !== "viewer";
   const qc = useQueryClient();
   const toast = useToast();
   const { data: t } = useQuery({ queryKey: ["radar-item", id], queryFn: () => api.get<any>(`/radar/${id}`) });
@@ -249,13 +255,13 @@ function Detail({ id, onClose, onStart }: { id: string; onClose: () => void; onS
       <div className="sticky bottom-0 bg-white/95 backdrop-blur border-t border-line-soft px-5 py-3 flex flex-wrap gap-2">
         {t.status === "deal" && t.deal_id ? (
           <Link to={`/app/deals/${t.deal_id}`} className="btn-primary">Open the deal</Link>
-        ) : (
+        ) : canBid ? (
           <button className="btn-primary" onClick={() => onStart(t)}>Start a deal</button>
-        )}
-        {t.status !== "deal" && (t.status === "saved"
+        ) : null}
+        {canMark && t.status !== "deal" && (t.status === "saved"
           ? <button className="btn-outline" onClick={() => set.mutate("new")}><Undo2 className="h-4 w-4" /> Unsave</button>
           : <button className="btn-outline" onClick={() => set.mutate("saved")}><Bookmark className="h-4 w-4" /> Save</button>)}
-        {t.status !== "deal" && (t.status === "dismissed"
+        {canMark && t.status !== "deal" && (t.status === "dismissed"
           ? <button className="btn-ghost" onClick={() => set.mutate("new")}><Undo2 className="h-4 w-4" /> Restore</button>
           : <button className="btn-ghost" onClick={() => set.mutate("dismissed")}><EyeOff className="h-4 w-4" /> Not for us</button>)}
       </div>

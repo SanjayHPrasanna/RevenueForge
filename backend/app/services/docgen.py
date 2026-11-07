@@ -86,6 +86,10 @@ def response_text(r: dict, company: str) -> str:
             return f"{company} acknowledges this condition; our position is confirmed in the commercial response."
         commit = _commit_sentence(r.get("text", ""))
         return (commit + " " if commit else "") + "We will comply with this obligation and confirm the specific controls with your security and legal teams during mobilisation."
+    if st == "gap" and not (r.get("gap") or {}).get("options"):
+        # Nothing in the library covers it and no mitigation was chosen: never write a promise the company can't keep.
+        return ("[NOT COVERED: nothing in the knowledge library supports this requirement and no mitigation has been chosen. "
+                "Decide whether to partner, hire, take an exception or not bid before this proposal is sent.]")
     parts = []
     missing_std = [t for t in m.get("technologies_missing", []) if _is_standard_name(t)]
     # never "commit" to holding a certificate we don't have
@@ -121,7 +125,9 @@ def response_text(r: dict, company: str) -> str:
 
 def ai_responses(reqs: list[dict], company: dict, client: str, guidance: str = "", progress=None) -> dict[str, str]:
     """AI drafts the client-facing response for each requirement, using only its matched evidence."""
-    todo = [r for r in reqs if r["category"] != "Commercial" and r.get("match_status") != "confirm"]
+    # A gap with no chosen mitigation gets the NOT COVERED marker from response_text, never an AI-polished promise.
+    todo = [r for r in reqs if r["category"] != "Commercial" and r.get("match_status") != "confirm"
+            and not (r.get("match_status") == "gap" and not (r.get("gap") or {}).get("options"))]
     out: dict[str, str] = {}
     batches = [todo[i:i + 15] for i in range(0, len(todo), 15)]
     for n, chunk in enumerate(batches, start=1):
@@ -137,8 +143,9 @@ def ai_responses(reqs: list[dict], company: dict, client: str, guidance: str = "
                          + (f"\n  plan to close gap: {plan[:240]}" if plan else ""))
         prompt = (f"Company: {company['name']}. {company.get('about', '')[:500]}\nClient: {client}\n\n" + "\n".join(lines) +
                   '\n\nWrite the response for each requirement as it will appear in the proposal compliance matrix: 2-3 sentences, confident, '
-                  "specific, first person plural (we). Mention the cited capability, reference project or certification by name. For gaps, state "
-                  "the approach positively without admitting weakness and without inventing facts. JSON array: "
+                  "specific, first person plural (we). Mention the cited capability, reference project or certification by name. For a gap or "
+                  "partial fit, describe the plan to close it (a partner, new hires, a build) plainly: never say or imply the company already has "
+                  "a capability, certificate or reference it doesn't have, and never invent facts. JSON array: "
                   '[{"i": index, "response": "..."}]' + guidance)
         res = None
         for _ in range(2):  # one retry, then move on: a failed batch keeps the rules answer and later batches still run
@@ -167,6 +174,8 @@ def executive_summary(ctx: dict) -> str:
     rfp_price = sc["price"] * pr["fx_to_rfp"]
     counts = g.get("counts", {})
     tech = [r for r in ctx["requirements"] if r["category"] in ("Functional", "Non-functional")]
+    planned_gaps = sum(1 for r in ctx["requirements"] if r.get("match_status") == "gap" and (r.get("gap") or {}).get("options"))
+    open_gaps = sum(1 for r in ctx["requirements"] if r.get("match_status") == "gap") - planned_gaps
     cs = ctx.get("case_studies", [])[:2]
     cs_txt = "; ".join(f"{c['title']} ({'; '.join(c.get('outcomes', [])[:1]) or c.get('industry', '')})" for c in cs)
     if llm.is_enabled():
@@ -175,7 +184,7 @@ def executive_summary(ctx: dict) -> str:
                 "client": d["client_display"], "rfp_title": d["name"], "engagement": ENG_LABEL.get(d["engagement_type"], ""),
                 "company": company["name"], "company_about": company.get("about", ""), "requirements": len(ctx["requirements"]),
                 "technical_requirements": len(tech), "fully_met": counts.get("strong", 0), "met_with_approach": counts.get("partial", 0),
-                "gaps_closed_by_mitigation_plan": counts.get("gap", 0), "conditions_and_submission_items_acknowledged": counts.get("confirm", 0),
+                "gaps_closed_by_mitigation_plan": planned_gaps, "gaps_without_a_plan_do_not_claim_these": open_gaps, "conditions_and_submission_items_acknowledged": counts.get("confirm", 0),
                 "team_size": est["headcount"], "duration_months": est["contract_months"],
                 "build_months": est.get("build_months") if d["engagement_type"] == "build_run" else None,
                 "managed_service_months": est.get("run_months"),
@@ -184,17 +193,20 @@ def executive_summary(ctx: dict) -> str:
                 "evaluation_criteria": [e["criterion"] for e in ctx["meta"].get("evaluation_criteria", [])],
             }
             return llm.complete("You write crisp, factual executive summaries for enterprise proposals. Use only the facts given. 3 short paragraphs, "
-                                "no headings, no bullet points. Don't mention counts that are zero, and don't describe the company as serving "
-                                "industries that aren't in the facts.",
+                                "no headings, no bullet points. Don't mention counts that are zero, don't describe the company as serving "
+                                "industries that aren't in the facts, and never say every requirement is met or covered unless the facts show "
+                                "no gaps without a plan.",
                                 f"Facts (JSON): {facts}", max_tokens=900).strip()
         except Exception:
             pass
     p1 = (f"{d['client_display']} is seeking a partner for {d['name']}. {company['name']} proposes {_a(ENG_LABEL.get(d['engagement_type'], 'engagement'))} "
-          f"that answers all {len(ctx['requirements'])} requirements identified in the RFP, including {len(tech)} functional and non-functional requirements.")
+          f"in response to the {len(ctx['requirements'])} requirements identified in the RFP, including {len(tech)} functional and non-functional requirements.")
     bits = [f"{counts.get('strong', 0)} requirements are met by proven, in-house capabilities"]
     if counts.get("partial"):
         bits.append(f"{counts['partial']} by extending them")
-    p2 = "; ".join(bits) + (f", and the remaining {counts['gap']} are covered by the mitigation plan in this proposal. " if counts.get("gap") else ". ") \
+    p2 = "; ".join(bits) + (f", and {planned_gaps} more are covered by the mitigation plan in this proposal. " if planned_gaps else ". ") \
+        + (f"[INTERNAL - remove before sending: {open_gaps} requirement{'s have' if open_gaps != 1 else ' has'} no capability or mitigation yet.] "
+           if open_gaps else "") \
         + (f"Relevant references include {cs_txt}. " if cs_txt else "") + ctx["architecture"]["summary"]
     if d["engagement_type"] == "build_run" and est.get("build_months"):
         when = f"build and migrate the platform in {est['build_months']} months and then run it for {est.get('run_months')} months"

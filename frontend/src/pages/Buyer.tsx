@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Dropzone, Empty, Modal, PageLoader, Spinner, StatStrip, useToast } from "../components/ui";
 import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { ago } from "../lib/format";
 
 const REGIONS = ["", "Europe", "United Kingdom", "North America", "Latin America & Caribbean", "Middle East & North Africa", "Sub-Saharan Africa",
@@ -47,6 +48,7 @@ function NewRequest({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 export function BuyerRequests() {
   const [open, setOpen] = useState(false);
+  const canEdit = useAuth().user?.role !== "viewer";
   const { data } = useQuery({ queryKey: ["buyer-requests"], queryFn: () => api.get<any[]>("/buyer/requests") });
   if (!data) return <PageLoader />;
   return (
@@ -57,7 +59,9 @@ export function BuyerRequests() {
           <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Your requests</h1>
           <p className="text-ink-muted text-[14px] mt-1">Upload an RFP, see which suppliers have proven they can deliver it, and invite the right ones to bid.</p>
         </div>
-        <button className="btn-primary" onClick={() => setOpen(true)}><FileSearch className="h-4 w-4" /> Find suppliers for an RFP</button>
+        {canEdit
+          ? <button className="btn-primary" onClick={() => setOpen(true)}><FileSearch className="h-4 w-4" /> Find suppliers for an RFP</button>
+          : <span className="text-[12.5px] text-ink-muted">Viewers can look at requests but not create them.</span>}
       </div>
       <div className="card overflow-x-auto">
         {data.length === 0 ? (
@@ -130,6 +134,7 @@ export function BuyerRequest() {
   const toast = useToast();
   const nav = useNavigate();
   const qc = useQueryClient();
+  const canEdit = useAuth().user?.role !== "viewer";
   const [picked, setPicked] = useState<string[]>([]);
   const [msg, setMsg] = useState("");
   const [profile, setProfile] = useState<string | null>(null);
@@ -154,7 +159,7 @@ export function BuyerRequest() {
         <Link to="/app/buyer" className="text-[13px] text-ink-muted hover:text-brand-700 inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" /> Requests</Link>
         <div className="flex flex-wrap items-end gap-3 mt-2">
           <h1 className="flex-1 min-w-[300px] font-display text-[32px] leading-tight text-brand-950">{r.title}</h1>
-          <button className="btn-ghost" onClick={() => confirm("Delete this request? Invited suppliers will no longer see it.") && del.mutate()}><Trash2 className="h-4 w-4" /> Delete</button>
+          {canEdit && <button className="btn-ghost" onClick={() => confirm("Delete this request? Invited suppliers will no longer see it.") && del.mutate()}><Trash2 className="h-4 w-4" /> Delete</button>}
         </div>
         <div className="text-[13px] text-ink-muted mt-1">{[r.filename, r.region || "Any region", r.industry, r.due_date && `Due ${r.due_date}`].filter(Boolean).join(" · ")}</div>
       </div>
@@ -192,7 +197,7 @@ export function BuyerRequest() {
             <tbody>
               {sl.vendors.map((v: any) => (
                 <tr key={v.vendor_id} className={clsx(picked.includes(v.vendor_id) && "bg-brand-50/60")}>
-                  <td className="td align-top">{!v.invite_status && <input type="checkbox" className="h-4 w-4 mt-1 accent-[#118AC3]" aria-label={`Select ${v.name}`}
+                  <td className="td align-top">{canEdit && !v.invite_status && <input type="checkbox" className="h-4 w-4 mt-1 accent-[#118AC3]" aria-label={`Select ${v.name}`}
                     checked={picked.includes(v.vendor_id)} onChange={() => toggle(v.vendor_id)} />}</td>
                   <td className="td align-top"><div className="num font-bold text-[18px]">{v.score}%</div>
                     <div className="text-[11.5px] text-ink-muted">{v.coverage.strong || 0} strong · {v.coverage.partial || 0} partial · {v.coverage.gap || 0} gaps</div></td>

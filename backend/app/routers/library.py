@@ -14,7 +14,7 @@ from sqlalchemy import delete, func, select
 from ..config import UPLOAD_DIR, settings
 from ..models import Accelerator, CaseStudy, Capability, Certification, Document, Employee, RateCard, Tenant
 from ..security import Ctx, current_ctx, require_roles
-from ..services import folder_import, graph, llm
+from ..services import drive_sync, folder_import, graph, llm
 from ..services.onboarding import FIELDS, KINDS, analyze, missing_fields, records_from_table
 from ..services.parsing import parse_document
 
@@ -117,16 +117,30 @@ def update_company(body: dict, ctx: Ctx = Depends(require_roles())):
             setattr(t, f, str(body[f])[:2000])
     if "headcount" in body:
         try:
-            t.headcount = int(body["headcount"] or 0)
-        except ValueError:
-            pass
+            hc = int(float(body["headcount"] or 0))
+        except (TypeError, ValueError, OverflowError):
+            raise HTTPException(400, "Headcount must be a number.")
+        if not 0 <= hc <= 5_000_000:
+            raise HTTPException(400, "Headcount must be between 0 and 5,000,000.")
+        t.headcount = hc
     if isinstance(body.get("settings"), dict):
         s = dict(t.settings or {})
         for k, v in body["settings"].items():
-            if k == "ai":
-                continue  # the company's AI provider and key are changed only through /company/ai
+            # Only the commercial policy is set here. The AI key (/company/ai), the network listing (/network/profile), the
+            # demo flag and learned history are system-managed, so they can't be overwritten through this route.
+            if k not in ("target_margin", "min_margin", "travel_pct", "hide_employee_names"):
+                continue
+            if k == "hide_employee_names":
+                s[k] = bool(v)
+                continue
             if k in ("target_margin", "min_margin", "travel_pct"):
-                v = float(v)
+                try:
+                    v = float(v)
+                except (TypeError, ValueError):
+                    raise HTTPException(400, f"{k.replace('_', ' ')} must be a number.")
+                hi = 100 if k == "travel_pct" else 80
+                if not 0 <= v <= hi:
+                    raise HTTPException(400, f"{k.replace('_', ' ')} must be between 0 and {hi}.")
             s[k] = v
         t.settings = s
     ctx.audit("company.update", t.id)
@@ -222,6 +236,7 @@ def _import_doc(ctx: Ctx, doc: Document, mode: str = "replace", records: list | 
         ctx.db.execute(delete(M).where(M.tenant_id == ctx.tenant_id))
     cols = {c.name for c in M.__table__.columns}
     n = 0
+    added = []
     for r in recs:
         clean = {k: v for k, v in r.items() if k in cols and k not in ("id", "tenant_id")}
         if kind == "skills" and not clean.get("code"):
@@ -230,8 +245,12 @@ def _import_doc(ctx: Ctx, doc: Document, mode: str = "replace", records: list | 
             clean["name"] = ""
         if kind == "rates" and not clean.get("currency"):
             clean["currency"] = ctx.tenant.currency
-        ctx.db.add(M(tenant_id=ctx.tenant_id, source_doc=doc.id, **clean))
+        obj = M(tenant_id=ctx.tenant_id, source_doc=doc.id, **clean)
+        ctx.db.add(obj)
+        added.append(obj)
         n += 1
+    # fingerprints of what was imported, so a later Drive refresh can say which records were edited in the app since
+    doc.parsed = {**(doc.parsed or {}), "sigs": [drive_sync.record_sig(M, o) for o in added]}
     doc.status = "imported"
     ob = dict(ctx.tenant.onboarding or {})
     ob[kind] = True
@@ -271,13 +290,26 @@ def _folder_row(d: Document) -> dict:
     return {"id": d.id, "path": p.get("path") or d.filename, "filename": d.filename, "size": d.size, "status": d.status,
             "type": d.kind if d.kind in folder_import.TYPES else None, "detected": p.get("detected"),
             "confidence": p.get("confidence"), "reason": p.get("reason", ""), "records": p.get("record_count", 0),
-            "format": p.get("format"), "missing": p.get("missing", []), "error": d.error, "how": p.get("how"), "ai": p.get("ai")}
+            "format": p.get("format"), "missing": p.get("missing", []), "error": d.error, "how": p.get("how"), "ai": p.get("ai"),
+            "drive_change": (p.get("drive") or {}).get("change")}
 
 
 @router.post("/library/folder")
 async def folder_upload(files: list[UploadFile] = File(...), paths: list[str] = Form(default=[]), batch: str = Form(default=""),
+                        drive: list[str] = Form(default=[]), drive_folder: str = Form(default=""),
                         ctx: Ctx = Depends(require_roles("presales", "architect", "finance"))):
-    """Receive some (or all) files of a folder. Large folders arrive in several calls with the same batch id."""
+    """Receive some (or all) files of a folder. Large folders arrive in several calls with the same batch id.
+    Files from Google Drive also carry `drive` (one JSON object per file: id, modified, version, change) and the batch
+    carries `drive_folder` ({"id", "name"}), so the folder can stay connected and be refreshed later."""
+    import json as _json
+    folder_meta = None
+    if drive_folder:
+        try:
+            fm = _json.loads(drive_folder)
+            if isinstance(fm, dict) and fm.get("id"):
+                folder_meta = {"id": str(fm["id"])[:128], "name": str(fm.get("name") or "Google Drive folder")[:200]}
+        except ValueError:
+            raise HTTPException(400, "drive_folder must be JSON.")
     batch = re.sub(r"[^a-z0-9]", "", batch.lower())[:32] or secrets.token_hex(8)
     existing = _batch_docs(ctx, batch)
     if len(existing) + len(files) > MAX_FOLDER_FILES:
@@ -304,8 +336,19 @@ async def folder_upload(files: list[UploadFile] = File(...), paths: list[str] = 
             skipped.append({"path": rel, "reason": "Same file appears twice in the folder"})
             continue
         seen.add((name, len(data)))
+        parsed = {"batch": batch, "path": rel}
+        if folder_meta and i < len(drive):
+            try:
+                dm = _json.loads(drive[i])
+            except ValueError:
+                dm = None
+            if isinstance(dm, dict) and dm.get("id"):
+                parsed["drive"] = {"id": str(dm["id"])[:128], "modified": str(dm.get("modified") or "")[:40],
+                                   "version": str(dm.get("version") or "")[:40],
+                                   "change": dm.get("change") if dm.get("change") in ("new", "changed") else "new"}
+                parsed["drive_folder"] = folder_meta
         doc = Document(tenant_id=ctx.tenant_id, kind="unsorted", filename=name, path="", size=len(data), uploaded_by=ctx.user.id,
-                       status="analyzing", parsed={"batch": batch, "path": rel})
+                       status="analyzing", parsed=parsed)
         ctx.db.add(doc)
         ctx.db.flush()
         folder = UPLOAD_DIR / ctx.tenant_id
@@ -323,6 +366,8 @@ async def folder_upload(files: list[UploadFile] = File(...), paths: list[str] = 
 @router.get("/library/folder/{batch}")
 def folder_status(batch: str, ctx: Ctx = Depends(current_ctx)):
     docs = _batch_docs(ctx, batch)
+    if not docs:
+        raise HTTPException(404, "Upload not found.")
     rows = [_folder_row(d) for d in docs]
     return {"batch": batch, "files": rows, "pending": sum(1 for r in rows if r["status"] == "analyzing"),
             "imported": sum(1 for r in rows if r["status"] == "imported")}
@@ -351,9 +396,21 @@ def folder_set_type(batch: str, doc_id: str, body: dict, ctx: Ctx = Depends(requ
 @router.post("/library/folder/{batch}/import")
 def folder_import_all(batch: str, body: dict | None = None, ctx: Ctx = Depends(require_roles("presales", "architect", "finance"))):
     body = body or {}
-    skip = set(body.get("skip") or [])
+    if not _batch_docs(ctx, batch):
+        raise HTTPException(404, "Upload not found.")
+    if not isinstance(body, dict):
+        body = {}
+    skip = {str(x) for x in body.get("skip")} if isinstance(body.get("skip"), list) else set()
     replace = bool(body.get("replace", True))
-    docs = [d for d in _batch_docs(ctx, batch) if d.status == "review"]
+    all_docs = _batch_docs(ctx, batch)
+    drive_docs = [d for d in all_docs if (d.parsed or {}).get("drive")]
+    conn = drive_sync.connection(ctx.tenant)
+    sync = bool(body.get("sync")) and conn is not None and bool(drive_docs)
+    if sync and any((d.parsed or {}).get("drive_folder", {}).get("id") != conn["folder"]["id"] for d in drive_docs):
+        raise HTTPException(409, "These files come from a different Drive folder than the connected one.")
+    if sync:
+        replace = False  # a refresh only touches the files that changed; everything else stays as it is
+    docs = [d for d in all_docs if d.status == "review"]
     if any(d.status == "analyzing" for d in _batch_docs(ctx, batch)):
         raise HTTPException(409, "Some files are still being read. Wait a moment and try again.")
     counts: dict[str, int] = {}
@@ -381,14 +438,151 @@ def folder_import_all(batch: str, body: dict | None = None, ctx: Ctx = Depends(r
         except HTTPException as e:
             problems.append({"path": (d.parsed or {}).get("path") or d.filename, "reason": e.detail})
             continue
+        if sync:  # the new version is in; now take out what the previous version of the same Drive file put there
+            old = conn["files"].get(d.parsed["drive"]["id"]) or {}
+            if old.get("doc_id") and old.get("kind") in MODEL:
+                OM = MODEL[old["kind"]]
+                ctx.db.execute(delete(OM).where(OM.tenant_id == ctx.tenant_id, OM.source_doc == old["doc_id"]))
+                prev = ctx.db.get(Document, old["doc_id"])
+                if prev and prev.tenant_id == ctx.tenant_id:
+                    prev.status = "replaced"
         started.add(d.kind)
         counts[d.kind] = counts.get(d.kind, 0) + n
         files += 1
+    removed = []
+    if drive_docs:
+        if sync:
+            removed = _drive_remove(ctx, conn, body.get("remove"))
+        else:  # first import from Drive: this folder is now connected
+            first = drive_docs[0].parsed["drive_folder"]
+            conn = {"folder": first, "connected_by": ctx.user.name, "connected_at": drive_sync.now_iso(), "files": {}}
+        for d in drive_docs:
+            dm = d.parsed["drive"]
+            if d.status == "imported":
+                conn["files"][dm["id"]] = {"path": d.parsed.get("path") or d.filename, "modified": dm["modified"], "version": dm["version"],
+                                           "doc_id": d.id, "kind": d.kind}
+            elif not sync:
+                # left out on purpose at connect time: remember it, so a refresh only raises it again if it changes
+                conn["files"][dm["id"]] = {"path": d.parsed.get("path") or d.filename, "modified": dm["modified"], "version": dm["version"],
+                                           "doc_id": "", "kind": ""}
+        conn["last_refresh"] = drive_sync.now_iso()
+        drive_sync.save_connection(ctx.tenant, conn)
     ctx.db.flush()
     stats = graph.rebuild_company_graph(ctx.db, ctx.tenant_id)
-    ctx.audit("library.folder_import", batch, files=files, **counts)
+    ctx.audit("library.folder_import", batch, files=files, drive="refresh" if sync else ("connect" if drive_docs else ""), removed=len(removed), **counts)
     ctx.db.commit()
-    return {"files": files, "counts": counts, "problems": problems, "graph": stats, "onboarding": _onboarding_status(ctx)}
+    return {"files": files, "counts": counts, "problems": problems, "graph": stats, "onboarding": _onboarding_status(ctx),
+            "removed": removed}
+
+
+# --------------------------------------------------------------------------- connected Google Drive folder
+def _drive_out(ctx: Ctx, conn: dict | None) -> dict:
+    if not conn:
+        return {"connected": False}
+    return {"connected": True, "folder": conn["folder"], "connected_by": conn.get("connected_by", ""), "connected_at": conn.get("connected_at"),
+            "last_refresh": conn.get("last_refresh"), "last_checked": conn.get("last_checked"),
+            "files": sum(1 for f in conn.get("files", {}).values() if f.get("doc_id")),
+            "left_out": sum(1 for f in conn.get("files", {}).values() if not f.get("doc_id"))}
+
+
+def _drive_remove(ctx: Ctx, conn: dict, ids) -> list[str]:
+    """Take out what the given Drive files put in the library (only files the person ticked)."""
+    out = []
+    for fid in [str(x) for x in ids] if isinstance(ids, list) else []:
+        f = conn["files"].get(fid)
+        if not f:
+            continue
+        if f.get("doc_id") and f.get("kind") in MODEL:
+            M = MODEL[f["kind"]]
+            ctx.db.execute(delete(M).where(M.tenant_id == ctx.tenant_id, M.source_doc == f["doc_id"]))
+        if f.get("doc_id"):
+            doc = ctx.db.get(Document, f["doc_id"])
+            if doc and doc.tenant_id == ctx.tenant_id:
+                doc.status = "removed"
+        conn["files"].pop(fid, None)
+        out.append(f.get("path") or fid)
+    return out
+
+
+@router.get("/library/drive")
+def drive_status(ctx: Ctx = Depends(current_ctx)):
+    return _drive_out(ctx, drive_sync.connection(ctx.tenant))
+
+
+@router.post("/library/drive/plan")
+def drive_plan(body: dict, ctx: Ctx = Depends(require_roles("presales", "architect", "finance"))):
+    """Compare the folder as the browser sees it now with what was imported last time. Nothing is changed here."""
+    conn = drive_sync.connection(ctx.tenant)
+    if not conn:
+        raise HTTPException(404, "No Google Drive folder is connected.")
+    if not isinstance(body, dict) or str(body.get("folder_id") or "") != conn["folder"]["id"]:
+        raise HTTPException(409, "That isn't the connected folder.")
+    listing = drive_sync.clean_listing(body.get("files"))
+    known = conn.get("files", {})
+    new, chg, unchanged = [], [], 0
+    for f in listing:
+        old = known.get(f["id"])
+        if old is None:
+            new.append({"id": f["id"], "path": f["path"]})
+        elif drive_sync.changed(old, f):
+            item = {"id": f["id"], "path": f["path"], "kind": old.get("kind") or None, "imported": bool(old.get("doc_id"))}
+            if old.get("doc_id") and old.get("kind") in MODEL:
+                doc = ctx.db.get(Document, old["doc_id"])
+                M = MODEL[old["kind"]]
+                item["records"] = len(drive_sync.doc_records(ctx.db, M, ctx.tenant_id, old["doc_id"]))
+                item["edited_in_app"] = drive_sync.edited_count(ctx.db, M, ctx.tenant_id, doc) if doc else None
+            chg.append(item)
+        else:
+            unchanged += 1
+            if old.get("path") != f["path"]:
+                old["path"] = f["path"]  # renamed or moved inside the folder: same file
+    seen = {f["id"] for f in listing}
+    gone = []
+    for fid, old in list(known.items()):
+        if fid in seen:
+            continue
+        if not old.get("doc_id"):
+            known.pop(fid)  # nothing was imported from it, so there's nothing to decide
+            continue
+        item = {"id": fid, "path": old.get("path", ""), "kind": old.get("kind") or None, "imported": bool(old.get("doc_id")), "records": 0}
+        if old.get("doc_id") and old.get("kind") in MODEL:
+            item["records"] = len(drive_sync.doc_records(ctx.db, MODEL[old["kind"]], ctx.tenant_id, old["doc_id"]))
+        gone.append(item)
+    conn["last_checked"] = drive_sync.now_iso()
+    if not new and not chg and not gone:
+        conn["last_refresh"] = conn["last_checked"]
+    drive_sync.save_connection(ctx.tenant, conn)
+    ctx.audit("library.drive_check", conn["folder"]["id"], new=len(new), changed=len(chg), removed=len(gone))
+    ctx.db.commit()
+    return {"new": new, "changed": chg, "removed": gone, "unchanged": unchanged, "up_to_date": not new and not chg and not gone}
+
+
+@router.post("/library/drive/remove")
+def drive_remove(body: dict, ctx: Ctx = Depends(require_roles("presales", "architect", "finance"))):
+    """For a refresh where files were only deleted from Drive: take out what the ticked files put in the library."""
+    conn = drive_sync.connection(ctx.tenant)
+    if not conn:
+        raise HTTPException(404, "No Google Drive folder is connected.")
+    removed = _drive_remove(ctx, conn, (body or {}).get("ids") if isinstance(body, dict) else None)
+    conn["last_refresh"] = drive_sync.now_iso()
+    drive_sync.save_connection(ctx.tenant, conn)
+    ctx.db.flush()
+    stats = graph.rebuild_company_graph(ctx.db, ctx.tenant_id)
+    ctx.audit("library.drive_remove", conn["folder"]["id"], removed=len(removed))
+    ctx.db.commit()
+    return {"removed": removed, "graph": stats}
+
+
+@router.delete("/library/drive")
+def drive_disconnect(ctx: Ctx = Depends(require_roles("presales", "architect", "finance"))):
+    """Forget the folder. Everything already imported stays in the library."""
+    conn = drive_sync.connection(ctx.tenant)
+    if not conn:
+        raise HTTPException(404, "No Google Drive folder is connected.")
+    drive_sync.save_connection(ctx.tenant, None)
+    ctx.audit("library.drive_disconnect", conn["folder"]["id"])
+    ctx.db.commit()
+    return {"connected": False}
 
 
 @router.get("/library/uploads")
@@ -485,13 +679,56 @@ def list_kind(kind: str, q: str = "", ctx: Ctx = Depends(current_ctx)):
     return out
 
 
+def _clean_fields(M, body: dict, creating: bool) -> dict:
+    """Only real columns, with the right shape: lists stay lists, text stays text, required fields aren't empty."""
+    from sqlalchemy import JSON, Float, Integer, String, Text
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Send the fields as a JSON object.")
+    out = {}
+    for col in M.__table__.columns:
+        k = col.name
+        if k in ("id", "tenant_id") or k not in body:
+            continue
+        v = body[k]
+        t = col.type
+        if isinstance(t, JSON):
+            if v is None:
+                v = []
+            if isinstance(v, str):
+                v = [x.strip() for x in v.split(",") if x.strip()]
+            if not isinstance(v, (list, dict)):
+                raise HTTPException(400, f"{k} must be a list.")
+        elif isinstance(t, (Integer, Float)):
+            if v in (None, ""):
+                v = None
+            else:
+                try:
+                    v = int(v) if isinstance(t, Integer) else float(v)
+                except (TypeError, ValueError):
+                    raise HTTPException(400, f"{k} must be a number.")
+        elif isinstance(t, (String, Text)):
+            if v is None:
+                v = ""
+            if not isinstance(v, (str, int, float)):
+                raise HTTPException(400, f"{k} must be text.")
+            v = str(v)
+            if getattr(t, "length", None) and len(v) > t.length:
+                raise HTTPException(400, f"{k} is too long (at most {t.length} characters).")
+        out[k] = v
+    required = [col.name for col in M.__table__.columns if not col.nullable and col.default is None and not col.primary_key
+                and col.name not in ("tenant_id",)]
+    for k in required:
+        if (creating and k not in out) or (k in out and (out[k] is None or (isinstance(out[k], str) and not out[k].strip()))):
+            raise HTTPException(400, f"{k.replace('_', ' ').capitalize()} is required.")
+    return out
+
+
 @router.post("/library/{kind}")
 def create_item(kind: str, body: dict, ctx: Ctx = Depends(require_roles("presales", "architect", "finance"))):
     if kind not in MODEL:
         raise HTTPException(404, "Unknown library section.")
     M = MODEL[kind]
-    cols = {c.name for c in M.__table__.columns} - {"id", "tenant_id"}
-    obj = M(tenant_id=ctx.tenant_id, **{k: v for k, v in body.items() if k in cols})
+    obj = M(tenant_id=ctx.tenant_id, **_clean_fields(M, body, creating=True))
     ctx.db.add(obj)
     ctx.db.flush()
     graph.rebuild_company_graph(ctx.db, ctx.tenant_id)
@@ -506,10 +743,8 @@ def update_item(kind: str, item_id: str, body: dict, ctx: Ctx = Depends(require_
     obj = ctx.db.get(MODEL[kind], item_id)
     if not obj or obj.tenant_id != ctx.tenant_id:
         raise HTTPException(404, "Item not found.")
-    cols = {c.name for c in MODEL[kind].__table__.columns} - {"id", "tenant_id"}
-    for k, v in body.items():
-        if k in cols:
-            setattr(obj, k, v)
+    for k, v in _clean_fields(MODEL[kind], body, creating=False).items():
+        setattr(obj, k, v)
     ctx.db.flush()
     graph.rebuild_company_graph(ctx.db, ctx.tenant_id)
     ctx.db.commit()

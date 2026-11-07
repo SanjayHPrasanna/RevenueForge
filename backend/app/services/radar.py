@@ -15,10 +15,11 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sqlalchemy import func, select
 
 from . import knowledge as K
-from .matching import CompanyKB, _STEMMED_STOP, _cap_text, _cs_text, _acc_text, _stem_text, standards_in
+from .matching import (CompanyKB, _STEMMED_STOP, _acc_text, _cap_text, _covered, _cs_text, _domain_terms, _stem_text, _vocab,
+                       current_certs, squash_repeats, standards_in)
 
 BANDS = [(60, "Strong fit"), (35, "Possible fit"), (0, "Weak fit")]
-SCORER_VERSION = 1
+SCORER_VERSION = 2
 
 
 def band(score: int) -> str:
@@ -39,7 +40,7 @@ def _tender_text(t) -> tuple[str, bool]:
     cats = " ".join(c.get("label", "") for c in t.categories or [])
     english = (t.language or "en").startswith("en")
     body = t.description[:3000] if english else ""
-    return f"{t.title}. {cats}. {body}", english
+    return squash_repeats(f"{t.title}. {cats}. {body}"), english
 
 
 def score_all(kb: CompanyKB, tenders: list, inventory: dict | None = None) -> list[dict]:
@@ -48,9 +49,11 @@ def score_all(kb: CompanyKB, tenders: list, inventory: dict | None = None) -> li
         return []
     inv = inventory or kb.tech_inventory()
     company_techs = {t for t, v in inv.items() if v["people"] or v["capabilities"]}
-    held_std = {s for c in kb.certifications for s in standards_in(f"{c['name']} {c.get('description', '')}")}
+    held_std = {s for c in current_certs(kb.certifications) for s in standards_in(f"{c['name']} {c.get('description', '')}")}
     caps, css, accs = kb.capabilities, kb.case_studies, kb.accelerators
-    docs = [K.expand(_cap_text(c)) for c in caps] + [K.expand(_cs_text(c)) for c in css] + [K.expand(_acc_text(a)) for a in accs]
+    docs = [K.expand(squash_repeats(_cap_text(c))) for c in caps] + [K.expand(squash_repeats(_cs_text(c))) for c in css] + \
+        [K.expand(squash_repeats(_acc_text(a))) for a in accs]
+    vocab = _vocab(kb)
     texts = [_tender_text(t) for t in tenders]
     out = []
     if not docs:
@@ -88,10 +91,19 @@ def score_all(kb: CompanyKB, tenders: list, inventory: dict | None = None) -> li
             raw = 0.75 * cap + 0.25 * cs
         raw -= min(0.3, 0.15 * len(lacking_std))
         score = int(round(max(0.0, min(1.0, raw)) * 100))
+        # Same honesty checks as requirement matching: a notice that is little more than product names, or whose only
+        # overlap with the library is a product name, can't be a strong fit.
+        terms = _domain_terms(txt, techs)
+        cov = sum(1 for x in terms if _covered(x, vocab)) / len(terms) if terms else 0.0
+        thin_note = ""
+        if len(terms) < 3 and score > 50:
+            score, thin_note = 50, "The notice says little beyond product names, so the fit can't be judged from it. Read the full notice."
+        elif techs and len(terms) >= 3 and cov < 0.2 and cap < 0.5 and score > 34:
+            score, thin_note = 34, "Only product names overlap with your library; the work itself isn't covered."
         matches = [{"type": "Capability", "name": caps[j]["name"], "strength": round(norm(s, 0.28), 2)} for s, j in cap_rank if s > 0.05]
         matches += [{"type": "Case study", "name": css[j]["title"], "strength": round(norm(s, 0.25), 2)} for s, j in cs_rank if s > 0.05]
         matches += [{"type": "Accelerator / product", "name": accs[j]["name"], "strength": round(norm(s, 0.28), 2)} for s, j in acc_rank if s > 0.08]
-        notes = []
+        notes = [thin_note] if thin_note else []
         if not english:
             notes.append("The notice isn't in English, so only its title and category were scored. Read the full notice before deciding.")
         if not (t.description or "").strip():

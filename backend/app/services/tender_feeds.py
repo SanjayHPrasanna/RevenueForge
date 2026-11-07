@@ -396,17 +396,38 @@ def store(db, items: list[dict]) -> int:
 
     from ..models import Tender
     now = datetime.now(timezone.utc)
+    cols = Tender.__table__.columns
     n = 0
     for it in items:
+        if not isinstance(it, dict) or not it.get("source_id") or not str(it.get("title") or "").strip():
+            continue  # a notice without an id or a title can't be shown or de-duplicated
+        for k in ("published", "deadline"):
+            v = it.get(k)
+            if v is not None and not isinstance(v, datetime):
+                it[k] = None
+            elif v is not None and v.tzinfo is None:
+                it[k] = v.replace(tzinfo=timezone.utc)
         if it.get("deadline") and it["deadline"] < now:
             continue  # closed already
-        row = db.scalar(select(Tender).where(Tender.source == it["source"], Tender.source_id == it["source_id"]))
+        if it.get("value") is not None:
+            try:
+                it["value"] = float(it["value"])
+                if it["value"] != it["value"] or it["value"] < 0 or it["value"] > 1e13:
+                    it["value"] = None
+            except (TypeError, ValueError):
+                it["value"] = None
+        sid = str(it["source_id"])[:120]
+        row = db.scalar(select(Tender).where(Tender.source == it["source"], Tender.source_id == sid))
         if row is None:
-            row = Tender(source=it["source"], source_id=it["source_id"])
+            row = Tender(source=it["source"], source_id=sid)
             db.add(row)
         for k in _STORE_KEYS:
             if k in it:
-                setattr(row, k, it[k])
+                v = it[k]
+                length = getattr(cols[k].type, "length", None)
+                if isinstance(v, str) and length:
+                    v = v[:length]  # PostgreSQL refuses over-long text; SQLite doesn't care
+                setattr(row, k, v)
         row.fetched_at = now
         n += 1
     db.commit()
@@ -456,6 +477,10 @@ def refresh(sources: list[str] | None = None) -> dict:
                     result[key] = src.fetched
                 except Exception as e:  # one source failing never stops the others
                     log.warning("Tender source %s failed: %s", key, e)
+                    db.rollback()
+                    src = db.get(TenderSource, key) or TenderSource(key=key)
+                    db.add(src)
+                    src.last_run = datetime.now(timezone.utc)
                     src.error = str(e)[:500]
                     result[key] = f"failed: {str(e)[:120]}"
                 db.commit()
