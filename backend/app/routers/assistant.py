@@ -91,6 +91,18 @@ def _check_rate_limit(client_ip: str):
         events.append(now)
 
 
+def _unavailable(e: Exception) -> HTTPException:
+    """Say what actually went wrong, instead of calling every failure 'busy'."""
+    m = str(e).lower()
+    if any(x in m for x in ("api key", "api_key", "permission", "401", "403", "unauthenticated", "invalid")):
+        return HTTPException(503, "Maahi can't reach its AI service: the AI key isn't accepted. An admin needs to check it.")
+    if any(x in m for x in ("quota", "429", "resource_exhausted", "rate")):
+        return HTTPException(503, "Maahi has used up its AI allowance for now. Please try again later.")
+    if any(x in m for x in ("timed out", "timeout", "deadline")):
+        return HTTPException(503, "Maahi's AI service is taking too long to answer. Please try again in a minute.")
+    return HTTPException(503, "Maahi is busy right now (the AI service is overloaded). Please try again in a minute.")
+
+
 @router.post("/chat")
 def chat(body: ChatRequest, request: Request):
     # Maahi has its own key (MAAHI_GEMINI_API_KEY) so chat never uses up the quota that deals depend on.
@@ -116,7 +128,7 @@ def chat(body: ChatRequest, request: Request):
         )
     except llm.LLMUnavailable as e:
         log.warning("Maahi chat failed: %s", str(e)[:300])
-        raise HTTPException(503, "Maahi is busy right now (the AI service is overloaded). Please try again in a minute.")
+        raise _unavailable(e)
     answer = answer.strip()
     if not answer:
         raise HTTPException(503, "Maahi couldn't create a response just now. Please try again shortly.")
@@ -149,7 +161,7 @@ def workspace_chat(body: ChatRequest, ctx: Ctx = Depends(current_ctx)):
         )
     except llm.LLMUnavailable as e:
         log.warning("Maahi workspace chat failed: %s", str(e)[:300])
-        raise HTTPException(503, "Maahi is busy right now (the AI service is overloaded). Please try again in a minute.")
+        raise _unavailable(e)
     answer = answer.strip()
     if not answer:
         raise HTTPException(503, "Maahi couldn't create a response just now. Please try again shortly.")

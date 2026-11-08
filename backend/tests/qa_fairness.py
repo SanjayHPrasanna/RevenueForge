@@ -135,6 +135,13 @@ ok("radar: one-word notice isn't a strong fit", fits[4]["score"] < 60, str(fits[
 ok("radar: unrelated construction is weak", fits[3]["score"] < 35, str(fits[3]["score"]))
 fr = RS.score_all(AZ, [tender("Migration vers Azure de 300 machines virtuelles", "Migrer les charges de travail vers Microsoft Azure.", lang="fr")])[0]
 ok("radar: non-English notice says it was scored on title only", any("English" in n for n in fr["notes"]))
+fd = RS.score_all(AZ, [tender("Azure-Migration von 300 virtuellen Maschinen", "Migration der Arbeitslasten nach Microsoft Azure.", lang="de"),
+                       tender("Azure migration of 300 virtual machines", "")])
+ok("radar: a non-English notice is never a strong fit (title-only evidence)", fd[0]["score"] <= 55, str(fd[0]["score"]))
+ok("radar: a notice with no description is never a strong fit", fd[1]["score"] <= 55, str(fd[1]["score"]))
+fp = RS.score_all(AZ, [tender("Managed print services framework", "Provision of multifunction printers, pull printing, maintenance, consumables "
+                              "and managed print services across 40 offices, hosted reporting on Azure.")])[0]
+ok("radar: shared words ('managed services', 'Azure') don't make a print contract a strong fit", fp["score"] < 60, str(fp["score"]))
 fe = RS.score_all(CompanyKB(name="Empty"), [tender("Azure migration", "Azure.")])[0]
 ok("radar: empty library scores 0", fe["score"] == 0)
 fc = RS.score_all(AZ, [tender("Managed SOC", "Supplier must hold SOC 2 Type II and PCI DSS certification. Azure Sentinel.")])[0]

@@ -50,7 +50,17 @@ def sources(ctx: Ctx = Depends(current_ctx)):
                     "last_ok": _aware(s.last_ok) if s else None, "last_run": _aware(s.last_run) if s else None,
                     "error": (s.error if s else "") if on else ("Add a free SAM.gov API key (SAM_API_KEY) to include US federal opportunities."
                                                                 if meta.get("needs_key") else "")})
-    return {"sources": out, "not_covered": tender_feeds.NOT_COVERED, "refresh": tender_feeds.status(),
+    from ..models import Award
+    from ..services import award_feeds
+    acount = dict(ctx.db.execute(select(Award.source, func.count()).group_by(Award.source)).all())
+    awards = []
+    for key, meta in award_feeds.AWARD_SOURCES.items():
+        s = rows.get(key)
+        on = key in award_feeds.enabled()
+        awards.append({"key": key, "name": meta["name"], "enabled": on, "stored": acount.get(meta["tender_source"], 0),
+                       "history_from": (s.cursor if s else "") or None, "last_ok": _aware(s.last_ok) if s else None,
+                       "error": (s.error if s else "") if on else ""})
+    return {"sources": out, "awards": awards, "not_covered": tender_feeds.NOT_COVERED, "refresh": tender_feeds.status(),
             "total": sum(counts.values()), "regions": tender_feeds.REGIONS + ["Other"]}
 
 

@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { NoticeBar } from "./GoogleButton";
-import { BookOpen, Brain, Briefcase, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, FileSearch, LogOut, Menu, Network, Radar, Settings, ShieldCheck, Sparkles, TrendingUp, Trophy, X } from "lucide-react";
+import { BookOpen, Brain, Briefcase, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, FileSearch, LogOut, Menu, Network, Radar, Settings, ShieldCheck, Sparkles, TrendingUp, Trophy, Users, X } from "lucide-react";
 import { Suspense, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -13,6 +13,7 @@ const NAV = [
   { to: "/app", label: "Home", icon: LayoutDashboard, end: true },
   { to: "/app/opportunities", label: "Opportunities", icon: Radar },
   { to: "/app/market", label: "Market insights", icon: TrendingUp },
+  { to: "/app/customers", label: "Find customers", icon: Users },
   { to: "/app/deals", label: "Deals", icon: Briefcase },
   { to: "/app/winloss", label: "Win/loss", icon: Trophy },
   { to: "/app/library", label: "Knowledge library", icon: BookOpen },

@@ -372,6 +372,31 @@ class Tender(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class Award(Base):
+    """A published contract award: who bought what, from which supplier, for how much, and (where the notice says) until
+    when. Public information shared by every company, used by "Find customers"."""
+    __tablename__ = "awards"
+    __table_args__ = (UniqueConstraint("source", "source_id"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    source: Mapped[str] = mapped_column(String(20), index=True)  # ted, uk_fts, canadabuys
+    source_id: Mapped[str] = mapped_column(String(120))
+    title: Mapped[str] = mapped_column(String(600), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    language: Mapped[str] = mapped_column(String(8), default="en")
+    buyer: Mapped[str] = mapped_column(String(300), default="", index=True)
+    country: Mapped[str] = mapped_column(String(80), default="")
+    region: Mapped[str] = mapped_column(String(40), default="", index=True)
+    categories: Mapped[list] = mapped_column(JSON, default=list)
+    suppliers: Mapped[list] = mapped_column(JSON, default=list)  # organisation names of the winners
+    value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    currency: Mapped[str] = mapped_column(String(8), default="")
+    awarded: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    contract_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    end_basis: Mapped[str] = mapped_column(String(40), default="")  # "published end date", "start + duration", ""
+    url: Mapped[str] = mapped_column(String(600), default="")
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class TenderSource(Base):
     """When each source was last read, and whether it worked."""
     __tablename__ = "tender_sources"
@@ -380,6 +405,7 @@ class TenderSource(Base):
     last_ok: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     fetched: Mapped[int] = mapped_column(Integer, default=0)
     error: Mapped[str] = mapped_column(Text, default="")
+    cursor: Mapped[str] = mapped_column(String(40), default="")  # awards: oldest date read so far (back-filling)
 
 
 class TenderFit(Base):

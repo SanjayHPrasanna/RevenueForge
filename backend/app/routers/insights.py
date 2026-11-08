@@ -1,6 +1,7 @@
 """Management dashboard and the knowledge-graph API."""
 from __future__ import annotations
 
+import re
 from collections import Counter, defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -193,3 +194,105 @@ def market_insights(ctx: Ctx = Depends(current_ctx)):
         raise HTTPException(403, "Market insights are for supplier workspaces.")
     from ..services import market
     return market.market(ctx.db, ctx.tenant)
+
+
+def _supplier_ctx(ctx: Ctx) -> Ctx:
+    if (ctx.tenant.kind or "vendor") == "buyer":
+        raise HTTPException(403, "Finding customers is for supplier workspaces.")
+    return ctx
+
+
+def _finder_input(body) -> tuple[dict, list[str]]:
+    if not isinstance(body, dict):
+        raise HTTPException(400, "Send the product as an object.")
+    regions = body.get("regions") if isinstance(body.get("regions"), list) else []
+    return body, [str(r)[:40] for r in regions[:12]]
+
+
+@router.post("/insights/customers")
+def find_customers(body: dict, ctx: Ctx = Depends(current_ctx)):
+    """Who could buy one product: open tenders, past awards, renewals coming up, and the buyers behind them."""
+    from ..services import customer_finder
+    _supplier_ctx(ctx)
+    body, regions = _finder_input(body)
+    product = customer_finder.product_from(ctx.db, ctx.tenant_id, body)
+    return customer_finder.find(ctx.db, ctx.tenant, product, regions)
+
+
+@router.post("/insights/customers/export")
+def export_customers(body: dict, ctx: Ctx = Depends(current_ctx)):
+    """The same lists as an Excel workbook for the sales team."""
+    import io
+
+    from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    from ..services import customer_finder
+    _supplier_ctx(ctx)
+    body, regions = _finder_input(body)
+    product = customer_finder.product_from(ctx.db, ctx.tenant_id, body)
+    r = customer_finder.find(ctx.db, ctx.tenant, product, regions)
+    wb = Workbook()
+    head = Font(bold=True, color="FFFFFF")
+    fill = PatternFill("solid", fgColor="0F3D5E")
+
+    def sheet(ws, title, cols, rows):
+        ws.title = title
+        ws.append([c for c, _ in cols])
+        for c in ws[1]:
+            c.font, c.fill = head, fill
+        for it in rows:
+            ws.append([f(it) for _, f in cols])
+        for row in ws.iter_rows(min_row=2):
+            for c in row:
+                c.alignment = Alignment(wrap_text=True, vertical="top")
+                if c.data_type == "f":  # notice text that starts with "=" stays text
+                    c.data_type = "s"
+        for i, (name, _) in enumerate(cols):
+            ws.column_dimensions[ws.cell(1, i + 1).column_letter].width = 46 if name in ("Title", "Why it matches", "Notes", "Examples") else 18
+
+    d = lambda s: (s or "")[:10]
+    money = lambda it: f"{it['value']:,.0f} {it['currency']}" if it.get("value") else ""
+    common = [("Score", lambda x: x["score"]), ("Match", lambda x: x["band"]), ("Title", lambda x: x["title"]), ("Buyer", lambda x: x["buyer"]),
+              ("Country", lambda x: x["country"])]
+    tail = [("Why it matches", lambda x: ", ".join(x["why"])), ("Notes", lambda x: " ".join(x["notes"])), ("Source", lambda x: x["source_name"]),
+            ("Link", lambda x: x["url"])]
+    ws = wb.active
+    ws.title = "Summary"
+    ws.append([f"Customers for: {r['product']['name']} ({r['product']['kind']})"])
+    ws["A1"].font = Font(bold=True, size=14)
+    ws.append([f"Key terms used: {', '.join(r['key_terms'])}"])
+    ws.append([f"Regions: {', '.join(regions) if regions else 'all covered regions'}. Generated {r['generated_at'][:16].replace('T', ' ')} UTC."])
+    ws.append([f"Buying now: {len(r['buying_now'])}  |  Bought before: {len(r['bought_before'])}  |  Renewals (6-18 months): {len(r['renewals'])}  |  Customers: {len(r['customers'])}"])
+    ws.append([])
+    ws.append(["How to read this: scores compare the notice text with the product description; no AI is used. Always read the official notice."])
+    for lim in r["coverage"]["limits"]:
+        ws.append([lim])
+    for s in r["coverage"]["tender_sources"]:
+        ws.append([f"Source: {s}"])
+    ws.append(["Notices are reused under each source's licence (see the Trust & data page): TED © European Union; UK OGL v3.0; "
+               "Open Government Licence – Canada; World Bank CC BY 4.0."])
+    ws.column_dimensions["A"].width = 120
+    sheet(wb.create_sheet(), "Buying now", common + [("Deadline", lambda x: d(x.get("deadline"))), ("Estimated value", money)] + tail,
+          r["buying_now"])
+    sheet(wb.create_sheet(), "Bought before", common + [("Supplier(s)", lambda x: ", ".join(x.get("suppliers") or [])),
+                                                         ("Awarded", lambda x: d(x.get("awarded"))), ("Value", money),
+                                                         ("Contract ends", lambda x: d(x.get("contract_end")))] + tail, r["bought_before"])
+    sheet(wb.create_sheet(), "Renewals", common + [("Contract ends", lambda x: d(x.get("contract_end"))), ("How we know", lambda x: x.get("end_basis") or ""),
+                                                    ("Current supplier(s)", lambda x: ", ".join(x.get("suppliers") or [])), ("Value", money)] + tail,
+          r["renewals"])
+    sheet(wb.create_sheet(), "Customers", [("Buyer", lambda c: c["buyer"]), ("Country", lambda c: c["country"]),
+                                           ("Open tenders now", lambda c: c["open_tenders"]), ("Past awards", lambda c: c["past_awards"]),
+                                           ("Total awarded", lambda c: "; ".join(f"{v:,} {k}" for k, v in c["value"].items())),
+                                           ("Last award", lambda c: d(c["last_award"])), ("Next contract end", lambda c: d(c["next_renewal"])),
+                                           ("Suppliers they used", lambda c: ", ".join(c["suppliers"])), ("Best match", lambda c: c["best_score"]),
+                                           ("Examples", lambda c: " | ".join(c["examples"]))], r["customers"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    safe = re.sub(r"[^A-Za-z0-9 _-]", "", r["product"]["name"])[:60].strip() or "product"
+    ctx.audit("insights.customers_export", product["name"][:120])
+    ctx.db.commit()
+    return StreamingResponse(buf, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                             headers={"Content-Disposition": f'attachment; filename="Customers - {safe}.xlsx"'})

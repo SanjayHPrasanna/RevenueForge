@@ -112,6 +112,18 @@ def _compute(db, tenant) -> dict:
     vec.fit(docs + texts)
     sims = cosine_similarity(vec.transform(texts), vec.transform(docs))
     served_regions, case_countries = _served(db, tenant)
+    # Same honesty check as the radar: a shared phrase ("managed services") isn't demand for what the company does.
+    # A tender counts only if enough of what it talks about appears anywhere in the company's library.
+    from .matching import _covered, _domain_terms, _vocab
+    from .pipeline import load_kb
+    vocab = _vocab(load_kb(db, tenant.id))
+
+    def relevant(t) -> bool:
+        txt = ttext(t)
+        terms = _domain_terms(txt, [x for x in K.find_technologies(txt) if x not in K.COMMODITY_TECH])
+        if len(terms) < 3:
+            return True  # too little text to judge either way; the similarity threshold decides
+        return sum(1 for x in terms if _covered(x, vocab)) / len(terms) >= 0.34
 
     per = {o["id"]: {"id": o["id"], "kind": o["kind"], "name": o["name"], "open": 0, "total": 0, "regions": Counter(), "countries": Counter(),
                      "sectors": Counter(), "buyers": Counter(), "values": defaultdict(float), "examples": []} for o in offers}
@@ -122,7 +134,7 @@ def _compute(db, tenant) -> dict:
     for i, t in enumerate(tenders):
         row = sims[i]
         j = int(row.argmax())
-        if row[j] < MIN_SIM:
+        if row[j] < MIN_SIM or not relevant(t):
             continue
         o = offers[j]
         p = per[o["id"]]

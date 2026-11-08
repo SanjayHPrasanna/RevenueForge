@@ -25,6 +25,7 @@ const SettingsPage = React.lazy(() => import("./pages/Settings"));
 const WinLoss = React.lazy(() => import("./pages/WinLoss"));
 const RadarPage = React.lazy(() => import("./pages/Radar"));
 const Market = React.lazy(() => import("./pages/Market"));
+const Customers = React.lazy(() => import("./pages/Customers"));
 const TrustPage = React.lazy(() => import("./pages/Trust").then((m) => ({ default: m.TrustPage })));
 const PrivacyPage = React.lazy(() => import("./pages/Trust").then((m) => ({ default: m.PrivacyPage })));
 const TermsPage = React.lazy(() => import("./pages/Trust").then((m) => ({ default: m.TermsPage })));
@@ -94,6 +95,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="winloss" element={<WinLoss />} />
                 <Route path="opportunities" element={<RadarPage />} />
                 <Route path="market" element={<Market />} />
+                <Route path="customers" element={<Customers />} />
                 <Route path="buyer" element={<BuyerRequests />} />
                 <Route path="buyer/:id" element={<BuyerRequest />} />
                 <Route path="settings" element={<SettingsPage />} />

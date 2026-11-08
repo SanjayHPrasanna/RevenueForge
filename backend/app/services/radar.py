@@ -19,7 +19,7 @@ from .matching import (CompanyKB, _STEMMED_STOP, _acc_text, _cap_text, _covered,
                        current_certs, squash_repeats, standards_in)
 
 BANDS = [(60, "Strong fit"), (35, "Possible fit"), (0, "Weak fit")]
-SCORER_VERSION = 2
+SCORER_VERSION = 3
 
 
 def band(score: int) -> str:
@@ -94,18 +94,33 @@ def score_all(kb: CompanyKB, tenders: list, inventory: dict | None = None) -> li
         # Same honesty checks as requirement matching: a notice that is little more than product names, or whose only
         # overlap with the library is a product name, can't be a strong fit.
         terms = _domain_terms(txt, techs)
-        cov = sum(1 for x in terms if _covered(x, vocab)) / len(terms) if terms else 0.0
+        hit = [x for x in terms if _covered(x, vocab)]
+        cov = len(hit) / len(terms) if terms else 0.0
+        limited = not english or not (t.description or "").strip()
         thin_note = ""
         if len(terms) < 3 and score > 50:
             score, thin_note = 50, "The notice says little beyond product names, so the fit can't be judged from it. Read the full notice."
         elif techs and len(terms) >= 3 and cov < 0.2 and cap < 0.5 and score > 34:
             score, thin_note = 34, "Only product names overlap with your library; the work itself isn't covered."
+        else:
+            if len(terms) >= 3:
+                # A short notice shares a phrase like "managed services" with almost anything. Scale the score by how much of
+                # what the notice talks about appears in the library at all (60% or more counts in full).
+                score = int(round(score * (0.5 + 0.5 * min(1.0, cov / 0.6))))
+                if score >= 60 and cov < 0.5:
+                    score = 59
+                    if english:
+                        missed = [terms[x] for x in terms if x not in hit][:4]
+                        thin_note = f"Parts of the notice aren't in your library ({', '.join(missed)}), so it can't be a strong fit."
+            if limited and score > 55:
+                score = 55  # judged from the title alone: never more than a possible fit
         matches = [{"type": "Capability", "name": caps[j]["name"], "strength": round(norm(s, 0.28), 2)} for s, j in cap_rank if s > 0.05]
         matches += [{"type": "Case study", "name": css[j]["title"], "strength": round(norm(s, 0.25), 2)} for s, j in cs_rank if s > 0.05]
         matches += [{"type": "Accelerator / product", "name": accs[j]["name"], "strength": round(norm(s, 0.28), 2)} for s, j in acc_rank if s > 0.08]
         notes = [thin_note] if thin_note else []
         if not english:
-            notes.append("The notice isn't in English, so only its title and category were scored. Read the full notice before deciding.")
+            notes.append("The notice isn't in English, so only its title and category were scored, and it can't be rated a strong fit. "
+                         "Read the full notice before deciding.")
         if not (t.description or "").strip():
             notes.append("The source gives no description, so only the title and category were scored.")
         if lacking_std:
@@ -133,11 +148,19 @@ def ensure_scored(db, tid: str, kb_loader) -> int:
         return 0
     kb = kb_loader(db, tid)
     now = datetime.now(timezone.utc)
+    new_rows, updates = [], []
     for t, fit in zip(todo, score_all(kb, todo)):
         row = have.get(t.id)
+        values = {"score": fit["score"], "detail": {**fit, "sig": sig}, "scored_at": now}
         if row is None:
-            row = TenderFit(tenant_id=tid, tender_id=t.id)
-            db.add(row)
-        row.score, row.detail, row.scored_at = fit["score"], {**fit, "sig": sig}, now
+            new_rows.append({"tenant_id": tid, "tender_id": t.id, "status": "new", "deal_id": "", **values})
+        else:
+            updates.append({"id": row.id, **values})
+    # thousands of rows: write them in bulk, in short batches (one statement per batch, not one per row)
+    from sqlalchemy import insert
+    for i in range(0, len(new_rows), 1000):
+        db.execute(insert(TenderFit), new_rows[i:i + 1000])
+    for i in range(0, len(updates), 1000):
+        db.bulk_update_mappings(TenderFit, updates[i:i + 1000])
     db.commit()
     return len(todo)

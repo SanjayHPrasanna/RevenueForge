@@ -407,6 +407,7 @@ def store(db, items: list[dict]) -> int:
     now = datetime.now(timezone.utc)
     cols = Tender.__table__.columns
     n = 0
+    seen: dict = {}
     for it in items:
         if not isinstance(it, dict) or not it.get("source_id") or not str(it.get("title") or "").strip():
             continue  # a notice without an id or a title can't be shown or de-duplicated
@@ -426,10 +427,11 @@ def store(db, items: list[dict]) -> int:
             except (TypeError, ValueError):
                 it["value"] = None
         sid = str(it["source_id"])[:120]
-        row = db.scalar(select(Tender).where(Tender.source == it["source"], Tender.source_id == sid))
+        row = seen.get((it["source"], sid)) or db.scalar(select(Tender).where(Tender.source == it["source"], Tender.source_id == sid))
         if row is None:
             row = Tender(source=it["source"], source_id=sid)
             db.add(row)
+        seen[(it["source"], sid)] = row  # the same notice twice in one batch (e.g. across pages) updates one row
         for k in _STORE_KEYS:
             if k in it:
                 v = it[k]
@@ -501,6 +503,9 @@ def refresh(sources: list[str] | None = None) -> dict:
                     src.error = str(e)[:500]
                     result[key] = f"failed: {str(e)[:120]}"
                 db.commit()
+            if sources is None or any(k in sources for k in ("awards",)):
+                from . import award_feeds
+                result.update(award_feeds.refresh(db, client, _state))
         prune(db)
     finally:
         db.close()
