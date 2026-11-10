@@ -20,6 +20,7 @@ import math
 import re
 import threading
 import time
+from datetime import datetime, timezone
 from collections import deque
 from dataclasses import dataclass, replace
 
@@ -371,6 +372,7 @@ def _gemini_call(p: Profile, system: str, prompt: str, max_tokens: int, temperat
         text = "".join(x.get("text", "") for x in parts if not x.get("thought"))
         if not text.strip():
             raise LLMUnavailable(f"Gemini returned an empty answer (finish reason {cands[0].get('finishReason')})")
+        _note_tokens((data.get("usageMetadata") or {}).get("totalTokenCount", 0))
         return text
 
 
@@ -399,6 +401,8 @@ def _other_complete(p: Profile, name: str, system: str, prompt: str, max_tokens:
         client = anthropic.Anthropic(api_key=p.anthropic_api_key)
         msg = client.messages.create(model=p.anthropic_model, max_tokens=max_tokens, temperature=temperature,
                                      system=system, messages=[{"role": "user", "content": prompt}])
+        u = getattr(msg, "usage", None)
+        _note_tokens((getattr(u, "input_tokens", 0) or 0) + (getattr(u, "output_tokens", 0) or 0))
         return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
     if name == "openai":
         from openai import OpenAI
@@ -456,6 +460,7 @@ def _chat(p: Profile, client, model: str, system: str, prompt: str, max_tokens: 
             r = client.chat.completions.create(model=model, messages=msgs, **args, **kw)
             if reasoning:
                 st["reasoning_model"] = True
+            _note_tokens(getattr(getattr(r, "usage", None), "total_tokens", 0) or 0)
             return r.choices[0].message.content or ""
         except openai.APIStatusError as e:
             body = f"{model}: {getattr(e, 'message', '') or e}"
@@ -491,13 +496,18 @@ def complete(system: str, prompt: str, max_tokens: int = 4000, temperature: floa
         raise LLMUnavailable(st["disabled_reason"])
     last = None
     alt = 0  # which model in the fallback list to use: moves on after "overloaded", "out of quota" or a timeout
+    t0 = time.monotonic()
     for attempt in range(max(1, attempts)):
         _throttle(p)
         try:
             st["calls"] += 1
+            _tok.n = 0
             if name == "gemini":
-                return _gemini_complete(p, system, prompt, max_tokens, temperature, want_json, timeout or 180, fast, alt)
-            return _other_complete(p, name, system, prompt, max_tokens, temperature, want_json)
+                out = _gemini_complete(p, system, prompt, max_tokens, temperature, want_json, timeout or 180, fast, alt)
+            else:
+                out = _other_complete(p, name, system, prompt, max_tokens, temperature, want_json)
+            _record(name, _model_name(p, name, st), True, time.monotonic() - t0, getattr(_tok, "n", 0))
+            return out
         except _HttpError as e:
             last = e
             if e.status in (401, 403) or (e.status == 400 and "API key" in e.body):
@@ -532,7 +542,84 @@ def complete(system: str, prompt: str, max_tokens: int = 4000, temperature: floa
                 time.sleep(min(3 * (attempt + 1), max_wait))
     st["failures"] += 1
     st["last_error"] = str(last)
+    _record(name, _model_name(p, name, st), False, time.monotonic() - t0, 0)
     raise LLMUnavailable(f"AI call failed: {last}")
+
+
+# --------------------------------------------------------------------------- usage records (platform console)
+_tok = threading.local()
+_usage_lock = threading.Lock()
+_usage: dict[tuple, list[int]] = {}  # (day, tenant, provider, model) -> [calls, failures, tokens, ms], not yet saved
+
+
+def _note_tokens(n) -> None:
+    try:
+        _tok.n = int(n or 0)
+    except (TypeError, ValueError):
+        _tok.n = 0
+
+
+def _model_name(p: Profile, name: str, st: dict) -> str:
+    return {"gemini": st.get("last_model") or p.gemini_model or "gemini", "anthropic": p.anthropic_model, "openai": p.openai_model,
+            "azure": p.azure_deployment}.get(name, name)
+
+
+def _record(provider: str, model: str, ok: bool, secs: float, tokens: int) -> None:
+    """Counts one AI call for the platform console: which company, provider and model, whether it worked, how long it took
+    and how many tokens it used. Nothing of what was asked or answered."""
+    key = (datetime.now(timezone.utc).strftime("%Y-%m-%d"), _tenant.get() or "", provider, (model or "")[:120])
+    with _usage_lock:
+        row = _usage.setdefault(key, [0, 0, 0, 0])
+        row[0] += 1
+        row[1] += 0 if ok else 1
+        row[2] += max(0, tokens)
+        row[3] += int(secs * 1000)
+
+
+def flush_usage() -> int:
+    """Saves the counts gathered so far. Called every minute by a background thread and before the console reads them."""
+    with _usage_lock:
+        pending = dict(_usage)
+        _usage.clear()
+    if not pending:
+        return 0
+    from sqlalchemy import select as _select
+
+    from ..db import SessionLocal
+    from ..models import AiUsage
+
+    db = SessionLocal()
+    try:
+        for (day, tid, prov, model), (c, f, t, ms) in pending.items():
+            row = db.scalar(_select(AiUsage).where(AiUsage.day == day, AiUsage.tenant_id == tid, AiUsage.provider == prov, AiUsage.model == model))
+            if row is None:
+                db.add(AiUsage(day=day, tenant_id=tid, provider=prov, model=model, calls=c, failures=f, tokens=t, ms=ms))
+            else:
+                row.calls, row.failures, row.tokens, row.ms = row.calls + c, row.failures + f, row.tokens + t, row.ms + ms
+        db.commit()
+    except Exception as e:  # never lose the app over a counter: put them back for the next try
+        db.rollback()
+        log.warning("Couldn't save AI usage counts: %s", e)
+        with _usage_lock:
+            for k, v in pending.items():
+                row = _usage.setdefault(k, [0, 0, 0, 0])
+                for i in range(4):
+                    row[i] += v[i]
+        return 0
+    finally:
+        db.close()
+    return len(pending)
+
+
+def start_usage_flusher(every: int = 60) -> None:
+    def loop():
+        while True:
+            time.sleep(every)
+            try:
+                flush_usage()
+            except Exception as e:
+                log.warning("AI usage flush failed: %s", e)
+    threading.Thread(target=loop, name="ai-usage-flush", daemon=True).start()
 
 
 def complete_json(system: str, prompt: str, max_tokens: int = 8000, api_key: str | None = None):
@@ -598,6 +685,7 @@ def embed(texts: list[str], task: str = "SEMANTIC_SIMILARITY") -> list[list[floa
                     r = client.embeddings.create(model="text-embedding-3-small", input=[t[:6000] or " " for t in texts[start:start + 500]])
                     vecs += [_normalize(d.embedding) for d in r.data]
             st["embed_ok"] = True
+            _record(name, {"gemini": p.gemini_embed_model, "openai": "text-embedding-3-small"}.get(name, p.azure_embed_deployment), True, 0, 0)
             return vecs
         except _HttpError as e:
             if e.status == 429:

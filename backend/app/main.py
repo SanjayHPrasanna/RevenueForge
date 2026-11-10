@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import BASE_DIR, settings
 from .db import init_db
-from .routers import assistant, auth, company_data, deals, insights, learning, library, network, radar, trust
+from .routers import assistant, auth, company_data, deals, insights, learning, library, network, platform, radar, trust
 from .services import company_ai, llm  # noqa: F401  (company_ai registers the per-company AI settings)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -83,6 +83,9 @@ def _startup():
     init_db()
     from .services import ai_settings
     ai_settings.apply_saved()  # AI engine settings saved from Settings → AI engine
+    llm.start_usage_flusher()  # AI call counts for the platform console, saved every minute
+    from .services import errlog
+    errlog.install()  # recent warnings and errors, for the platform console's health view
     from .services import notify
     notify.start_deadline_watch()  # "due in 3 days / tomorrow" reminder emails
     from .services import tender_feeds
@@ -126,6 +129,7 @@ def robots():
 
 
 app.include_router(auth.router)
+app.include_router(platform.router)
 app.include_router(library.router)
 app.include_router(deals.router)
 app.include_router(insights.router)

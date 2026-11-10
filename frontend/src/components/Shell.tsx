@@ -26,7 +26,7 @@ const BUYER_NAV = [
   { to: "/app/buyer", label: "Requests", icon: FileSearch, end: false },
   { to: "/app/settings", label: "Settings", icon: Settings },
 ];
-const BUYER_PATHS = ["/app/buyer", "/app/settings"];
+const BUYER_PATHS = ["/app/buyer", "/app/settings", "/app/platform"];
 
 export default function Shell() {
   const { user, logout } = useAuth();
@@ -52,7 +52,7 @@ export default function Shell() {
   const { data: company } = useQuery({ queryKey: ["company"], queryFn: () => api.get("/company") });
   const isBuyer = user?.tenant.kind === "buyer";
   const ob = isBuyer ? null : company?.onboarding;
-  const nav = isBuyer ? BUYER_NAV : NAV;
+  const nav = [...(isBuyer ? BUYER_NAV : NAV), ...(user?.platform_admin ? [{ to: "/app/platform", label: "Platform console", icon: ShieldCheck, end: false }] : [])];
 
   const navFor = (mini: boolean) => (
     <nav className="relative flex flex-col h-full overflow-hidden">

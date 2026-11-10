@@ -15,8 +15,8 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import get_db
-from ..models import Tenant, User
-from ..security import Ctx, create_token, current_ctx, hash_password, require_roles, verify_password, client_ip
+from ..models import AuditLog, Tenant, User
+from ..security import Ctx, create_token, current_ctx, ensure_company_open, hash_password, require_roles, verify_password, client_ip
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -55,8 +55,30 @@ class GoogleIn(BaseModel):
     kind: str = "vendor"
 
 
+def _mask(email: str) -> str:
+    """An email as security events show it when it matched no account: enough to spot a pattern, not to read it in full."""
+    name, _, dom = (email or "").lower().partition("@")
+    return f"{name[:2]}***@{dom}" if dom else "***"
+
+
+def _signin_event(db: Session, action: str, u: User | None, email: str, ip: str, **detail) -> None:
+    """Security events for the platform console. Kept short: who, what, from which network, when. Never passwords."""
+    db.add(AuditLog(tenant_id=u.tenant_id if u else "", user=u.email if u else _mask(email), action=action,
+                    target=ip[:60], detail={k: v for k, v in detail.items() if v}))
+    db.commit()
+
+
+def _signed_in(db: Session, u: User, method: str, ip: str = "") -> dict:
+    t = db.get(Tenant, u.tenant_id)
+    ensure_company_open(t)
+    _signin_event(db, "auth.sign_in", u, u.email, ip, method=method)
+    return {"token": create_token(u), "user": user_out(u, t)}
+
+
 def user_out(u: User, t: Tenant) -> dict:
+    from ..services import ai_settings
     return {"id": u.id, "name": u.name, "email": u.email, "role": u.role, "sso": bool(u.google_sub or u.ms_oid),
+            "platform_admin": ai_settings.is_platform_admin(u.email),
             "tenant": {"id": t.id, "name": t.name, "slug": t.slug, "onboarding": t.onboarding or {}, "kind": t.kind or "vendor"}}
 
 
@@ -89,8 +111,9 @@ def create_tenant(db: Session, data: RegisterIn) -> tuple[Tenant, User]:
 
 
 @router.post("/register")
-def register(data: RegisterIn, db: Session = Depends(get_db)):
+def register(data: RegisterIn, request: Request, db: Session = Depends(get_db)):
     t, u = create_tenant(db, data)
+    _signin_event(db, "auth.register", u, u.email, client_ip(request), method="password")
     return {"token": create_token(u), "user": user_out(u, t)}
 
 
@@ -129,14 +152,20 @@ def _note_login_failure(keys: list[str]) -> None:
 def login(data: LoginIn, request: Request, db: Session = Depends(get_db)):
     ip = client_ip(request)
     keys = [f"email:{data.email.lower()}", f"ip:{ip}"]
-    _check_login_allowed(keys)
     u = db.scalar(select(User).where(func.lower(User.email) == data.email.lower()))
+    try:
+        _check_login_allowed(keys)
+    except HTTPException:
+        _signin_event(db, "auth.locked_out", u, data.email, ip)
+        raise
     if not u or not verify_password(data.password, u.password_hash):
         _note_login_failure(keys)
+        _signin_event(db, "auth.sign_in_failed", u, data.email, ip, reason="unknown email" if not u else "wrong password")
         raise HTTPException(401, "Email or password is incorrect.")
     if not u.is_active:
+        _signin_event(db, "auth.sign_in_failed", u, u.email, ip, reason="account disabled")
         raise HTTPException(403, "This account is disabled. Ask your company admin to re-enable it.")
-    return {"token": create_token(u), "user": user_out(u, db.get(Tenant, u.tenant_id))}
+    return _signed_in(db, u, "password", ip)
 
 
 @router.get("/config")
@@ -264,7 +293,7 @@ def microsoft_sign_in(data: MicrosoftIn, db: Session = Depends(get_db)):
         if not u.ms_oid:
             u.ms_oid = m["sub"]
             db.commit()
-        return {"token": create_token(u), "user": user_out(u, db.get(Tenant, u.tenant_id))}
+        return _signed_in(db, u, "microsoft")
     if not data.company_name.strip():
         return {"needs_company": True, "email": m["email"], "name": m["name"]}
     reg = RegisterIn(company_name=data.company_name, industry=data.industry, headquarters=data.headquarters, kind=data.kind, name=m["name"], email=m["email"],
@@ -287,7 +316,7 @@ def google_sign_in(data: GoogleIn, db: Session = Depends(get_db)):
         if not u.google_sub:
             u.google_sub = g["sub"]
             db.commit()
-        return {"token": create_token(u), "user": user_out(u, db.get(Tenant, u.tenant_id))}
+        return _signed_in(db, u, "google")
     if not data.company_name.strip():
         return {"needs_company": True, "email": g["email"], "name": g["name"]}
     reg = RegisterIn(company_name=data.company_name, industry=data.industry, headquarters=data.headquarters, kind=data.kind, name=g["name"], email=g["email"],
@@ -360,10 +389,14 @@ def update_user(uid: str, body: dict, ctx: Ctx = Depends(require_roles())):
     if "role" in body:
         if body["role"] not in ROLES:
             raise HTTPException(400, "Unknown role.")
+        if body["role"] != u.role:
+            ctx.audit("user.role_change", u.email, before=u.role, after=body["role"])
         u.role = body["role"]
     if "active" in body:
         if u.id == ctx.user.id:
             raise HTTPException(400, "You can't disable your own account.")
+        if bool(body["active"]) != u.is_active:
+            ctx.audit("user.enable" if body["active"] else "user.disable", u.email)
         u.is_active = bool(body["active"])
     ctx.db.commit()
     return {"ok": True}

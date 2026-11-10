@@ -35,6 +35,9 @@ class Tenant(Base):
     onboarding: Mapped[dict] = mapped_column(JSON, default=dict)  # step -> status
     # "vendor": a company that bids (the original RevenueForge workspace); "buyer": an organisation that issues RFPs
     kind: Mapped[str] = mapped_column(String(20), default="vendor")
+    # Set by a platform admin to pause the whole company: nobody in it can sign in or use the app until reactivated.
+    suspended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    suspend_reason: Mapped[str] = mapped_column(String(300), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -51,6 +54,8 @@ class User(Base):
     prefs: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=dict)  # personal settings, e.g. which emails to get
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    tokens_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)  # "sign out everywhere"
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Document(Base):
@@ -278,6 +283,21 @@ class GraphEdge(Base):
     rel: Mapped[str] = mapped_column(String(40))
     weight: Mapped[float] = mapped_column(Float, default=1.0)
     props: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+class AiUsage(Base):
+    """AI calls per company, provider and model per day: counts and timings only, never prompts or answers."""
+    __tablename__ = "ai_usage"
+    __table_args__ = (UniqueConstraint("day", "tenant_id", "provider", "model"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    day: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD (UTC)
+    tenant_id: Mapped[str] = mapped_column(String(32), default="", index=True)  # "" = not a company (website chat)
+    provider: Mapped[str] = mapped_column(String(20))
+    model: Mapped[str] = mapped_column(String(120), default="")
+    calls: Mapped[int] = mapped_column(Integer, default=0)
+    failures: Mapped[int] = mapped_column(Integer, default=0)
+    tokens: Mapped[int] = mapped_column(Integer, default=0)
+    ms: Mapped[int] = mapped_column(Integer, default=0)  # total time of the calls
 
 
 class AuditLog(Base):

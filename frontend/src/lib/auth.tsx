@@ -7,6 +7,7 @@ export type User = {
   name: string;
   email: string;
   role: string;
+  platform_admin?: boolean;
   tenant: { id: string; name: string; slug: string; onboarding: Record<string, boolean>; kind?: "vendor" | "buyer" };
 };
 

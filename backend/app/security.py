@@ -3,10 +3,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import time
 import os
 from datetime import datetime, timedelta, timezone
 
 import jwt
+from sqlalchemy import update as sa_update
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
@@ -39,6 +41,7 @@ def create_token(user: User) -> str:
         "sub": user.id,
         "tid": user.tenant_id,
         "role": user.role,
+        "iat": int(time.time()),  # issued-at: "sign out everywhere" rejects passes issued before it
         "exp": datetime.now(timezone.utc) + timedelta(hours=settings.jwt_hours),
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
@@ -72,8 +75,27 @@ def current_ctx(creds: HTTPAuthorizationCredentials | None = Depends(bearer), db
     user = db.get(User, payload["sub"])
     if not user or not user.is_active or user.tenant_id != payload.get("tid"):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Account not found or disabled.")
+    if user.tokens_after and payload.get("iat", 0) < _utc(user.tokens_after).timestamp():
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "You were signed out by an administrator. Sign in again.")
     tenant = db.get(Tenant, user.tenant_id)
+    ensure_company_open(tenant)
+    now = datetime.now(timezone.utc)
+    if not user.last_seen_at or (now - _utc(user.last_seen_at)).total_seconds() > 300:  # "last active", at most every 5 minutes
+        db.execute(sa_update(User).where(User.id == user.id).values(last_seen_at=now))
+        db.commit()
     return Ctx(user, tenant, db)
+
+
+def _utc(d: datetime) -> datetime:
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)  # SQLite hands back times without a zone; they are UTC
+
+
+def ensure_company_open(tenant: Tenant | None) -> None:
+    """A company a platform admin has paused can't be used until it is reactivated."""
+    if tenant is not None and tenant.suspended_at:
+        why = f" Reason: {tenant.suspend_reason}." if tenant.suspend_reason else ""
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"Access for {tenant.name} is paused by the service operator.{why} "
+                                                       "Contact them to restore it.")
 
 
 def require_roles(*roles: str):
