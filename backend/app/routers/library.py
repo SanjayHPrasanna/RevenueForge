@@ -104,9 +104,10 @@ def save_company_ai(body: dict, ctx: Ctx = Depends(require_roles())):
 
 
 @router.post("/company/ai/test")
-def test_company_ai(ctx: Ctx = Depends(require_roles())):
+def test_company_ai(body: dict | None = None, ctx: Ctx = Depends(require_roles())):
+    """Checks the settings sent (the form as filled in, before saving), or the saved ones when nothing is sent."""
     from ..services import company_ai
-    return company_ai.test(ctx.tenant_id)
+    return company_ai.test(ctx.tenant, body if isinstance(body, dict) and body else None)
 
 
 @router.put("/company")

@@ -50,6 +50,10 @@ def profile_for(tid: str) -> llm.Profile | None:
         c = _cfg(t) if t else {}
     finally:
         db.close()
+    return _profile(c)
+
+
+def _profile(c: dict) -> llm.Profile | None:
     p = c.get("provider")
     if p not in PROVIDERS:
         return None
@@ -87,6 +91,19 @@ def view(t: Tenant) -> dict:
 
 
 def save(db, t: Tenant, body: dict, by: str) -> None:
+    c = _build(t, body)
+    c["updated_by"], c["updated_at"] = by, datetime.now(timezone.utc).isoformat()
+    t.settings = {**(t.settings or {}), "ai": c}
+    db.commit()
+    llm.invalidate_tenant(t.id)
+    with llm.use_tenant(t.id):
+        llm.reset_state(all_keys=False)
+
+
+def _build(t: Tenant, body: dict) -> dict:
+    """The settings the form describes, checked, without saving them. A blank key means "keep the saved one"."""
+    if not isinstance(body, dict):
+        raise ValueError("Send the settings to check.")
     p = str(body.get("provider") or "default").lower()
     c = _cfg(t)
     keys = dict(c.get("keys") or {})
@@ -113,24 +130,45 @@ def save(db, t: Tenant, body: dict, by: str) -> None:
             c["azure_endpoint"] = ep
     else:
         raise ValueError("Unknown AI provider.")
-    c["updated_by"], c["updated_at"] = by, datetime.now(timezone.utc).isoformat()
-    t.settings = {**(t.settings or {}), "ai": c}
-    db.commit()
-    llm.invalidate_tenant(t.id)
-    with llm.use_tenant(t.id):
-        llm.reset_state(all_keys=False)
+    return c
 
 
-def test(tid: str) -> dict:
+def test(t: Tenant, body: dict | None = None) -> dict:
+    """Check the settings in the form (or, with no body, the saved ones) with one tiny AI call. Nothing is saved."""
     import time
 
-    with llm.use_tenant(tid):
-        if llm.provider_name() == "none":
-            return {"ok": False, "message": "AI is off (rules engine only)."}
-        t0 = time.time()
+    if body:
+        try:
+            c = _build(t, body)
+        except ValueError as e:
+            return {"ok": False, "message": str(e)}
+        prof = _profile(c) if c.get("provider") in PROVIDERS else llm.server_profile()
+        if prof is None:
+            return {"ok": False, "message": "Enter an API key for this provider."}
+    else:
+        with llm.use_tenant(t.id):
+            prof = llm.current_profile()
+    if llm._usable(prof) == "none":
+        return {"ok": False, "message": "AI is off (rules engine only)." if prof.source != "company" else "Some settings are missing."}
+    llm._st(prof).update({"disabled_reason": "", "last_error": ""})  # a test always really tries, even after an earlier rejection
+    t0 = time.time()
+    with llm.use_profile(prof):
         try:
             out = llm.complete("You are a connection test.", "Reply with the single word OK.", max_tokens=20, attempts=1)
-            src = "your company's key" if llm.current_profile().source == "company" else "the server's default AI"
-            return {"ok": True, "message": f"Connected using {src} in {time.time() - t0:.1f}s. Reply: {out.strip()[:40]}"}
         except Exception as e:
-            return {"ok": False, "message": str(e)[:400]}
+            return {"ok": False, "message": _explain(str(e))}
+    src = "this key" if prof.source == "company" else "the server's default AI"
+    saved = " Press Save to start using it." if body and prof.source == "company" else ""
+    return {"ok": True, "message": f"Connected using {src} in {time.time() - t0:.1f}s (reply: {out.strip()[:20]}).{saved}"}
+
+
+def _explain(err: str) -> str:
+    """The provider's own error, with a plain-words reason in front when it's a common one."""
+    e = err.lower()
+    why = ("The key was not accepted. Check it was copied in full." if any(x in e for x in ("http 401", "http 403", "invalid api key", "access denied"))
+           else "The deployment name wasn't found on that endpoint. Use the name from the Deployments page." if "deploymentnotfound" in e or "http 404" in e
+           else "The provider says the quota or allowance is used up." if "http 429" in e or "quota" in e
+           else "The provider is busy. Try again in a minute." if any(x in e for x in ("http 503", "http 500", "overloaded", "high demand"))
+           else "The provider didn't answer in time." if "timed out" in e
+           else "")
+    return (why + " Details: " if why else "") + err[:350]

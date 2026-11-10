@@ -48,7 +48,7 @@ class Profile:
     azure_endpoint: str = ""
     azure_api_key: str = ""
     azure_deployment: str = ""
-    azure_api_version: str = "2024-06-01"
+    azure_api_version: str = "2024-10-21"
     rpm: int = 8
     paid: bool = False
     source: str = "server"  # "server" (the server's default) or "company" (the company's own key)
@@ -103,7 +103,22 @@ def invalidate_tenant(tid: str) -> None:
         _tenant_cache.pop(tid, None)
 
 
+_override: contextvars.ContextVar = contextvars.ContextVar("rf_ai_profile_override", default=None)
+
+
+@contextlib.contextmanager
+def use_profile(p: Profile):
+    """AI calls inside this block use exactly this profile (e.g. to test settings before they are saved)."""
+    token = _override.set(p)
+    try:
+        yield
+    finally:
+        _override.reset(token)
+
+
 def current_profile() -> Profile:
+    if _override.get() is not None:
+        return _override.get()
     tid = _tenant.get()
     if tid and _tenant_loader:
         with _cache_lock:
@@ -379,16 +394,69 @@ def _other_complete(p: Profile, name: str, system: str, prompt: str, max_tokens:
     if name == "openai":
         from openai import OpenAI
 
-        client, model = OpenAI(api_key=p.openai_api_key), p.openai_model
-    else:
-        from openai import AzureOpenAI
+        return _chat(p, OpenAI(api_key=p.openai_api_key), p.openai_model, system, prompt, max_tokens, temperature, want_json)
+    return _azure_complete(p, system, prompt, max_tokens, temperature, want_json)
 
-        client = AzureOpenAI(api_key=p.azure_api_key, azure_endpoint=p.azure_endpoint, api_version=p.azure_api_version)
-        model = p.azure_deployment
+
+def azure_base(endpoint: str) -> str:
+    """The resource's address, whatever form was pasted. A Foundry resource's ".services.ai.azure.com" address is the
+    same resource as its ".openai.azure.com" one, which is the address the OpenAI routes are guaranteed on."""
+    m = re.match(r"\s*(https://[^/\s]+)", endpoint or "")
+    base = m.group(1).rstrip("/") if m else (endpoint or "").strip().rstrip("/")
+    return re.sub(r"\.services\.ai\.azure\.com$", ".openai.azure.com", base)
+
+
+def _azure_complete(p: Profile, system: str, prompt: str, max_tokens: int, temperature: float, want_json: bool) -> str:
+    """Azure OpenAI: the current "v1" API first (works with every model and needs no API version), then the classic
+    dated API for resources that don't offer v1 yet. The route that worked is remembered for this key."""
+    import openai
+
+    base, st = azure_base(p.azure_endpoint), _st(p)
+    routes = ["v1", "classic"] if st.get("azure_route") != "classic" else ["classic"]
+    last = None
+    for route in routes:
+        if route == "v1":
+            client = openai.OpenAI(api_key=p.azure_api_key, base_url=f"{base}/openai/v1/")
+        else:
+            client = openai.AzureOpenAI(api_key=p.azure_api_key, azure_endpoint=base, api_version=p.azure_api_version or "2024-10-21")
+        try:
+            out = _chat(p, client, p.azure_deployment, system, prompt, max_tokens, temperature, want_json)
+            st["azure_route"] = route
+            return out
+        except _HttpError as e:
+            last = e
+            # No v1 route on this resource (404), or it wants a dated API version: try the classic route. Anything else
+            # (a wrong key, an unknown deployment on both routes, a quota) is the real answer and is reported as it is.
+            if route == "v1" and len(routes) > 1 and (e.status == 404 or (e.status == 400 and "api-version" in e.body.lower().replace(" ", "-"))):
+                continue
+            raise
+    raise last
+
+
+def _chat(p: Profile, client, model: str, system: str, prompt: str, max_tokens: int, temperature: float, want_json: bool) -> str:
+    """One chat call. Newer reasoning models (o-series, GPT-5) reject max_tokens and a custom temperature: they get
+    max_completion_tokens instead, with room for their thinking, and the model's own temperature."""
+    import openai
+
+    msgs = [{"role": "system", "content": system}, {"role": "user", "content": prompt}]
     kw = {"response_format": {"type": "json_object"}} if want_json else {}
-    r = client.chat.completions.create(model=model, max_tokens=max_tokens, temperature=temperature,
-                                       messages=[{"role": "system", "content": system}, {"role": "user", "content": prompt}], **kw)
-    return r.choices[0].message.content or ""
+    st = _st(p)
+    for reasoning in ([True] if st.get("reasoning_model") else [False, True]):
+        args = ({"max_completion_tokens": max(max_tokens * 2, 16000)} if reasoning else {"max_tokens": max_tokens, "temperature": temperature})
+        try:
+            r = client.chat.completions.create(model=model, messages=msgs, **args, **kw)
+            if reasoning:
+                st["reasoning_model"] = True
+            return r.choices[0].message.content or ""
+        except openai.APIStatusError as e:
+            body = f"{model}: {getattr(e, 'message', '') or e}"
+            if not reasoning and e.status_code == 400 and re.search(r"max_tokens|max_completion_tokens|temperature|unsupported", body, re.I):
+                continue  # a reasoning model: ask again its way
+            hdrs = getattr(getattr(e, "response", None), "headers", {}) or {}
+            raise _HttpError(e.status_code, body, hdrs.get("retry-after"))
+        except openai.APITimeoutError as e:
+            raise TimeoutError(f"{model} timed out") from e
+    raise LLMUnavailable(f"{model} gave no answer")
 
 
 class _HttpError(Exception):

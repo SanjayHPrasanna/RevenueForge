@@ -115,7 +115,7 @@ class Settings:
     azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "")
     azure_api_key = os.getenv("AZURE_OPENAI_API_KEY", "")
     azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "")
-    azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-06-01")
+    azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-10-21")
 
     max_upload_mb = int(os.getenv("MAX_UPLOAD_MB", "40"))
 

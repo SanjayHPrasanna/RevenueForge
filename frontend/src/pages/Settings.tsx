@@ -287,6 +287,7 @@ function AiEngine({ c }: { c: any }) {
             {f.provider === "azure" && (
               <label className="text-[13px]"><span className="label">Azure OpenAI endpoint</span>
                 <input className="input" value={f.azure_endpoint} onChange={(e) => setF({ ...f, azure_endpoint: e.target.value })} placeholder="https://your-resource.openai.azure.com" />
+              <span className="block text-[11.5px] text-ink-muted mt-1">From the resource's Keys and Endpoint page. A Foundry ".services.ai.azure.com" address works too.</span>
               </label>
             )}
             {f.provider !== "none" && (
@@ -338,8 +339,8 @@ function CompanyAi() {
     onError: (e: any) => toast("error", e.message),
   });
   const check = useMutation({
-    mutationFn: () => api.post<{ ok: boolean; message: string }>("/company/ai/test"),
-    onSuccess: (r) => { setTest(r); qc.invalidateQueries({ queryKey: ["company"] }); },
+    mutationFn: () => api.post<{ ok: boolean; message: string }>("/company/ai/test", f),  // checks the form as filled in; saves nothing
+    onSuccess: (r) => setTest(r),
     onError: (e: any) => setTest({ ok: false, message: e.message }),
   });
   if (!cfg || !f) return null;
@@ -380,6 +381,7 @@ function CompanyAi() {
           {f.provider === "azure" && (
             <label className="text-[13px]"><span className="label">Azure OpenAI endpoint</span>
               <input className="input" value={f.azure_endpoint} onChange={(e) => setF({ ...f, azure_endpoint: e.target.value })} placeholder="https://your-resource.openai.azure.com" />
+              <span className="block text-[11.5px] text-ink-muted mt-1">From the resource's Keys and Endpoint page. A Foundry ".services.ai.azure.com" address works too.</span>
             </label>
           )}
           <label className="text-[13px]"><span className="label">Requests per minute</span>
@@ -399,7 +401,7 @@ function CompanyAi() {
         {test && <span className={`text-[13px] ${test.ok ? "text-ok" : "text-fit-gap-ink"}`}>{test.message}</span>}
       </div>}
       <div className="mt-3 text-[12px] text-ink-muted">
-        Keys are stored encrypted and never shown again.{cfg.updated_by ? ` Last changed by ${cfg.updated_by}.` : ""} "Test connection" checks the saved settings.
+        Keys are stored encrypted and never shown again.{cfg.updated_by ? ` Last changed by ${cfg.updated_by}.` : ""} "Test connection" checks the settings above as you've filled them in, without saving. Leave the key empty to test the saved one.
       </div>
     </section>
   );
