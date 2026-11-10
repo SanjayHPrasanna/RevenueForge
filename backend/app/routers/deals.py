@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select
 
-from ..models import STAGES, Deal, DealStage, Document, Requirement, RequirementComment, User
+from ..models import STAGES, Deal, DealStage, Document, Requirement, RequirementComment, StageComment, User
 from ..security import Ctx, current_ctx, require_roles
 from ..services import knowledge as K
 from ..services import learning, llm, pipeline
@@ -37,6 +37,11 @@ def deal_out(ctx: Ctx, d: Deal, full: bool = False) -> dict:
     mask = deal_masker(d)
     stages = {s.stage: s for s in ctx.db.scalars(select(DealStage).where(DealStage.deal_id == d.id))}
     req_count = ctx.db.scalar(select(func.count()).select_from(Requirement).where(Requirement.deal_id == d.id))
+    notes = dict(ctx.db.execute(select(StageComment.stage, func.count()).where(StageComment.deal_id == d.id, StageComment.status == "open")
+                                .group_by(StageComment.stage)).all())
+    owner = ctx.db.get(User, d.owner_id) if d.owner_id else None
+    if owner and owner.tenant_id != d.tenant_id:
+        owner = None
     gaps = stages.get("gaps").data if "gaps" in stages else {}
     pricing = stages.get("pricing").data if "pricing" in stages else {}
     sel = None
@@ -52,7 +57,10 @@ def deal_out(ctx: Ctx, d: Deal, full: bool = False) -> dict:
         "verdict": gaps.get("verdict"),
         "value": round(sel["price"] * pricing.get("fx_to_rfp", 1), 2) if sel else None, "value_currency": pricing.get("rfp_currency") if sel else None,
         "margin_pct": sel["margin_pct"] if sel else None,
-        "stages": [{"stage": s, "status": stages[s].status if s in stages else "pending", "approved_by": stages[s].approved_by if s in stages else "",
+        "owner": {"id": owner.id, "name": owner.name, "email": owner.email, "active": owner.is_active} if owner else None,
+        "open_notes": sum(notes.values()),
+        "stages": [{"stage": s, "status": stages[s].status if s in stages else "pending", "open_notes": notes.get(s, 0),
+                    "approved_by": stages[s].approved_by if s in stages else "",
                     "approved_at": stages[s].approved_at if s in stages else None, "duration_ms": stages[s].duration_ms if s in stages else 0}
                    for s in STAGES],
     }
@@ -131,6 +139,17 @@ def update_deal(deal_id: str, body: dict, ctx: Ctx = Depends(require_roles("pres
             if v < 0 or v != v or v in (float("inf"),):
                 raise HTTPException(400, f"{f.replace('_', ' ').capitalize()} can't be negative.")
             setattr(d, f, v)
+    if "owner_id" in body and body["owner_id"] != d.owner_id:
+        if ctx.user.role != "admin" and ctx.user.id != d.owner_id:
+            raise HTTPException(403, "Only the deal owner or an admin can hand the deal to someone else.")
+        nu = ctx.db.get(User, str(body["owner_id"] or ""))
+        if not nu or nu.tenant_id != ctx.tenant_id or not nu.is_active:
+            raise HTTPException(400, "Pick an active person from your company as the owner.")
+        if nu.role == "viewer":
+            raise HTTPException(400, f"{nu.name} has the viewer role and can't own a deal. Change their role first.")
+        before = ctx.db.get(User, d.owner_id) if d.owner_id else None
+        d.owner_id = nu.id
+        ctx.audit("deal.owner", d.id, before=before.name if before else "", after=nu.name)
     rerun = None
     if "engagement_type" in body and body["engagement_type"] != d.engagement_type:
         if body["engagement_type"] not in ("managed_services", "build_run", "implementation", "product", "consulting"):
@@ -259,6 +278,95 @@ def delete_comment(deal_id: str, comment_id: str, ctx: Ctx = Depends(current_ctx
         raise HTTPException(404, "Comment not found.")
     if c.user_id != ctx.user.id and ctx.user.role != "admin":
         raise HTTPException(403, "You can only delete your own comments.")
+    ctx.db.delete(c)
+    ctx.db.commit()
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------- review notes on stages
+def _note_out(c: StageComment, mask, ctx: Ctx, d: Deal) -> dict:
+    return {"id": c.id, "stage": c.stage, "line_key": c.line_key, "line": mask(c.line), "text": mask(c.text), "author": c.author,
+            "author_role": c.author_role, "user_id": c.user_id, "status": c.status, "resolved_by": c.resolved_by,
+            "resolved_at": c.resolved_at, "created_at": c.created_at, "mine": c.user_id == ctx.user.id,
+            "can_resolve": _can_resolve(ctx, d, c)}
+
+
+def _can_resolve(ctx: Ctx, d: Deal, c: StageComment) -> bool:
+    return ctx.user.role == "admin" or ctx.user.id in (d.owner_id, c.user_id)
+
+
+@router.get("/{deal_id}/notes")
+def list_notes(deal_id: str, stage: str = "", ctx: Ctx = Depends(current_ctx)):
+    """Review notes on a deal: one stage, or every stage (the owner's list of what's left to fix)."""
+    d = _deal(ctx, deal_id)
+    if stage and stage not in STAGES:
+        raise HTTPException(404, "Unknown stage.")
+    stmt = select(StageComment).where(StageComment.deal_id == d.id)
+    if stage:
+        stmt = stmt.where(StageComment.stage == stage)
+    rows = ctx.db.scalars(stmt.order_by(StageComment.created_at)).all()
+    mask = deal_masker(d)
+    return [_note_out(c, mask, ctx, d) for c in rows]
+
+
+@router.post("/{deal_id}/stages/{stage}/notes")
+def add_note(deal_id: str, stage: str, body: dict, ctx: Ctx = Depends(require_roles("presales", "architect", "finance", "delivery"))):
+    d = _deal(ctx, deal_id)
+    if stage not in STAGES:
+        raise HTTPException(404, "Unknown stage.")
+    text = str(body.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "Write the note first.")
+    if len(text) > 4000:
+        raise HTTPException(400, "Keep a note under 4,000 characters.")
+    ids = _mentions(ctx, text)
+    c = StageComment(tenant_id=ctx.tenant_id, deal_id=d.id, stage=stage, line_key=str(body.get("line_key") or "")[:160],
+                     line=str(body.get("line") or "")[:300], text=text, user_id=ctx.user.id, author=ctx.user.name,
+                     author_role=ctx.user.role, mentions=ids)
+    ctx.db.add(c)
+    ctx.audit("stage.note", f"{d.id}:{stage}", mentions=len(ids))
+    ctx.db.commit()
+    from ..services import notify
+    notify.review_note(ctx.db, d, ctx.user, c, ids)
+    return _note_out(c, deal_masker(d), ctx, d)
+
+
+def _note(ctx: Ctx, d: Deal, note_id: str) -> StageComment:
+    c = ctx.db.get(StageComment, note_id)
+    if not c or c.deal_id != d.id:
+        raise HTTPException(404, "Note not found.")
+    return c
+
+
+@router.post("/{deal_id}/notes/{note_id}/resolve")
+def resolve_note(deal_id: str, note_id: str, ctx: Ctx = Depends(current_ctx)):
+    d = _deal(ctx, deal_id)
+    c = _note(ctx, d, note_id)
+    if not _can_resolve(ctx, d, c):
+        raise HTTPException(403, "The deal owner, the person who wrote the note or an admin can resolve it.")
+    c.status, c.resolved_by, c.resolved_at = "resolved", ctx.user.name, datetime.now(timezone.utc)
+    ctx.audit("stage.note_resolved", f"{d.id}:{c.stage}")
+    ctx.db.commit()
+    return _note_out(c, deal_masker(d), ctx, d)
+
+
+@router.post("/{deal_id}/notes/{note_id}/reopen")
+def reopen_note(deal_id: str, note_id: str, ctx: Ctx = Depends(current_ctx)):
+    d = _deal(ctx, deal_id)
+    c = _note(ctx, d, note_id)
+    if not _can_resolve(ctx, d, c):
+        raise HTTPException(403, "The deal owner, the person who wrote the note or an admin can reopen it.")
+    c.status, c.resolved_by, c.resolved_at = "open", "", None
+    ctx.db.commit()
+    return _note_out(c, deal_masker(d), ctx, d)
+
+
+@router.delete("/{deal_id}/notes/{note_id}")
+def delete_note(deal_id: str, note_id: str, ctx: Ctx = Depends(current_ctx)):
+    d = _deal(ctx, deal_id)
+    c = _note(ctx, d, note_id)
+    if c.user_id != ctx.user.id and ctx.user.role != "admin":
+        raise HTTPException(403, "You can only delete your own notes.")
     ctx.db.delete(c)
     ctx.db.commit()
     return {"ok": True}
@@ -444,7 +552,7 @@ def get_stage(deal_id: str, stage: str, ctx: Ctx = Depends(current_ctx)):
 
 
 @router.post("/{deal_id}/stages/{stage}/approve")
-def approve(deal_id: str, stage: str, ctx: Ctx = Depends(current_ctx)):
+def approve(deal_id: str, stage: str, body: dict | None = None, ctx: Ctx = Depends(current_ctx)):
     d = _deal(ctx, deal_id)
     if stage not in STAGES:
         raise HTTPException(404, "Unknown stage.")
@@ -454,10 +562,15 @@ def approve(deal_id: str, stage: str, ctx: Ctx = Depends(current_ctx)):
     st = ctx.db.scalar(select(DealStage).where(DealStage.deal_id == d.id, DealStage.stage == stage))
     if not st or st.status not in ("draft", "approved"):
         raise HTTPException(400, "This stage has no draft to approve yet.")
+    still_open = ctx.db.scalar(select(func.count()).select_from(StageComment).where(
+        StageComment.deal_id == d.id, StageComment.stage == stage, StageComment.status == "open"))
+    if still_open and not (body or {}).get("despite_open_notes"):
+        raise HTTPException(409, f"{still_open} review note{'s are' if still_open > 1 else ' is'} still open on this stage. "
+                                 "Resolve them first, or approve anyway.")
     st.status = "approved"
     st.approved_by = ctx.user.name
     st.approved_at = datetime.now(timezone.utc)
-    ctx.audit("stage.approve", f"{d.id}:{stage}")
+    ctx.audit("stage.approve", f"{d.id}:{stage}", **({"open_notes": still_open} if still_open else {}))
     learned = {}
     if stage == "requirements":
         # Approval confirms the categories: they become training data for the company's own classifier.

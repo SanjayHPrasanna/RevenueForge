@@ -61,8 +61,9 @@ STAGE_NAME = {"requirements": "Requirements", "matching": "Capability match", "g
 # Email types a person can switch off in Settings → My email notifications.
 KINDS = {"ready": "When a deal I started is ready for review",
          "stage": "When a stage is ready for my approval",
-         "reminders": "Deadline reminders for deals I own or need to approve",
-         "mentions": "When someone mentions me in a comment"}
+         "reminders": "Deadline reminders for deals I own or need to approve, and saved tenders closing soon",
+         "mentions": "When someone mentions me in a comment",
+         "notes": "When someone leaves a review note on a deal I own"}
 
 
 def wants(user: User, kind: str) -> bool:
@@ -267,6 +268,7 @@ def start_deadline_watch() -> None:
             db = SessionLocal()
             try:
                 check_deadlines(db)
+                check_tender_deadlines(db)
             except Exception as e:
                 log.warning("Deadline check failed: %s", e)
             finally:
@@ -290,3 +292,71 @@ def mentioned(db, deal: Deal, author: User, comment_text: str, requirement_code:
                              "Reply in RevenueForge so the whole team sees the discussion.", _deal_link(deal, "requirements"),
                              "Open the requirement", "Someone mentioned you.")
         send_async(u.email, f"{author.name} mentioned you on {requirement_code} ({name})", text, body)
+
+
+# --------------------------------------------------------------------------- review notes
+def review_note(db, deal: Deal, author: User, note, mentioned_ids: list[str]) -> None:
+    """Tell the deal owner a reviewer left a note, and anyone the note @mentions."""
+    if not enabled():
+        return
+    name, client = _deal_label(deal)
+    mask = deal_masker(deal)
+    rows = [("Deal", f"{name}{f' ({client})' if client else ''}"), ("Stage", STAGE_NAME.get(note.stage, note.stage))]
+    if note.line:
+        rows.append(("About", mask(note.line)[:200]))
+    rows.append(("Note", mask(note.text)[:600]))
+    told: set[str] = set()
+    owner = db.get(User, deal.owner_id) if deal.owner_id else None
+    if owner and owner.id != author.id and owner.tenant_id == deal.tenant_id and wants(owner, "notes"):
+        text, body = compose(owner, f"{author.name} left a review note on {STAGE_NAME.get(note.stage, note.stage)}.", rows,
+                             "Fix it in RevenueForge and mark the note resolved, so the reviewer can approve the stage.",
+                             _deal_link(deal, note.stage), "Open the stage", "You own this deal.")
+        send_async(owner.email, f"Review note on {name}: {STAGE_NAME.get(note.stage, note.stage)}", text, body)
+        told.add(owner.id)
+    for uid in mentioned_ids:
+        u = db.get(User, uid)
+        if not u or u.id == author.id or u.id in told or u.tenant_id != deal.tenant_id or not wants(u, "mentions"):
+            continue
+        text, body = compose(u, f"{author.name} mentioned you in a review note.", rows,
+                             "Reply in RevenueForge so the whole team sees it.", _deal_link(deal, note.stage), "Open the stage",
+                             "Someone mentioned you.")
+        send_async(u.email, f"{author.name} mentioned you on {name}", text, body)
+
+
+# --------------------------------------------------------------------------- saved tenders closing soon
+def check_tender_deadlines(db, now=None) -> int:
+    """Remind presales people and admins 3 days and 1 day before a tender their company saved closes."""
+    from datetime import datetime, timezone
+
+    from ..models import Tender, TenderFit
+
+    if not enabled():
+        return 0
+    now = now or datetime.now(timezone.utc)
+    sent = 0
+    rows = db.execute(select(Tender, TenderFit).join(TenderFit, TenderFit.tender_id == Tender.id)
+                      .where(TenderFit.status == "saved", Tender.deadline.is_not(None), Tender.deadline >= now)).all()
+    for t, f in rows:
+        dl = t.deadline if t.deadline.tzinfo else t.deadline.replace(tzinfo=timezone.utc)
+        left = (dl.date() - now.date()).days
+        mark = "1" if 0 <= left <= 1 else "3" if 2 <= left <= 3 else None
+        detail = dict(f.detail or {})
+        done = dict(detail.get("reminders") or {})
+        if not mark or done.get(mark):
+            continue
+        when = "today" if left == 0 else "tomorrow" if left == 1 else f"in {left} days"
+        link = f"{settings.app_url.rstrip('/')}/app/opportunities?t={t.id}"
+        for u in db.scalars(select(User).where(User.tenant_id == f.tenant_id, User.role.in_(("admin", "presales")))):
+            if not wants(u, "reminders"):
+                continue
+            text, body = compose(u, f"A tender your team saved closes {when}.",
+                                 [("Tender", t.title[:200]), ("Buyer", t.buyer or "Not stated"), ("Closes", f"{dl:%d %b %Y} ({when})")],
+                                 "Start a deal from it, or dismiss it if you're not bidding.", link, "Open the tender",
+                                 "Your company saved this tender.")
+            if send(u.email, f"Closes {when}: {t.title[:80]}", text, body):
+                sent += 1
+        done[mark] = now.date().isoformat()
+        detail["reminders"] = done
+        f.detail = detail
+        db.commit()
+    return sent

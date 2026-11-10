@@ -6,6 +6,7 @@ import { Dropzone, Empty, Meter, Modal, PageLoader, Spinner, useToast } from "..
 import { api } from "../lib/api";
 import { ago, ENGAGEMENT, money } from "../lib/format";
 import { DealStatus } from "./Dashboard";
+import { OwnerTag } from "../components/review";
 
 function NewDeal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
@@ -153,8 +154,8 @@ export default function Deals() {
             <tbody>
               {data.map((d: any) => (
                 <tr key={d.id} className="hover:bg-paper">
-                  <td className="td max-w-[340px]">
-                    <Link to={`/app/deals/${d.id}`} className="font-semibold hover:text-brand-700 line-clamp-1">{d.name}</Link>
+                  <td className="td max-w-[420px]">
+                    <div className="flex items-center gap-2 min-w-0"><Link to={`/app/deals/${d.id}`} className="font-semibold hover:text-brand-700 line-clamp-1 min-w-0">{d.name}</Link><OwnerTag owner={d.owner} className="shrink-0" />{d.open_notes > 0 && <span className="chip bg-ember-100 text-ember-600 shrink-0" title="Open review notes">{d.open_notes} to fix</span>}</div>
                     <div className="text-[12px] text-ink-muted flex items-center gap-1">
                       {d.confidential && <EyeOff className="h-3 w-3" />} {d.client} · {d.industry || "—"}{d.region ? ` · ${d.region}` : ""}
                     </div>

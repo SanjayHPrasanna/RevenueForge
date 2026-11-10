@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import BASE_DIR, settings
 from .db import init_db
-from .routers import assistant, auth, company_data, deals, insights, learning, library, network, platform, radar, trust
+from .routers import assistant, auth, calendar, company_data, deals, insights, learning, library, network, platform, radar, trust
 from .services import company_ai, llm  # noqa: F401  (company_ai registers the per-company AI settings)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -132,6 +132,7 @@ app.include_router(auth.router)
 app.include_router(platform.router)
 app.include_router(library.router)
 app.include_router(deals.router)
+app.include_router(calendar.router)
 app.include_router(insights.router)
 app.include_router(learning.router)
 app.include_router(assistant.router)

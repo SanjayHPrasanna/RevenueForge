@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import { NoticeBar } from "./GoogleButton";
-import { BookOpen, Brain, Briefcase, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, FileSearch, LogOut, Menu, Network, Radar, Settings, ShieldCheck, Sparkles, TrendingUp, Trophy, Users, X } from "lucide-react";
+import { BookOpen, Brain, Briefcase, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, FileSearch, LogOut, Menu, Network, Radar, Settings, ShieldCheck, Sparkles, TrendingUp, Trophy, Users, X } from "lucide-react";
 import { Suspense, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ const NAV = [
   { to: "/app/market", label: "Market insights", icon: TrendingUp },
   { to: "/app/customers", label: "Find customers", icon: Users },
   { to: "/app/deals", label: "Deals", icon: Briefcase },
+  { to: "/app/calendar", label: "Calendar", icon: CalendarDays },
   { to: "/app/winloss", label: "Win/loss", icon: Trophy },
   { to: "/app/library", label: "Knowledge library", icon: BookOpen },
   { to: "/app/graph", label: "Knowledge graph", icon: Network },
@@ -52,6 +53,8 @@ export default function Shell() {
   const { data: company } = useQuery({ queryKey: ["company"], queryFn: () => api.get("/company") });
   const isBuyer = user?.tenant.kind === "buyer";
   const ob = isBuyer ? null : company?.onboarding;
+  const { data: due } = useQuery({ queryKey: ["reminders"], queryFn: () => api.get<any>("/calendar/reminders"), enabled: !!user && !isBuyer, refetchInterval: 300000 });
+  const badge: Record<string, { n: number; hot: boolean } | undefined> = { "/app/calendar": due?.count ? { n: due.count, hot: due.overdue > 0 } : undefined };
   const nav = [...(isBuyer ? BUYER_NAV : NAV), ...(user?.platform_admin ? [{ to: "/app/platform", label: "Platform console", icon: ShieldCheck, end: false }] : [])];
 
   const navFor = (mini: boolean) => (
@@ -84,6 +87,10 @@ export default function Shell() {
                 {isActive && <span aria-hidden className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-ember-400 shadow-[0_0_12px_rgba(247,154,94,.7)]" />}
                 <n.icon className={clsx("h-[18px] w-[18px] shrink-0 transition-transform duration-200 ease-apple group-hover:scale-110", isActive ? "text-ember-400" : "")} />
                 {!mini && n.label}
+                {badge[n.to] && (
+                  <span className={clsx("num text-[11px] font-bold rounded-full min-w-[18px] h-[18px] px-1 grid place-items-center", mini ? "absolute top-0.5 right-0.5" : "ml-auto",
+                    badge[n.to]!.hot ? "bg-rose-500 text-white" : "bg-ember-500 text-white")} title={`${badge[n.to]!.n} deadline${badge[n.to]!.n > 1 ? "s" : ""} coming up for you`}>{badge[n.to]!.n}</span>
+                )}
               </>
             )}
           </NavLink>

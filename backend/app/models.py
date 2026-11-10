@@ -242,6 +242,27 @@ class RequirementComment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class StageComment(Base):
+    """A reviewer's note on one stage of a deal, optionally pinned to one line of it (a role, a phase, a requirement...).
+    Open notes are the deal owner's to-do list; whoever fixes one marks it resolved."""
+    __tablename__ = "stage_comments"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    tenant_id: Mapped[str] = mapped_column(String(32), index=True)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    stage: Mapped[str] = mapped_column(String(30))
+    line_key: Mapped[str] = mapped_column(String(160), default="")  # stable id of the line, "" = the stage as a whole
+    line: Mapped[str] = mapped_column(String(300), default="")  # what the line said when the note was written
+    text: Mapped[str] = mapped_column(Text)
+    user_id: Mapped[str] = mapped_column(String(32), default="")
+    author: Mapped[str] = mapped_column(String(200), default="")
+    author_role: Mapped[str] = mapped_column(String(30), default="")
+    mentions: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(12), default="open")  # open, resolved
+    resolved_by: Mapped[str] = mapped_column(String(200), default="")
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 STAGES = ["requirements", "matching", "gaps", "architecture", "estimation", "pricing", "proposal", "handoff"]
 
 

@@ -27,6 +27,7 @@ const RadarPage = React.lazy(() => import("./pages/Radar"));
 const Market = React.lazy(() => import("./pages/Market"));
 const Customers = React.lazy(() => import("./pages/Customers"));
 const Platform = React.lazy(() => import("./pages/Platform"));
+const CalendarPage = React.lazy(() => import("./pages/Calendar"));
 const TrustPage = React.lazy(() => import("./pages/Trust").then((m) => ({ default: m.TrustPage })));
 const PrivacyPage = React.lazy(() => import("./pages/Trust").then((m) => ({ default: m.PrivacyPage })));
 const TermsPage = React.lazy(() => import("./pages/Trust").then((m) => ({ default: m.TermsPage })));
@@ -98,6 +99,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="market" element={<Market />} />
                 <Route path="customers" element={<Customers />} />
                 <Route path="platform" element={<Platform />} />
+                <Route path="calendar" element={<CalendarPage />} />
                 <Route path="buyer" element={<BuyerRequests />} />
                 <Route path="buyer/:id" element={<BuyerRequest />} />
                 <Route path="settings" element={<SettingsPage />} />

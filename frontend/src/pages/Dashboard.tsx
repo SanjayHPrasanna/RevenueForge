@@ -8,6 +8,7 @@ import { Bars, FitLegend, useTip } from "../components/viz";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ENGAGEMENT, FIT, money } from "../lib/format";
+import { OwnerTag } from "../components/review";
 
 const MIX = FIT.map((f) => ({ key: f.key, label: f.label, fill: f.fill }));
 
@@ -123,7 +124,7 @@ export default function Dashboard() {
                   return (
                     <tr key={d.id} className="hover:bg-brand-50/40">
                       <td className="td">
-                        <Link to={`/app/deals/${d.id}`} className="font-semibold hover:text-brand-700 line-clamp-1">{d.name}</Link>
+                        <div className="flex items-center gap-2 min-w-0"><Link to={`/app/deals/${d.id}`} className="font-semibold hover:text-brand-700 line-clamp-1 min-w-0">{d.name}</Link><OwnerTag owner={d.owner} className="shrink-0" /></div>
                         <div className="text-[12px] text-ink-muted">{d.client}{d.engagement_type ? `, ${(ENGAGEMENT[d.engagement_type] || "").toLowerCase()}` : ""}{d.due_date ? `. Due ${d.due_date}` : ""}</div>
                       </td>
                       <td className="td"><DealStatus s={d.status} /></td>

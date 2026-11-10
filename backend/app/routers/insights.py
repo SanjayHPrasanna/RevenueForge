@@ -52,6 +52,12 @@ def dashboard(ctx: Ctx = Depends(current_ctx)):
                      "industry": d.industry, "engagement_type": d.engagement_type, "value": deal_val if sel else 0, "value_currency": deal_ccy if sel else None, "margin_pct": sel["margin_pct"] if sel else None,
                      "coverage_pct": g.get("coverage_pct"), "readiness": g.get("mitigated_readiness"), "verdict": g.get("verdict"),
                      "approved_stages": approved, "created_at": d.created_at, "due_date": d.due_date})
+    from ..models import User
+    names = {u.id: u.name for u in ctx.db.scalars(select(User).where(User.tenant_id == tid))}
+    owner_of = {d.id: d.owner_id for d in deals}
+    for row in rows:
+        oid = owner_of.get(row["id"])
+        row["owner"] = {"id": oid, "name": names[oid]} if oid in names else None
     reqs = ctx.db.scalars(select(Requirement).where(Requirement.tenant_id == tid)).all()
     per_deal = defaultdict(Counter)
     for r in reqs:

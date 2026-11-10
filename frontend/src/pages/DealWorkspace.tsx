@@ -5,10 +5,11 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Modal, PageLoader, Spinner, StageStatus, useToast } from "../components/ui";
 import { useAuthConfig } from "../components/GoogleButton";
-import { api, download } from "../lib/api";
+import { ApiError, api, download } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ENGAGEMENT, money, STAGES } from "../lib/format";
 import { DealStatus } from "./Dashboard";
+import { DueDate, LeftToFix, OwnerPicker, ReviewNotes } from "../components/review";
 import { OverviewStage } from "./Overview";
 import { ArchitectureStage, EstimationStage, GapsStage, HandoffStage, MatchingStage, PricingStage, ProposalStage, RequirementsStage } from "./stages";
 
@@ -73,6 +74,7 @@ function StageRail({ deal, current, metric, onPick }: { deal: any; current: stri
                   </span>
                 </span>
                 <span className={clsx("block text-[11.5px] mt-0.5 pl-[22px] whitespace-nowrap num", status === "pending" ? "text-ink-faint" : "text-ink-muted")}>
+                  {st[s.key]?.open_notes > 0 && <span className="mr-1.5 rounded-full bg-ember-500 text-white px-1.5 text-[10.5px] font-bold" title={`${st[s.key].open_notes} review notes to fix`}>{st[s.key].open_notes} to fix</span>}
                   {status === "running" ? "Working…" : status === "approved" ? `Approved${st[s.key]?.approved_by ? ` by ${st[s.key].approved_by.split(" ")[0]}` : ""}` : metric[s.key] || (status === "pending" ? "Waiting" : status === "overview" ? "" : "Ready to review")}
                 </span>
               </button>
@@ -165,7 +167,17 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
   const [menu, setMenu] = useState<"dl" | "outcome" | null>(null);
   const [outcome, setOutcome] = useState<null | { status: string; final_value: string; actual_effort_days: string; outcome_notes: string }>(null);
   const approve = useMutation({
-    mutationFn: () => api.post(`/deals/${id}/stages/${stage}/approve`),
+    mutationFn: async () => {
+      try {
+        return await api.post(`/deals/${id}/stages/${stage}/approve`);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 409 && confirm(`${e.message}\n\nApprove this stage anyway?`)) {
+          return api.post(`/deals/${id}/stages/${stage}/approve`, { despite_open_notes: true });
+        }
+        if (e instanceof ApiError && e.status === 409) throw new Error("Not approved. Resolve the open review notes first.");
+        throw e;
+      }
+    },
     onSuccess: (r: any) => {
       qc.invalidateQueries({ queryKey: ["deal", id] });
       const L = r?.learned || {};
@@ -208,8 +220,9 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
             {deal.engagement_type && <span>{ENGAGEMENT[deal.engagement_type]}</span>}
             {deal.industry && <span>{deal.industry}{deal.sector ? `, ${deal.sector.toLowerCase()} sector` : ""}</span>}
             {deal.region && <span>{deal.region}</span>}
-            {deal.due_date && <span>Due {deal.due_date}</span>}
+            <DueDate deal={deal} />
             <DealStatus s={deal.status} />
+            <OwnerPicker deal={deal} />
           </div>
           <Standfirst deal={deal} est={m.est} />
         </div>
@@ -271,7 +284,7 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
       {processing && (stage === "overview" || (stageInfo?.status !== "draft" && stageInfo?.status !== "approved")) ? (
         <Processing deal={deal} />
       ) : stage === "overview" ? (
-        <div className="mt-6"><OverviewStage deal={deal} /></div>
+        <div className="mt-6"><LeftToFix deal={deal} /><OverviewStage deal={deal} /></div>
       ) : (
         <div className="mt-6">
           <div className="flex flex-wrap items-start gap-3 mb-4">
@@ -289,6 +302,7 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
               </button>
             )}
           </div>
+          <ReviewNotes deal={deal} stage={stage} />
           {stage === "requirements" && <RequirementsStage {...props} />}
           {stage === "matching" && <MatchingStage {...props} />}
           {stage === "gaps" && <GapsStage {...props} />}

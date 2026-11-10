@@ -19,15 +19,17 @@ const ROLES = ["admin", "presales", "architect", "finance", "delivery", "viewer"
 const C = { a: "#118AC3", b: "#F5833A", c: "#0C3D55", d: "#B4232A", grid: "#E6EDF1", ink: "#5B6B76" };
 
 const num = (n: number | undefined) => (n ?? 0).toLocaleString();
-const day = (iso?: string) => (iso ? new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "—");
+// The server stores UTC times; SQLite drops the "Z", so add it back before the browser reads them as local time.
+const utc = (iso: string) => new Date(!iso.includes("T") || /[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z");
+const day = (iso?: string) => (iso ? utc(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : "—");
 const when = (iso?: string) => {
   if (!iso) return "Never";
-  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  const s = (Date.now() - utc(iso).getTime()) / 1000;
   if (s < 90) return "Just now";
   if (s < 3600) return `${Math.round(s / 60)} min ago`;
   if (s < 86400) return `${Math.round(s / 3600)} h ago`;
   if (s < 86400 * 30) return `${Math.round(s / 86400)} days ago`;
-  return new Date(iso).toLocaleDateString();
+  return utc(iso).toLocaleDateString();
 };
 const bytes = (b: number) => (b > 1e9 ? `${(b / 1e9).toFixed(1)} GB` : b > 1e6 ? `${(b / 1e6).toFixed(1)} MB` : `${Math.round(b / 1e3)} KB`);
 const short = (d: string) => d.slice(5).replace("-", "/");
@@ -308,7 +310,7 @@ function Health() {
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-3 text-[13px] text-ink-muted">
-        <span>Checked {when(h.checked_at)}</span><span>· Up {h.uptime_hours} h (since {new Date(h.started_at).toLocaleString()})</span>{h.version && <span>· Version {h.version}</span>}
+        <span>Checked {when(h.checked_at)}</span><span>· Up {h.uptime_hours} h (since {utc(h.started_at).toLocaleString()})</span>{h.version && <span>· Version {h.version}</span>}
         <button className="btn-ghost py-1 text-[12.5px]" onClick={() => refetch()} disabled={isFetching}><RefreshCw className={clsx("h-3.5 w-3.5", isFetching && "animate-spin")} /> Refresh</button>
       </div>
       <section className="card divide-y divide-line-soft">
@@ -364,7 +366,7 @@ function Events({ rows, hideCompany }: { rows: any[]; hideCompany?: boolean }) {
           const bad = /failed|Locked|deleted|paused|disabled/i.test(e.label);
           return (
             <tr key={i} className="border-t border-line-soft">
-              <td className="td whitespace-nowrap text-ink-muted">{new Date(e.at).toLocaleString()}</td>
+              <td className="td whitespace-nowrap text-ink-muted">{utc(e.at).toLocaleString()}</td>
               <td className={clsx("td font-medium", bad && "text-rose-700")}>{e.label}</td>
               {!hideCompany && <td className="td">{e.company || <span className="text-ink-muted">No company</span>}</td>}
               <td className="td">{e.user}</td>

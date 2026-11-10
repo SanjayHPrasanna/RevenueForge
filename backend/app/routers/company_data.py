@@ -24,13 +24,13 @@ from starlette.background import BackgroundTask
 from ..config import OUTPUT_DIR, UPLOAD_DIR
 from ..models import (Accelerator, AnswerEntry, AuditLog, CaseStudy, Capability, Certification, Deal, DealStage, Document,
                       EmbeddingCache, Employee, GraphEdge, GraphNode, LearningExample, ModelState, NetworkInvite, NetworkRequest,
-                      RateCard, Requirement, RequirementComment, Tenant, TenderFit, User)
+                      RateCard, Requirement, RequirementComment, StageComment, Tenant, TenderFit, User)
 from ..security import Ctx, require_roles, verify_password
 
 router = APIRouter(prefix="/api/company", tags=["company-data"])
 
 # every table with a tenant_id column, children before parents
-OWNED = [RequirementComment, Requirement, DealStage, Deal, Capability, Employee, Certification, CaseStudy, Accelerator, RateCard,
+OWNED = [StageComment, RequirementComment, Requirement, DealStage, Deal, Capability, Employee, Certification, CaseStudy, Accelerator, RateCard,
          GraphEdge, GraphNode, LearningExample, AnswerEntry, EmbeddingCache, ModelState, TenderFit, Document, AuditLog, NetworkRequest]
 SECRET_COLS = {"password_hash", "google_sub", "ms_oid", "embedding", "vector", "blob", "state"}
 
@@ -83,6 +83,7 @@ def export(ctx: Ctx = Depends(require_roles())):
             z.writestr(f"{base}/requirements.json", dump(_rows(ctx.db, Requirement, Requirement.deal_id == d.id)))
             z.writestr(f"{base}/stages.json", dump(_rows(ctx.db, DealStage, DealStage.deal_id == d.id)))
             z.writestr(f"{base}/comments.json", dump(_rows(ctx.db, RequirementComment, RequirementComment.deal_id == d.id)))
+            z.writestr(f"{base}/review_notes.json", dump(_rows(ctx.db, StageComment, StageComment.deal_id == d.id)))
         z.writestr("answers.json", dump(_rows(ctx.db, AnswerEntry, AnswerEntry.tenant_id == tid)))
         z.writestr("learning.json", dump(_rows(ctx.db, LearningExample, LearningExample.tenant_id == tid)))
         z.writestr("radar.json", dump(_rows(ctx.db, TenderFit, TenderFit.tenant_id == tid)))
