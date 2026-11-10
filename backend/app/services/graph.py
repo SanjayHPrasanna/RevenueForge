@@ -76,15 +76,19 @@ def rebuild_company_graph(db: Session, tid: str) -> dict:
         role = K.normalize_role(rc.role)
         ck = g.node("Cost", f"{role} · {rc.location}", day_rate=rc.day_rate, day_cost=rc.day_cost, currency=rc.currency)
         g.edge(g.node("Resource", role), ck, "priced_at")
-    caps = list(db.scalars(select(Capability).where(Capability.tenant_id == tid)))
+    caps = [(c, {K.canonical_tech(t) for t in c.technologies or []} - K.COMMODITY_TECH)
+            for c in db.scalars(select(Capability).where(Capability.tenant_id == tid))]
     for cs in db.scalars(select(CaseStudy).where(CaseStudy.tenant_id == tid)):
         k = g.node("CaseStudy", cs.title, industry=cs.industry, id=cs.id)
         techs = {K.canonical_tech(t) for t in cs.technologies or []}
         for t in techs:
             g.edge(k, g.node("Technology", t), "used")
-        for c in caps:
-            if techs & {K.canonical_tech(t) for t in c.technologies or []}:
-                g.edge(k, _key("Capability", c.name), "proves")
+        for c, ctechs in caps:
+            # A case study proves a capability only when it used most of what makes that capability: two shared
+            # technologies, or the capability's only one. One shared umbrella name ("TIBCO", "Azure") isn't proof.
+            shared = techs & ctechs
+            if ctechs and len(shared) >= min(2, len(ctechs)):
+                g.edge(k, _key("Capability", c.name), "proves", weight=round(len(shared) / len(ctechs), 2))
     for a in db.scalars(select(Accelerator).where(Accelerator.tenant_id == tid)):
         k = g.node("Accelerator", a.name, saving=a.effort_saving_pct)
         for t in a.technologies or []:

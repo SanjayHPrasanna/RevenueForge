@@ -22,13 +22,51 @@ const TYPES: { key: string; label: string; color: string }[] = [
 ];
 const COLOR = Object.fromEntries(TYPES.map((t) => [t.key, t.color]));
 
+function gravity(strength: number) {
+  let nodes: any[] = [];
+  const force = (alpha: number) => {
+    for (const n of nodes) {
+      n.vx -= (n.x || 0) * strength * alpha;
+      n.vy -= (n.y || 0) * strength * alpha;
+    }
+  };
+  force.initialize = (ns: any[]) => { nodes = ns; };
+  return force;
+}
+
+// Labels are drawn after the nodes, most-connected first, skipping any that would overlap one already drawn.
+function drawLabels(ctx: CanvasRenderingContext2D, scale: number, nodes: any[], sel: string | null, near: Set<string>) {
+  const fs = 11 / scale;
+  ctx.font = `500 ${fs}px Hanken Grotesk, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  const order = nodes.filter((n) => n.x != null).sort((a, b) =>
+    Number(b.id === sel) - Number(a.id === sel) || Number(near.has(b.id)) - Number(near.has(a.id)) || b.degree - a.degree);
+  const limit = scale < 1.5 ? 22 : scale < 3 ? 60 : 400;
+  const boxes: number[][] = [];
+  let drawn = 0;
+  for (const n of order) {
+    const must = n.id === sel || near.has(n.id);
+    if (!must && (drawn >= limit || (sel && !near.has(n.id)))) continue;
+    const label = n.label.length > 34 ? n.label.slice(0, 32) + "…" : n.label;
+    const w = ctx.measureText(label).width, pad = 2 / scale;
+    const x = n.x - w / 2 - pad, y = n.y + (n.type === "Deal" ? 14 : 7) / scale, h = fs + pad * 2;
+    if (boxes.some(([bx, by, bw, bh]) => x < bx + bw && x + w + pad * 2 > bx && y < by + bh && y + h > by)) continue;
+    boxes.push([x, y, w + pad * 2, h]);
+    ctx.fillStyle = "rgba(251,252,253,0.85)";
+    ctx.fillRect(x, y, w + pad * 2, h);
+    ctx.fillStyle = n.id === sel ? "#10222E" : "#3D4F5B";
+    ctx.fillText(label, n.x, y + pad);
+    drawn++;
+  }
+}
+
 export default function GraphPage() {
   const { data: deals } = useQuery({ queryKey: ["deals"], queryFn: () => api.get("/deals") });
   const [dealId, setDealId] = useState("");
   const [hidden, setHidden] = useState<Set<string>>(new Set(["Cost", "Requirement"]));
   const fg = useRef<any>(null);
   useEffect(() => { setHidden(new Set(dealId ? ["Cost"] : ["Cost", "Requirement"])); }, [dealId]);
-  useEffect(() => { fg.current?.d3Force?.("charge")?.strength(-70); }, [fg.current]);
   const [sel, setSel] = useState<string | null>(null);
   const { data, isLoading } = useQuery({ queryKey: ["graph", dealId], queryFn: () => api.get(`/graph${dealId ? `?deal_id=${dealId}` : ""}`) });
   const { data: detail } = useQuery({ queryKey: ["node", sel], queryFn: () => api.get(`/graph/node?key=${encodeURIComponent(sel!)}`), enabled: !!sel });
@@ -45,6 +83,29 @@ export default function GraphPage() {
     const ids = new Set(nodes.map((n: any) => n.id));
     return { nodes, links: data.edges.filter((e: any) => ids.has(e.source) && ids.has(e.target)).map((e: any) => ({ ...e })) };
   }, [data, hidden]);
+  const near = useMemo(() => {
+    const s = new Set<string>();
+    if (!sel) return s;
+    for (const l of gd.links as any[]) {
+      const a = typeof l.source === "object" ? l.source.id : l.source, b = typeof l.target === "object" ? l.target.id : l.target;
+      if (a === sel) s.add(b);
+      if (b === sel) s.add(a);
+    }
+    return s;
+  }, [gd, sel]);
+  // Forces are set once the graph is mounted with data: repel nodes, and pull every group gently toward the
+  // centre so small groups that share nothing with the rest don't drift to the edges and shrink the view.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const g = fg.current;
+      if (!g?.d3Force) return;
+      g.d3Force("charge")?.strength(-90);
+      g.d3Force("link")?.distance(38);
+      g.d3Force("gravity", gravity(0.07));
+      g.d3ReheatSimulation?.();
+    }, 0);
+    return () => clearTimeout(t);
+  }, [gd]);
 
   return (
     <div className="px-4 lg:px-8 py-6 max-w-[1500px]">
@@ -92,16 +153,7 @@ export default function GraphPage() {
               onNodeClick={(n: any) => setSel(n.id)}
               onBackgroundClick={() => setSel(null)}
               nodeLabel={(n: any) => `${n.type}: ${n.label}`}
-              nodeCanvasObjectMode={() => "after"}
-              nodeCanvasObject={(n: any, ctx, scale) => {
-                const show = n.type === "Deal" || n.degree >= 14 || n.id === sel || scale > 2.6;
-                if (!show) return;
-                const label = n.label.length > 34 ? n.label.slice(0, 32) + "…" : n.label;
-                ctx.font = `${n.type === "Deal" ? 600 : 500} ${11 / scale}px Hanken Grotesk, sans-serif`;
-                ctx.fillStyle = "#3D4F5B";
-                ctx.textAlign = "center";
-                ctx.fillText(label, n.x, n.y + (n.type === "Deal" ? 16 : 9) / scale + 4);
-              }}
+              onRenderFramePost={(ctx: CanvasRenderingContext2D, scale: number) => drawLabels(ctx, scale, gd.nodes, sel, near)}
             />
           )}
         </div>

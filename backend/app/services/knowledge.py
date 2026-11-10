@@ -235,28 +235,41 @@ def expand(text: str) -> str:
 
 # --------------------------------------------------------------------------- roles
 ROLE_KEYWORDS = {
-    "Engagement Manager": ["engagement manager", "delivery manager", "account manager", "service delivery manager"],
+    "Engagement Manager": ["engagement manager", "delivery manager", "account manager", "service delivery manager", "client partner"],
     "Project Manager": ["project manager", "program manager", "pmo", "scrum master"],
     "Solution Architect": ["solution architect", "technical architect", "integration architect", "enterprise architect", "architect"],
-    "Integration Engineer": ["integration engineer", "integration developer", "middleware", "esb developer", "api developer", "mulesoft", "boomi", "tibco", "rhapsody"],
-    "Software Engineer": ["software engineer", "developer", "full stack", "backend", "frontend", "java developer", ".net developer"],
-    "Data Engineer": ["data engineer", "etl", "data analyst", "bi developer"],
-    "Data Scientist": ["data scientist", "ml engineer", "ai engineer", "machine learning"],
-    "QA Engineer": ["qa", "test engineer", "tester", "quality"],
+    "Integration Engineer": ["integration engineer", "integration developer", "middleware", "esb developer", "api developer", "mulesoft", "boomi", "tibco",
+                             "rhapsody", "workato", "snaplogic"],
+    "BI Developer": ["bi developer", "bi engineer", "power bi", "tableau", "spotfire", "reporting developer", "report developer"],
+    "MDM Specialist": ["mdm", "master data"],
+    "CRM Developer": ["salesforce", "sfdc", "crm developer", "dynamics developer"],
+    "Data Engineer": ["data engineer", "etl", "data analyst", "datastage", "data management engineer"],
+    "Data Scientist": ["data scientist", "ml engineer", "ai engineer", "ai developer", "machine learning"],
+    "QA Engineer": ["qa", "test engineer", "tester", "quality", "test automation"],
     "DevOps Engineer": ["devops", "cloud engineer", "site reliability", "sre", "platform engineer"],
     "Support Engineer": ["support engineer", "l2", "l3", "operations engineer", "production support", "noc"],
     "Security Specialist": ["security", "infosec", "cyber", "iam specialist"],
-    "Business Analyst": ["business analyst", "functional consultant", "ba"],
+    "Business Analyst": ["business analyst", "business systems analyst", "functional consultant", "ba"],
     "Technical Writer": ["technical writer", "documentation"],
+    # Generic last, so a more specific title above wins ("ETL developer" is a Data Engineer, not a Software Engineer).
+    "Software Engineer": ["software engineer", "developer", "full stack", "backend", "frontend", "java developer", ".net developer"],
 }
+
+
+def _has(t: str, k: str) -> bool:
+    # Short keywords ("ba", "qa", "sre", "l2") must be whole words: "database administrator" is not a BA.
+    return re.search(rf"\b{re.escape(k)}\b", t) is not None if len(k) <= 3 else k in t
 
 
 def normalize_role(title: str) -> str:
     t = (title or "").lower()
     for role, kws in ROLE_KEYWORDS.items():
-        if any(k in t for k in kws):
+        if any(_has(t, k) for k in kws):
             return role
-    return title.strip().title() if title else "Software Engineer"
+    if not title or not title.strip():
+        return "Software Engineer"
+    title = title.strip()
+    return title if any(c.isupper() for c in title) else title.title()  # keep "CoE Head" as written
 
 
 # Technology families: used to tell "we know the neighbourhood" (upskill) from "new territory" (hire/partner).
