@@ -727,6 +727,12 @@ export function PricingStage({ deal }: P) {
           { key: "travel_pct", label: "Travel", suffix: "%" },
         ]} />
       </div>
+      {p.rates_from && p.rates_from !== "rate_card" && (
+        <div role="alert" className="card px-5 py-3.5 border-ember-300 bg-ember-50/60 text-[13px] text-ember-700">
+          <b>{p.rates_from === "benchmark" ? "These prices use generic benchmark rates, not yours." : "Some roles use generic benchmark rates."}</b>{" "}
+          {p.assumptions?.[0]}
+        </div>
+      )}
       <div className="card p-5">
         <div className="font-bold">Price against cost</div>
         <div className="text-[12.5px] text-ink-muted mb-3">Each option on one scale with your total cost and your {p.min_margin}% margin floor. Select an option to put it in the proposal.</div>

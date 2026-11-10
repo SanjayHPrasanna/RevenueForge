@@ -560,7 +560,7 @@ for _pair in filter(None, _os.getenv("FX_RATES", "").split(",")):
 DEFAULT_RATES = {"Engagement Manager": (900, 480), "Project Manager": (700, 360), "Solution Architect": (950, 500), "Integration Engineer": (450, 210),
                  "Software Engineer": (420, 190), "Data Scientist": (520, 250), "Data Engineer": (420, 190), "QA Engineer": (300, 135),
                  "DevOps Engineer": (420, 190), "Support Engineer": (320, 140), "Security Specialist": (520, 250), "Business Analyst": (520, 260),
-                 "Technical Writer": (220, 100)}
+                 "Technical Writer": (220, 100), "BI Developer": (420, 190), "MDM Specialist": (480, 220), "CRM Developer": (450, 210)}
 
 
 def _rate_for(kb: CompanyKB, role: str, location: str, overrides: dict) -> tuple[float, float, str, str]:
@@ -582,6 +582,18 @@ def _rate_for(kb: CompanyKB, role: str, location: str, overrides: dict) -> tuple
     if location == "Onsite":
         rate, cost = rate * 2.1, cost * 2.0
     return float(rate), float(cost), "USD", "Benchmark (no rate card row)"
+
+
+def _rates_note(company: str, lines: list[dict], rates_from: str) -> str:
+    """Says truthfully where the day rates came from, so nobody sends a client a price built on guesses without knowing."""
+    if rates_from == "benchmark":
+        return (f"No rate card yet: every day rate is a generic market benchmark, not {company}'s own rates. Add your rate card "
+                "(Knowledge library) before using this price.")
+    bench = sorted({l["role"] for l in lines if l["rate_source"].startswith("Benchmark")})
+    if bench:
+        return (f"Rates from the {company} rate card, except {', '.join(bench)}: no rate card row, so a generic market benchmark is used "
+                "for these. Add them to your rate card for real figures.")
+    return f"Rates from the {company} rate card."
 
 
 def _contingency_note(pct: float, est: dict) -> str:
@@ -621,11 +633,15 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
         return {"name": name, "margin_pct": round(margin, 1), "price": round(p, 2), "gross_profit": round(p - total_cost, 2),
                 "vs_list_pct": round((p / list_price - 1) * 100, 1) if list_price else 0, "note": note}
 
+    bench = {l["role"] for l in lines if l["rate_source"].startswith("Benchmark")}
+    rates_from = "benchmark" if bench and len(bench) == len({l["role"] for l in lines}) else "mixed" if bench else "rate_card"
     implied = (1 - total_cost / list_price) * 100 if list_price else 0
     scenarios = [scen("Aggressive", max(floor, target - 8), "Price to win; at or near the margin floor"),
                  scen("Target", target, "Company target margin"),
                  scen("Premium", target + 8, "Value-based price for a strong fit"),
-                 {**scen("Rate card", implied, "Straight rate-card pricing"), "price": round(list_price, 2)}]
+                 {**scen("Rate card", implied, "Straight rate-card pricing" if rates_from == "rate_card" else
+                         "Straight list price at generic benchmark rates: add your rate card for real figures" if rates_from == "benchmark" else
+                         "Straight list price: your rate card, with benchmark rates where it has no row"), "price": round(list_price, 2)}]
     rfp_ccy = meta.get("currency") or base_ccy
     fx_to_rfp = FX_PER_USD.get(rfp_ccy, 1) / FX_PER_USD.get(base_ccy, 1)
     eng = est.get("engagement_type")
@@ -673,7 +689,8 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
             "contingency_pct": contingency, "total_cost": round(total_cost, 2), "list_price": round(list_price, 2),
             "implied_rate_card_margin": round(implied, 1), "target_margin": target, "min_margin": floor, "scenarios": scenarios,
             "recommended": "Target", "milestones": milestones, "phase_split": phase_split, "partner_note": partner_note,
-            "assumptions": [f"Rates from the {kb.name} rate card in {base_ccy}; converted to {rfp_ccy} at an indicative {round(fx_to_rfp, 4)} (confirm the rate with finance)." if rfp_ccy != base_ccy
-                            else f"Rates from the {kb.name} rate card in {base_ccy}.",
+            "rates_from": rates_from,
+            "assumptions": [_rates_note(kb.name, lines, rates_from) + (f" Converted to {rfp_ccy} at an indicative {round(fx_to_rfp, 4)} (confirm the rate with finance)."
+                                                                        if rfp_ccy != base_ccy else ""),
                             _contingency_note(contingency, est),
                             f"Travel and living at {travel_pct}% of onsite cost."]}

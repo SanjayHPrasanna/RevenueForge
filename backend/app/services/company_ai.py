@@ -69,7 +69,8 @@ def _profile(c: dict) -> llm.Profile | None:
         return replace(base, provider=p, anthropic_api_key=key, anthropic_model=model or DEFAULT_MODEL[p])
     if p == "openai":
         return replace(base, provider=p, openai_api_key=key, openai_model=model or DEFAULT_MODEL[p])
-    return replace(base, provider=p, azure_api_key=key, azure_deployment=model, azure_endpoint=c.get("azure_endpoint", ""))
+    return replace(base, provider=p, azure_api_key=key, azure_deployment=model, azure_endpoint=c.get("azure_endpoint", ""),
+                   azure_embed_deployment=c.get("embed_deployment", ""))
 
 
 llm.set_tenant_loader(profile_for)
@@ -85,6 +86,7 @@ def view(t: Tenant) -> dict:
     sp = llm.server_profile()
     return {"provider": c.get("provider") if c.get("provider") in PROVIDERS else "default", "model": c.get("model", ""),
             "rpm": int(c.get("rpm") or 8), "paid": bool(c.get("paid")), "azure_endpoint": c.get("azure_endpoint", ""),
+            "embed_deployment": c.get("embed_deployment", ""),
             "key_hint": {p: _hint(_dec(keys.get(p, ""))) for p in PROVIDERS},
             "updated_by": c.get("updated_by", ""), "updated_at": c.get("updated_at", ""),
             "server_default": {"provider": llm._usable(sp), "paid": sp.paid}}
@@ -128,6 +130,7 @@ def _build(t: Tenant, body: dict) -> dict:
             if not model:
                 raise ValueError("Enter the Azure OpenAI deployment name.")
             c["azure_endpoint"] = ep
+            c["embed_deployment"] = str(body.get("embed_deployment") or "").strip()[:120]
     else:
         raise ValueError("Unknown AI provider.")
     return c
@@ -157,9 +160,18 @@ def test(t: Tenant, body: dict | None = None) -> dict:
             out = llm.complete("You are a connection test.", "Reply with the single word OK.", max_tokens=20, attempts=1)
         except Exception as e:
             return {"ok": False, "message": _explain(str(e))}
+    emb = ""
+    if prof.provider == "azure" and prof.azure_embed_deployment:
+        with llm.use_profile(prof):
+            try:
+                llm._st(prof)["embed_ok"] = None
+                llm.embed(["connection test"])
+                emb = f" Embeddings ({prof.azure_embed_deployment}) work too."
+            except Exception as e:
+                return {"ok": False, "message": "Chat works, but the embedding deployment doesn't. " + _explain(str(e)).replace("deployment name", "embedding deployment name")}
     src = "this key" if prof.source == "company" else "the server's default AI"
     saved = " Press Save to start using it." if body and prof.source == "company" else ""
-    return {"ok": True, "message": f"Connected using {src} in {time.time() - t0:.1f}s (reply: {out.strip()[:20]}).{saved}"}
+    return {"ok": True, "message": f"Connected using {src} in {time.time() - t0:.1f}s (reply: {out.strip()[:20]}).{emb}{saved}"}
 
 
 def _explain(err: str) -> str:

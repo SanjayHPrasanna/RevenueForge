@@ -40,9 +40,34 @@ seen: list[dict] = []
 MODE = {"v1": True, "reasoning": False, "deployment": "revenueforge"}
 
 
+EMB = {"deployment": "text-embedding-3-small"}
+emb_calls: list[dict] = []
+
+
+def embedding_for(text: str) -> list[float]:
+    # A toy "meaning" space: integration words and data-exchange words land in the same direction.
+    t = text.lower()
+    integ = sum(w in t for w in ("integration", "exchange data", "interfaces", "connect", "applications talk"))
+    food = sum(w in t for w in ("catering", "meals", "food"))
+    return [1.0 + integ * 3, 0.1 + food * 3, 0.2]
+
+
 def handler(req: httpx.Request) -> httpx.Response:
     url = str(req.url)
     body = json.loads(req.content or b"{}")
+    if url.split("?")[0].endswith("/embeddings"):
+        key = req.headers.get("api-key") or (req.headers.get("authorization") or "").replace("Bearer ", "")
+        route = "v1" if "/openai/v1/" in url else "classic"
+        model = body.get("model") or url.split("/deployments/")[-1].split("/")[0]
+        emb_calls.append({"route": route, "model": model, "n": len(body.get("input", []))})
+        if key != GOOD_KEY:
+            return httpx.Response(401, json={"error": {"code": "401", "message": "Access denied"}})
+        if route == "v1" and not MODE["v1"]:
+            return httpx.Response(404, json={"error": {"code": "404", "message": "Resource not found"}})
+        if model != EMB["deployment"]:
+            return httpx.Response(404, json={"error": {"code": "DeploymentNotFound", "message": "The API deployment for this resource does not exist."}})
+        return httpx.Response(200, json={"object": "list", "model": model, "usage": {"prompt_tokens": 1, "total_tokens": 1},
+                                         "data": [{"object": "embedding", "index": i, "embedding": embedding_for(t)} for i, t in enumerate(body["input"])]})
     key = req.headers.get("api-key") or (req.headers.get("authorization") or "").replace("Bearer ", "")
     route = "v1" if "/openai/v1/" in url else "classic"
     seen.append({"host": req.url.host, "route": route, "model": body.get("model") or url.split("/deployments/")[-1].split("/")[0],
@@ -109,6 +134,36 @@ try:
 except llm.LLMUnavailable as e:
     ok("unknown deployment: the provider's DeploymentNotFound is reported", "DeploymentNotFound" in str(e) or "does not exist" in str(e), str(e))
 
+# ---------------------------------------------------------------- embeddings
+from dataclasses import replace as _replace  # noqa: E402
+
+ep = _replace(prof(), azure_embed_deployment="text-embedding-3-small")
+with llm.use_profile(prof()):
+    ok("no embedding deployment: embeddings off, word matching used", not llm.embeddings_enabled())
+with llm.use_profile(ep):
+    ok("embedding deployment set: embeddings on", llm.embeddings_enabled() and llm.embed_id().startswith("azure:https://revenueforge.openai.azure.com:"), llm.embed_id())
+    emb_calls.clear()
+    vecs = llm.embed(["Integration of the fare collection system", "Exchange data between the ticketing and finance applications",
+                      "Catering and meals for staff"] * 30)
+    ok("embeddings come back, one per text, normalised", len(vecs) == 90 and abs(sum(x * x for x in vecs[0]) - 1) < 1e-6)
+    ok("sent in small batches (trial-friendly)", [c["n"] for c in emb_calls] == [64, 26], str(emb_calls))
+    ok("similar meaning scores closer than shared words alone would",
+       llm.cosine(vecs[0], vecs[1]) > 0.95 and llm.cosine(vecs[0], vecs[2]) < 0.6, f"{llm.cosine(vecs[0], vecs[1]):.2f} {llm.cosine(vecs[0], vecs[2]):.2f}")
+MODE["v1"] = False
+e2 = _replace(prof(endpoint="https://revenueforge2.openai.azure.com/"), azure_embed_deployment="text-embedding-3-small")
+with llm.use_profile(e2):
+    emb_calls.clear()
+    llm.embed(["x"])
+    ok("embeddings fall back to the classic route", [c["route"] for c in emb_calls] == ["v1", "classic"], str(emb_calls))
+MODE["v1"] = True
+bad = _replace(prof(endpoint="https://revenueforge3.openai.azure.com/"), azure_embed_deployment="wrong-name")
+with llm.use_profile(bad):
+    try:
+        llm.embed(["x"])
+        ok("wrong embedding deployment fails", False)
+    except llm.LLMUnavailable:
+        ok("wrong embedding deployment: embeddings switch off for this key (word matching continues)", not llm.embeddings_enabled())
+
 # ---------------------------------------------------------------- Test connection before saving (API)
 with TestClient(app) as c:
     pw = "Qa-" + secrets.token_hex(8) + "!A1"
@@ -126,7 +181,12 @@ with TestClient(app) as c:
     ok("wrong deployment in the form: plain-words reason", not r["ok"] and "deployment name wasn't found" in r["message"], str(r))
     r = c.post("/api/company/ai/test", json={**form, "azure_endpoint": "revenueforge"}, headers=H).json()
     ok("bad endpoint caught before any call", not r["ok"] and "endpoint" in r["message"], str(r))
-    ok("save works after a good test", c.put("/api/company/ai", json=form, headers=H).status_code == 200)
+    r = c.post("/api/company/ai/test", json={**form, "embed_deployment": "text-embedding-3-small"}, headers=H).json()
+    ok("test connection also checks the embedding deployment", r["ok"] and "Embeddings (text-embedding-3-small) work too" in r["message"], str(r))
+    r = c.post("/api/company/ai/test", json={**form, "embed_deployment": "nope-embed"}, headers=H).json()
+    ok("wrong embedding deployment: chat works, embeddings named as the problem", not r["ok"] and r["message"].startswith("Chat works, but the embedding"), str(r))
+    ok("save works after a good test", c.put("/api/company/ai", json={**form, "embed_deployment": "text-embedding-3-small"}, headers=H).status_code == 200)
+    ok("the embedding deployment is saved and shown", c.get("/api/company/ai", headers=H).json().get("embed_deployment") == "text-embedding-3-small")
     r = c.post("/api/company/ai/test", json={**form, "api_key": ""}, headers=H).json()
     ok("empty key in the form tests the saved key", r["ok"], str(r))
     r = c.post("/api/company/ai/test", headers=H).json()

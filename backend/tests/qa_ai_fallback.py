@@ -112,6 +112,21 @@ cases = {
 for msg, want in cases.items():
     ok(f"Maahi error for '{msg[16:50]}…' says '{want}'", want in _unavailable(Exception(msg)).detail, _unavailable(Exception(msg)).detail)
 
+# ---------------------------------------------------------------- long conversations never block the next question
+from app.routers.assistant import ChatRequest  # noqa: E402
+
+req = ChatRequest(messages=[{"role": "user", "content": "List our people"}, {"role": "assistant", "content": "x" * 5000},
+                            {"role": "user", "content": "Is anyone available for a new Power BI project?"}])
+ok("a long earlier answer is shortened, not rejected", len(req.messages) == 3 and len(req.messages[1].content) <= 1502, str([len(m.content) for m in req.messages]))
+req = ChatRequest(messages=[{"role": "user", "content": "q"}, {"role": "assistant", "content": "a" * 1400}] * 12 + [{"role": "user", "content": "last"}])
+ok("a long conversation keeps the newest turns within the limit",
+   req.messages[-1].content == "last" and sum(len(m.content) for m in req.messages) <= 6000 and len(req.messages) <= 10, str(len(req.messages)))
+try:
+    ChatRequest(messages=[{"role": "user", "content": "y" * 1300}])
+    ok("an over-long question is refused", False)
+except Exception as e:
+    ok("an over-long question is refused with a plain reason", "keep your question under 1,200 characters" in str(e), str(e)[:200])
+
 print(f"\n{PASSES} passed, {len(FAILS)} failed")
 for f in FAILS:
     print("  -", f)

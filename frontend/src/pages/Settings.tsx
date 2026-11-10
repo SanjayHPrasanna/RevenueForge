@@ -330,7 +330,7 @@ function CompanyAi() {
   const [f, setF] = useState<any>(null);
   const [test, setTest] = useState<{ ok: boolean; message: string } | null>(null);
   useEffect(() => {
-    if (cfg && !f) setF({ provider: cfg.provider, api_key: "", model: cfg.model || "", rpm: cfg.rpm || 8, paid: !!cfg.paid, azure_endpoint: cfg.azure_endpoint || "" });
+    if (cfg && !f) setF({ provider: cfg.provider, api_key: "", model: cfg.model || "", rpm: cfg.rpm || 8, paid: !!cfg.paid, azure_endpoint: cfg.azure_endpoint || "", embed_deployment: cfg.embed_deployment || "" });
   }, [cfg]);
   const done = (r: any, msg: string) => { qc.setQueryData(["company-ai"], r); qc.invalidateQueries({ queryKey: ["company"] }); setF(null); setTest(null); toast("ok", msg); };
   const save = useMutation({
@@ -382,6 +382,12 @@ function CompanyAi() {
             <label className="text-[13px]"><span className="label">Azure OpenAI endpoint</span>
               <input className="input" value={f.azure_endpoint} onChange={(e) => setF({ ...f, azure_endpoint: e.target.value })} placeholder="https://your-resource.openai.azure.com" />
               <span className="block text-[11.5px] text-ink-muted mt-1">From the resource's Keys and Endpoint page. A Foundry ".services.ai.azure.com" address works too.</span>
+            </label>
+          )}
+          {f.provider === "azure" && (
+            <label className="text-[13px]"><span className="label">Embedding deployment (optional)</span>
+              <input className="input" value={f.embed_deployment} onChange={(e) => setF({ ...f, embed_deployment: e.target.value })} placeholder="e.g. text-embedding-3-small" />
+              <span className="block text-[11.5px] text-ink-muted mt-1">An embedding model on the same resource lets matching understand meaning, not just shared words. Leave empty to use word matching.</span>
             </label>
           )}
           <label className="text-[13px]"><span className="label">Requests per minute</span>

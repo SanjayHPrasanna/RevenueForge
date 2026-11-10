@@ -208,6 +208,27 @@ with TestClient(app, raise_server_exceptions=False) as c:
     stuffed = get("F2") if get("F2") is not None else get("Azure Azure")
     ok("radar API: the real integration tender outscores the keyword-stuffed one", real is not None and stuffed is not None and real > stuffed, f"{real} vs {stuffed}")
 
+# ---------------------------------------------------------------- pricing says truthfully where rates came from
+from app.services import solution as SOL  # noqa: E402
+
+ok("new roles have a benchmark rate", all(r in SOL.DEFAULT_RATES for r in ("BI Developer", "MDM Specialist", "CRM Developer")))
+_bench = [{"role": "Integration Engineer", "rate_source": "Benchmark (no rate card row)"}, {"role": "Project Manager", "rate_source": "Benchmark (no rate card row)"}]
+_note = SOL._rates_note("Acme", _bench, "benchmark")
+ok("no rate card: the note says rates are benchmarks, not the company's", "No rate card yet" in _note and "rate card in" not in _note, _note)
+_mixed = [{"role": "Integration Engineer", "rate_source": "Rate card"}, {"role": "Security Specialist", "rate_source": "Benchmark (no rate card row)"}]
+_note = SOL._rates_note("Acme", _mixed, "mixed")
+ok("partial rate card: the note names the benchmarked roles", "except Security Specialist" in _note, _note)
+ok("full rate card: plain note", SOL._rates_note("Acme", [{"role": "X", "rate_source": "Rate card"}], "rate_card") == "Rates from the Acme rate card.")
+from app.services.matching import CompanyKB  # noqa: E402
+
+_kb = CompanyKB(name="Acme")
+if True:
+    _est = {"team": [{"role": "Integration Engineer", "location": "Offshore", "fte": 1, "person_days": 100, "phase": "Build"}],
+            "engagement_type": "project", "contingency_pct": 10}
+    _p = SOL.price(_est, _kb, {}, {})
+    ok("price() with no rate card: flagged as benchmark everywhere", _p["rates_from"] == "benchmark" and "No rate card yet" in _p["assumptions"][0]
+       and "benchmark" in _p["scenarios"][-1]["note"], str(_p["assumptions"][:1]))
+
 print(f"\n{PASSES} passed, {len(FAILS)} failed")
 for f in FAILS:
     print("  -", f)

@@ -55,20 +55,34 @@ Product facts:
   here. Do not guess them."""
 
 
+QUESTION_MAX = 1200  # the new question itself
+EARLIER_MAX = 1500  # each earlier message is shortened to this, so a long answer never blocks the next question
+HISTORY_MAX = 6000  # the whole conversation sent to the AI
+
+
 class ChatTurn(BaseModel):
     role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=1200)
+    content: str = Field(min_length=1, max_length=20000)
 
 
 class ChatRequest(BaseModel):
-    messages: list[ChatTurn] = Field(min_length=1, max_length=10)
+    messages: list[ChatTurn] = Field(min_length=1, max_length=40)
 
     @model_validator(mode="after")
     def validate_conversation(self):
         if self.messages[-1].role != "user":
             raise ValueError("The final conversation message must be from the user.")
-        if sum(len(message.content) for message in self.messages) > 6000:
-            raise ValueError("The conversation is too long.")
+        if len(self.messages[-1].content) > QUESTION_MAX:
+            raise ValueError(f"Please keep your question under {QUESTION_MAX:,} characters.")
+        # Earlier turns are context only: keep the last 10, shorten long ones (Maahi's own answers can be long), and drop
+        # the oldest until the conversation fits. Nothing the person needs is rejected.
+        turns = self.messages[-10:]
+        for t in turns[:-1]:
+            if len(t.content) > EARLIER_MAX:
+                t.content = t.content[:EARLIER_MAX].rstrip() + " …"
+        while len(turns) > 1 and sum(len(t.content) for t in turns) > HISTORY_MAX:
+            turns = turns[1:]
+        self.messages = turns
         return self
 
 

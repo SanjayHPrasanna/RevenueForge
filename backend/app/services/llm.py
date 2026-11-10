@@ -48,6 +48,7 @@ class Profile:
     azure_endpoint: str = ""
     azure_api_key: str = ""
     azure_deployment: str = ""
+    azure_embed_deployment: str = ""  # optional: an embedding model deployed on the same Azure resource
     azure_api_version: str = "2024-10-21"
     rpm: int = 8
     paid: bool = False
@@ -66,6 +67,7 @@ def server_profile() -> Profile:
                    gemini_embed_model=s.gemini_embed_model, anthropic_api_key=s.anthropic_api_key, anthropic_model=s.anthropic_model,
                    openai_api_key=s.openai_api_key, openai_model=s.openai_model, azure_endpoint=s.azure_endpoint,
                    azure_api_key=s.azure_api_key, azure_deployment=s.azure_deployment, azure_api_version=s.azure_api_version,
+                   azure_embed_deployment=s.azure_embed_deployment,
                    rpm=max(1, s.llm_rpm), paid=s.llm_paid, source="server")
 
 
@@ -188,7 +190,7 @@ def status(usage: bool = True) -> dict:
              "openai": p.openai_model, "azure": p.azure_deployment}.get(name, "")
     return {"provider": name, "model": model, "enabled": is_enabled(), "configured_provider": p.provider, "source": p.source,
             "paid": p.paid, "rpm": p.rpm, "calls": st["calls"], "failures": st["failures"], "last_error": st["last_error"][:300],
-            "disabled_reason": st["disabled_reason"], "embeddings": name in ("gemini", "openai") and st["embed_ok"] is not False,
+            "disabled_reason": st["disabled_reason"], "embeddings": _embed_source(p) != "none" and st["embed_ok"] is not False,
             **({} if usage else {"calls": None, "failures": None, "last_error": ""})}
 
 
@@ -544,16 +546,24 @@ def parse_json(raw: str):
         raise
 
 
+def _embed_source(p: Profile) -> str:
+    name = _usable(p)
+    if name in ("gemini", "openai"):
+        return name
+    return "azure" if name == "azure" and p.azure_embed_deployment else "none"
+
+
 def embeddings_enabled() -> bool:
     p = current_profile()
-    return is_enabled() and _usable(p) in ("gemini", "openai") and _st(p)["embed_ok"] is not False
+    return is_enabled() and _embed_source(p) != "none" and _st(p)["embed_ok"] is not False
 
 
 def embed_id() -> str:
     """Which embedding model vectors come from. Vectors from different models can't be compared, so caches key on this."""
     p = current_profile()
-    name = _usable(p)
-    return f"gemini:{p.gemini_embed_model}" if name == "gemini" else "openai:text-embedding-3-small" if name == "openai" else "none"
+    src = _embed_source(p)
+    return {"gemini": f"gemini:{p.gemini_embed_model}", "openai": "openai:text-embedding-3-small",
+            "azure": f"azure:{azure_base(p.azure_endpoint)}:{p.azure_embed_deployment}"}.get(src, "none")
 
 
 def embed(texts: list[str], task: str = "SEMANTIC_SIMILARITY") -> list[list[float]]:
@@ -563,12 +573,14 @@ def embed(texts: list[str], task: str = "SEMANTIC_SIMILARITY") -> list[list[floa
     if not embeddings_enabled():
         raise LLMUnavailable("Embeddings not available")
     p = current_profile()
-    name = _usable(p)
+    name = _embed_source(p)
     st = _st(p)
     for attempt in range(3):
         try:
             if name == "gemini":
                 vecs = _gemini_embed(p, texts, task)
+            elif name == "azure":
+                vecs = _azure_embed(p, texts)
             else:
                 from openai import OpenAI
 
@@ -590,6 +602,31 @@ def embed(texts: list[str], task: str = "SEMANTIC_SIMILARITY") -> list[list[floa
         except Exception as e:
             raise LLMUnavailable(str(e))
     raise LLMUnavailable("Embedding rate limit")
+
+
+def _azure_embed(p: Profile, texts: list[str]) -> list[list[float]]:
+    """Embeddings from the Azure embedding deployment, on whichever route (v1 or classic) the resource answers."""
+    import openai
+
+    base, st = azure_base(p.azure_endpoint), _st(p)
+    routes = ["v1", "classic"] if st.get("azure_embed_route") != "classic" else ["classic"]
+    for i, route in enumerate(routes):
+        client = (openai.OpenAI(api_key=p.azure_api_key, base_url=f"{base}/openai/v1/") if route == "v1" else
+                  openai.AzureOpenAI(api_key=p.azure_api_key, azure_endpoint=base, api_version=p.azure_api_version or "2024-10-21"))
+        try:
+            vecs: list[list[float]] = []
+            for start in range(0, len(texts), 64):  # small batches: trial deployments have low tokens-per-minute limits
+                _throttle(p)
+                r = client.embeddings.create(model=p.azure_embed_deployment, input=[t[:6000] or " " for t in texts[start:start + 64]])
+                vecs += [_normalize(d.embedding) for d in r.data]
+            st["azure_embed_route"] = route
+            return vecs
+        except openai.APIStatusError as e:
+            if route == "v1" and i + 1 < len(routes) and e.status_code == 404:
+                continue
+            hdrs = getattr(getattr(e, "response", None), "headers", {}) or {}
+            raise _HttpError(e.status_code, f"{p.azure_embed_deployment}: {getattr(e, 'message', '') or e}", hdrs.get("retry-after"))
+    raise LLMUnavailable("No Azure embedding route answered")
 
 
 def _normalize(v: list[float]) -> list[float]:
