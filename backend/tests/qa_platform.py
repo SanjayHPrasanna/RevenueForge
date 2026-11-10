@@ -182,6 +182,41 @@ with TestClient(app) as c:
     ok("successful sign-ins listed with their method", any(e["detail"].get("method") == "password" and e["user"] == "pres@acme.example"
                                                           for e in sec2["sign_ins"]), str(sec2["sign_ins"][:2]))
 
+    # ---------------------------------------------------------------- email setup and test
+    import smtplib
+    from app.config import settings
+    from app.services import notify
+    h = c.get("/api/platform/health", headers=O).json()
+    ok("health shows email is not set up", h["email"]["configured"] is False and "password" not in json.dumps(h["email"]).lower().replace("password_set", ""))
+    r = c.post("/api/platform/email/test", headers=O)
+    ok("test email without setup explains what to add", r.status_code == 400 and "SMTP_HOST" in r.text)
+    ok("company admin can't send test email", c.post("/api/platform/email/test", headers=A).status_code == 403)
+    settings.smtp_host, settings.smtp_user, settings.smtp_password = "smtp.gmail.com", "someone@gmail.com", "abcdefghijklmnop"
+    h = c.get("/api/platform/health", headers=O).json()["email"]
+    ok("setup shown with account masked and no password", h["configured"] and h["user"] == "so***@gmail.com" and h["password_set"] is True
+       and "abcdefghijklmnop" not in json.dumps(h))
+    sent = []
+    real = notify._deliver
+    notify._deliver = lambda to, subject, text, html=None: sent.append((to, subject))
+    r = c.post("/api/platform/email/test", headers=O).json()
+    ok("test email goes to the platform admin", r["ok"] and sent == [("ops@platform.example", "RevenueForge test email")], str(r))
+    def boom(*a, **k):
+        raise smtplib.SMTPAuthenticationError(535, b"5.7.8 Username and Password not accepted")
+    notify._deliver = boom
+    r = c.post("/api/platform/email/test", headers=O).json()
+    ok("wrong password explained in plain words", not r["ok"] and "app password" in r["reason"], str(r))
+    def boom2(*a, **k):
+        raise smtplib.SMTPAuthenticationError(534, b"5.7.9 Application-specific password required")
+    notify._deliver = boom2
+    r = c.post("/api/platform/email/test", headers=O).json()
+    ok("missing app password explained", "2-Step Verification" in r["reason"], str(r))
+    def boom3(*a, **k):
+        raise TimeoutError("timed out")
+    notify._deliver = boom3
+    ok("timeout explained", "SMTP_PORT" in c.post("/api/platform/email/test", headers=O).json()["reason"])
+    notify._deliver = real
+    settings.smtp_host = settings.smtp_user = settings.smtp_password = ""
+
 print(f"\n{PASSES} passed, {len(FAILS)} failed")
 for f in FAILS:
     print("  -", f)

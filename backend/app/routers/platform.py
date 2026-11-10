@@ -420,6 +420,7 @@ def health(ctx: Ctx = Depends(platform_ctx)):
         "disk": disk,
         "background": {"tender_refresh": any("tender" in n or "radar" in n for n in threads), "ai_usage_saver": "ai-usage-flush" in threads,
                        "deadline_emails": any("deadline" in n for n in threads)},
+        "email": notify.setup(),
         "services": {"email": notify.enabled(), "google_sign_in": bool(settings.google_client_id),
                      "microsoft_sign_in": bool(settings.ms_client_id), "maahi_own_key": bool(settings.maahi_gemini_api_key),
                      "platform_admins": len(settings.platform_admins)},
@@ -454,3 +455,20 @@ def security(days: int = 30, ctx: Ctx = Depends(platform_ctx)):
         "events": [_event(r, names) for r in rows if r.action != "auth.sign_in"][:300],
         "sign_ins": [_event(r, names) for r in rows if r.action == "auth.sign_in"][:100],
     }
+
+
+@router.post("/email/test")
+def email_test(ctx: Ctx = Depends(platform_ctx)):
+    """Send a test email to the signed-in platform admin and report exactly what happened."""
+    from ..services import notify
+    if not notify.enabled():
+        raise HTTPException(400, "Email isn't set up yet: add SMTP_HOST, SMTP_USER and SMTP_PASSWORD in Azure, then restart.")
+    text, body = notify.compose(ctx.user, "This is a test email from RevenueForge. If you can read it, email is working.",
+                                [("Sent by", settings.smtp_from or settings.smtp_user), ("Server", f"{settings.smtp_host}:{settings.smtp_port}")],
+                                "Deadline reminders, review-note alerts and approval emails will now reach your team.",
+                                settings.app_url.rstrip("/") + "/app/platform", "Open RevenueForge", "You pressed Send test email.")
+    try:
+        notify._deliver(ctx.user.email, "RevenueForge test email", text, body)
+    except Exception as e:
+        return {"ok": False, "to": ctx.user.email, "reason": notify.explain(e)}
+    return {"ok": True, "to": ctx.user.email}

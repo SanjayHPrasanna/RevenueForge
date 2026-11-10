@@ -320,6 +320,7 @@ function Health() {
           </div>
         ))}
       </section>
+      <EmailCard e={h.email} />
       <div className="grid lg:grid-cols-2 gap-5">
         <Card title="Tender and award feeds" sub="Refreshed every 12 hours; stale means no success in 36 hours">
           <table className="w-full text-[12.5px]"><thead><tr><th className="th">Feed</th><th className="th">Last success</th><th className="th text-right">Read</th><th className="th">Status</th></tr></thead>
@@ -352,6 +353,26 @@ function Health() {
         ) : <div className="text-[13px] text-ink-muted flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-600" /> No warnings since the last restart.</div>}
       </Card>
     </div>
+  );
+}
+
+function EmailCard({ e }: { e: any }) {
+  const [res, setRes] = useState<any>(null);
+  const t = useMutation({ mutationFn: () => api.post<any>("/platform/email/test"), onSuccess: setRes, onError: (x: any) => setRes({ ok: false, reason: x.message }) });
+  if (!e) return null;
+  const rows: [string, string][] = [["Mail server", e.host ? `${e.host}:${e.port} (${e.security})` : "Not set"], ["Account", e.user || "Not set"],
+    ["Password", e.password_set ? "Set" : "Not set"], ["Sent from", `${e.from_name} <${e.from || e.user || "—"}>`], ["Links in emails open", e.app_url]];
+  return (
+    <Card title="Email" sub="Deadline reminders, review-note alerts, approval and 'deal ready' emails"
+      right={<button className="btn-outline py-1.5 text-[13px]" disabled={!e.configured || t.isPending} onClick={() => { setRes(null); t.mutate(); }}>{t.isPending ? <Spinner /> : null} Send test email to me</button>}>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-[13px]">
+        {rows.map(([k, v]) => <div key={k} className="rounded-lg bg-paper p-3 min-w-0"><div className="text-ink-muted text-[12px]">{k}</div><div className="font-semibold truncate" title={v}>{v}</div></div>)}
+      </div>
+      {!e.configured && <div className="mt-3 text-[13px] text-amber-700">Not set up: no emails are sent. Add SMTP_HOST, SMTP_USER and SMTP_PASSWORD in Azure → Environment variables.</div>}
+      {e.configured && !e.app_url_ok && <div className="mt-3 text-[13px] text-amber-700">APP_URL still points to localhost, so links in emails won't open. Set APP_URL to this site's address in Azure.</div>}
+      {res && (res.ok ? <div className="mt-3 text-[13px] text-emerald-700 flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4" /> Sent to {res.to}. Check the inbox (and spam) in a minute.</div>
+        : <div className="mt-3 text-[13px] text-rose-700 flex items-start gap-1.5"><AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> Not sent. {res.reason}</div>)}
+    </Card>
   );
 }
 

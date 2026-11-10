@@ -25,9 +25,8 @@ def enabled() -> bool:
     return bool(settings.smtp_host and (settings.smtp_from or settings.smtp_user))
 
 
-def send(to: str, subject: str, text: str, html_body: str | None = None) -> bool:
-    if not enabled() or not to:
-        return False
+def _deliver(to: str, subject: str, text: str, html_body: str | None = None) -> None:
+    """Send one email or raise the mail server's error."""
     sender = settings.smtp_from or settings.smtp_user
     msg = EmailMessage()
     msg["Subject"] = subject
@@ -36,23 +35,57 @@ def send(to: str, subject: str, text: str, html_body: str | None = None) -> bool
     msg.set_content(text)
     if html_body:
         msg.add_alternative(html_body, subtype="html")
+    mode = settings.smtp_security
+    if mode == "ssl":
+        server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=20, context=ssl.create_default_context())
+    else:
+        server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20)
+        if mode == "starttls":
+            server.starttls(context=ssl.create_default_context())
+    with server:
+        if settings.smtp_user and settings.smtp_password:
+            server.login(settings.smtp_user, settings.smtp_password)
+        server.send_message(msg)
+
+
+def send(to: str, subject: str, text: str, html_body: str | None = None) -> bool:
+    if not enabled() or not to:
+        return False
     try:
-        mode = settings.smtp_security
-        if mode == "ssl":
-            server = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=20, context=ssl.create_default_context())
-        else:
-            server = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20)
-            if mode == "starttls":
-                server.starttls(context=ssl.create_default_context())
-        with server:
-            if settings.smtp_user and settings.smtp_password:
-                server.login(settings.smtp_user, settings.smtp_password)
-            server.send_message(msg)
+        _deliver(to, subject, text, html_body)
         log.info("Email sent to %s: %s", to, subject)
         return True
     except Exception as e:  # an email problem must never break a deal
         log.warning("Could not send email to %s: %s", to, e)
         return False
+
+
+def setup() -> dict:
+    """What the server is configured with (never the password), for the platform console."""
+    user = settings.smtp_user
+    masked = (user[:2] + "***" + user[user.index("@"):]) if "@" in user else ("set" if user else "")
+    return {"configured": enabled(), "host": settings.smtp_host, "port": settings.smtp_port, "security": settings.smtp_security,
+            "user": masked, "password_set": bool(settings.smtp_password), "from": settings.smtp_from or "", "from_name": settings.smtp_from_name,
+            "app_url": settings.app_url, "app_url_ok": not settings.app_url.startswith("http://localhost")}
+
+
+def explain(e: Exception) -> str:
+    """Plain-words reason for the common setup mistakes."""
+    t = str(e)
+    low = t.lower()
+    if "application-specific password" in low or "534" in t:
+        return "Gmail wants an app password: turn on 2-Step Verification, create an app password, and put it in SMTP_PASSWORD."
+    if "username and password not accepted" in low or "535" in t or "authentication" in low:
+        return "The mail server refused the user name or password. For Gmail use the 16-letter app password (no spaces), not your normal password."
+    if "timed out" in low or "timeout" in low:
+        return "No answer from the mail server. Check SMTP_HOST and SMTP_PORT (587 with starttls, or 465 with ssl)."
+    if "name or service not known" in low or "getaddrinfo" in low or "nodename" in low:
+        return "The mail server name couldn't be found. Check SMTP_HOST (for Gmail: smtp.gmail.com)."
+    if "wrong version number" in low or "ssl" in low:
+        return "Security setting doesn't match the port: use SMTP_SECURITY=starttls with port 587, or ssl with port 465."
+    if "sender address rejected" in low or "550" in t or "553" in t:
+        return "The server won't send from that address. Leave SMTP_FROM empty, or set it to an address the account is allowed to send as."
+    return t[:300]
 
 
 # --------------------------------------------------------------------------- shared
