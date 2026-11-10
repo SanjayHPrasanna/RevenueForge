@@ -48,7 +48,9 @@ class Profile:
     azure_endpoint: str = ""
     azure_api_key: str = ""
     azure_deployment: str = ""
-    azure_embed_deployment: str = ""  # optional: an embedding model deployed on the same Azure resource
+    azure_embed_deployment: str = ""  # optional: an embedding model, on the chat resource unless the two fields below are set
+    azure_embed_endpoint: str = ""  # optional: the embedding model's own endpoint
+    azure_embed_api_key: str = ""  # optional: its key, when it differs from the chat key
     azure_api_version: str = "2024-10-21"
     rpm: int = 8
     paid: bool = False
@@ -58,7 +60,11 @@ class Profile:
     def key(self) -> str:
         secret = {"gemini": self.gemini_api_key, "anthropic": self.anthropic_api_key, "openai": self.openai_api_key,
                   "azure": self.azure_api_key}.get(self.provider, "")
-        return hashlib.sha256(f"{self.provider}|{secret}".encode()).hexdigest()[:16]
+        extra = ""
+        if self.provider == "azure":  # what the app learns (route, "embeddings don't work") belongs to these exact settings
+            extra = "|".join((self.azure_endpoint, self.azure_deployment, self.azure_embed_deployment, self.azure_embed_endpoint,
+                              self.azure_embed_api_key))
+        return hashlib.sha256(f"{self.provider}|{secret}|{extra}".encode()).hexdigest()[:16]
 
 
 def server_profile() -> Profile:
@@ -67,7 +73,8 @@ def server_profile() -> Profile:
                    gemini_embed_model=s.gemini_embed_model, anthropic_api_key=s.anthropic_api_key, anthropic_model=s.anthropic_model,
                    openai_api_key=s.openai_api_key, openai_model=s.openai_model, azure_endpoint=s.azure_endpoint,
                    azure_api_key=s.azure_api_key, azure_deployment=s.azure_deployment, azure_api_version=s.azure_api_version,
-                   azure_embed_deployment=s.azure_embed_deployment,
+                   azure_embed_deployment=s.azure_embed_deployment, azure_embed_endpoint=s.azure_embed_endpoint,
+                   azure_embed_api_key=s.azure_embed_api_key,
                    rpm=max(1, s.llm_rpm), paid=s.llm_paid, source="server")
 
 
@@ -563,7 +570,7 @@ def embed_id() -> str:
     p = current_profile()
     src = _embed_source(p)
     return {"gemini": f"gemini:{p.gemini_embed_model}", "openai": "openai:text-embedding-3-small",
-            "azure": f"azure:{azure_base(p.azure_endpoint)}:{p.azure_embed_deployment}"}.get(src, "none")
+            "azure": f"azure:{azure_base(p.azure_embed_endpoint or p.azure_endpoint)}:{p.azure_embed_deployment}"}.get(src, "none")
 
 
 def embed(texts: list[str], task: str = "SEMANTIC_SIMILARITY") -> list[list[float]]:
@@ -604,29 +611,57 @@ def embed(texts: list[str], task: str = "SEMANTIC_SIMILARITY") -> list[list[floa
     raise LLMUnavailable("Embedding rate limit")
 
 
+def _embed_routes(p: Profile) -> list[tuple[str, str]]:
+    """Addresses to try for the embedding deployment, best first: the resource's OpenAI address (v1, then the classic
+    dated API), then the address exactly as typed, then Foundry's model-inference route."""
+    typed = (p.azure_embed_endpoint or p.azure_endpoint or "").strip()
+    m = re.match(r"\s*(https://[^/\s]+)", typed)
+    host = m.group(1).rstrip("/") if m else typed.rstrip("/")
+    base = azure_base(typed)
+    routes = [("v1", base), ("classic", base)]
+    if host != base:
+        routes += [("v1", host), ("classic", host)]
+    if host.endswith(".services.ai.azure.com"):
+        routes.append(("inference", host))
+    return routes
+
+
 def _azure_embed(p: Profile, texts: list[str]) -> list[list[float]]:
-    """Embeddings from the Azure embedding deployment, on whichever route (v1 or classic) the resource answers."""
+    """Embeddings from the Azure embedding deployment, on whichever address answers. The one that worked is remembered."""
     import openai
 
-    base, st = azure_base(p.azure_endpoint), _st(p)
-    routes = ["v1", "classic"] if st.get("azure_embed_route") != "classic" else ["classic"]
-    for i, route in enumerate(routes):
-        client = (openai.OpenAI(api_key=p.azure_api_key, base_url=f"{base}/openai/v1/") if route == "v1" else
-                  openai.AzureOpenAI(api_key=p.azure_api_key, azure_endpoint=base, api_version=p.azure_api_version or "2024-10-21"))
+    st = _st(p)
+    key = p.azure_embed_api_key or p.azure_api_key
+    routes = _embed_routes(p)
+    if st.get("azure_embed_route") in routes:
+        routes = [st["azure_embed_route"]] + [r for r in routes if r != st["azure_embed_route"]]
+    first_err = None
+    for route, base in routes:
+        if route == "v1":
+            client = openai.OpenAI(api_key=key, base_url=f"{base}/openai/v1/")
+        elif route == "classic":
+            client = openai.AzureOpenAI(api_key=key, azure_endpoint=base, api_version=p.azure_api_version or "2024-10-21")
+        else:  # Foundry model inference: OpenAI-shaped, at /models, key in the api-key header
+            client = openai.OpenAI(api_key=key, base_url=f"{base}/models", default_headers={"api-key": key},
+                                   default_query={"api-version": "2024-05-01-preview"})
         try:
             vecs: list[list[float]] = []
             for start in range(0, len(texts), 64):  # small batches: trial deployments have low tokens-per-minute limits
                 _throttle(p)
                 r = client.embeddings.create(model=p.azure_embed_deployment, input=[t[:6000] or " " for t in texts[start:start + 64]])
                 vecs += [_normalize(d.embedding) for d in r.data]
-            st["azure_embed_route"] = route
+            st["azure_embed_route"] = (route, base)
             return vecs
         except openai.APIStatusError as e:
-            if route == "v1" and i + 1 < len(routes) and e.status_code == 404:
-                continue
             hdrs = getattr(getattr(e, "response", None), "headers", {}) or {}
-            raise _HttpError(e.status_code, f"{p.azure_embed_deployment}: {getattr(e, 'message', '') or e}", hdrs.get("retry-after"))
-    raise LLMUnavailable("No Azure embedding route answered")
+            err = _HttpError(e.status_code, f"{p.azure_embed_deployment}: {getattr(e, 'message', '') or e}", hdrs.get("retry-after"))
+            if e.status_code in (404, 400):  # not found at this address: try the next one, but report the first answer
+                first_err = first_err or err
+                continue
+            raise err
+        except openai.APIConnectionError:
+            continue  # this address doesn't exist for the resource (e.g. no .openai.azure.com name): try the next
+    raise first_err or LLMUnavailable("No Azure embedding address answered")
 
 
 def _normalize(v: list[float]) -> list[float]:

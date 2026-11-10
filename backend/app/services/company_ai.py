@@ -70,7 +70,8 @@ def _profile(c: dict) -> llm.Profile | None:
     if p == "openai":
         return replace(base, provider=p, openai_api_key=key, openai_model=model or DEFAULT_MODEL[p])
     return replace(base, provider=p, azure_api_key=key, azure_deployment=model, azure_endpoint=c.get("azure_endpoint", ""),
-                   azure_embed_deployment=c.get("embed_deployment", ""))
+                   azure_embed_deployment=c.get("embed_deployment", ""), azure_embed_endpoint=c.get("embed_endpoint", ""),
+                   azure_embed_api_key=_dec((c.get("keys") or {}).get("azure_embed", "")) if c.get("embed_endpoint") else "")
 
 
 llm.set_tenant_loader(profile_for)
@@ -86,7 +87,8 @@ def view(t: Tenant) -> dict:
     sp = llm.server_profile()
     return {"provider": c.get("provider") if c.get("provider") in PROVIDERS else "default", "model": c.get("model", ""),
             "rpm": int(c.get("rpm") or 8), "paid": bool(c.get("paid")), "azure_endpoint": c.get("azure_endpoint", ""),
-            "embed_deployment": c.get("embed_deployment", ""),
+            "embed_deployment": c.get("embed_deployment", ""), "embed_endpoint": c.get("embed_endpoint", ""),
+            "embed_key_hint": _hint(_dec(keys.get("azure_embed", ""))),
             "key_hint": {p: _hint(_dec(keys.get(p, ""))) for p in PROVIDERS},
             "updated_by": c.get("updated_by", ""), "updated_at": c.get("updated_at", ""),
             "server_default": {"provider": llm._usable(sp), "paid": sp.paid}}
@@ -131,6 +133,13 @@ def _build(t: Tenant, body: dict) -> dict:
                 raise ValueError("Enter the Azure OpenAI deployment name.")
             c["azure_endpoint"] = ep
             c["embed_deployment"] = str(body.get("embed_deployment") or "").strip()[:120]
+            eep = str(body.get("embed_endpoint") or "").strip()[:300]
+            if eep and not eep.startswith("https://"):
+                raise ValueError("Enter the embedding endpoint (https://…), or leave it empty to use the endpoint above.")
+            c["embed_endpoint"] = eep
+            ekey = str(body.get("embed_api_key") or "").strip()
+            if ekey:
+                keys["azure_embed"] = _enc(ekey[:400])
     else:
         raise ValueError("Unknown AI provider.")
     return c
@@ -166,9 +175,9 @@ def test(t: Tenant, body: dict | None = None) -> dict:
             try:
                 llm._st(prof)["embed_ok"] = None
                 llm.embed(["connection test"])
-                emb = f" Embeddings ({prof.azure_embed_deployment}) work too."
+                emb = f" Smart matching ({prof.azure_embed_deployment}) works too."
             except Exception as e:
-                return {"ok": False, "message": "Chat works, but the embedding deployment doesn't. " + _explain(str(e)).replace("deployment name", "embedding deployment name")}
+                return {"ok": False, "message": "The chat model works, but the smart matching model doesn't. " + _explain(str(e)).replace("The deployment name", "Its deployment name")}
     src = "this key" if prof.source == "company" else "the server's default AI"
     saved = " Press Save to start using it." if body and prof.source == "company" else ""
     return {"ok": True, "message": f"Connected using {src} in {time.time() - t0:.1f}s (reply: {out.strip()[:20]}).{emb}{saved}"}

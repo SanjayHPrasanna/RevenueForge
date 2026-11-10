@@ -57,10 +57,13 @@ def handler(req: httpx.Request) -> httpx.Response:
     body = json.loads(req.content or b"{}")
     if url.split("?")[0].endswith("/embeddings"):
         key = req.headers.get("api-key") or (req.headers.get("authorization") or "").replace("Bearer ", "")
-        route = "v1" if "/openai/v1/" in url else "classic"
+        route = "v1" if "/openai/v1/" in url else "inference" if "/models/embeddings" in url else "classic"
         model = body.get("model") or url.split("/deployments/")[-1].split("/")[0]
-        emb_calls.append({"route": route, "model": model, "n": len(body.get("input", []))})
-        if key != GOOD_KEY:
+        emb_calls.append({"route": route, "host": req.url.host, "model": model, "n": len(body.get("input", [])), "key": key})
+        only = EMB.get("only_at")
+        if only and (route, req.url.host.split(".", 1)[1]) != only:
+            return httpx.Response(404, json={"error": {"code": "DeploymentNotFound", "message": "The API deployment for this resource does not exist."}})
+        if key not in (GOOD_KEY, EMB.get("key")):
             return httpx.Response(401, json={"error": {"code": "401", "message": "Access denied"}})
         if route == "v1" and not MODE["v1"]:
             return httpx.Response(404, json={"error": {"code": "404", "message": "Resource not found"}})
@@ -164,6 +167,39 @@ with llm.use_profile(bad):
     except llm.LLMUnavailable:
         ok("wrong embedding deployment: embeddings switch off for this key (word matching continues)", not llm.embeddings_enabled())
 
+# separate endpoint and key for embeddings
+EMB["key"] = "emb-" + secrets.token_hex(12)
+sep = _replace(prof(), azure_embed_deployment="text-embedding-3-small", azure_embed_endpoint="https://other-res.services.ai.azure.com",
+               azure_embed_api_key=EMB["key"])
+with llm.use_profile(sep):
+    emb_calls.clear()
+    llm.embed(["x"])
+    ok("separate embedding endpoint and key are used", emb_calls[0]["host"] == "other-res.openai.azure.com" and emb_calls[0]["key"] == EMB["key"], str(emb_calls))
+    ok("cache id follows the embedding endpoint", "other-res.openai.azure.com" in llm.embed_id(), llm.embed_id())
+# deployment reachable only at the address as typed (.services.ai.azure.com), or only on Foundry's model route
+for where, label in ((("v1", "services.ai.azure.com"), "the typed .services.ai.azure.com address"), (("inference", "services.ai.azure.com"), "Foundry's model-inference route")):
+    EMB["only_at"] = where
+    p4 = _replace(prof(endpoint=f"https://res-{where[0]}.services.ai.azure.com/openai/v1/responses"), azure_embed_deployment="text-embedding-3-small")
+    with llm.use_profile(p4):
+        emb_calls.clear()
+        try:
+            v = llm.embed(["x"])
+            ok(f"embeddings found via {label}", len(v) == 1 and emb_calls[-1]["route"] == where[0], str([(c["route"], c["host"]) for c in emb_calls]))
+        except llm.LLMUnavailable as e:
+            ok(f"embeddings found via {label}", False, f"{e} {[(c['route'], c['host']) for c in emb_calls]}")
+        emb_calls.clear()
+        llm.embed(["y"])
+        ok(f"the working address is remembered ({label})", len(emb_calls) == 1, str([(c["route"], c["host"]) for c in emb_calls]))
+EMB["only_at"] = ("nowhere", "x")
+p5 = _replace(prof(endpoint="https://res-none.services.ai.azure.com"), azure_embed_deployment="text-embedding-3-small")
+with llm.use_profile(p5):
+    try:
+        llm.embed(["x"])
+        ok("not found anywhere: fails", False)
+    except llm.LLMUnavailable as e:
+        ok("not found anywhere: Azure's own 'does not exist' answer is reported", "does not exist" in str(e), str(e))
+EMB["only_at"] = None
+
 # ---------------------------------------------------------------- Test connection before saving (API)
 with TestClient(app) as c:
     pw = "Qa-" + secrets.token_hex(8) + "!A1"
@@ -182,9 +218,9 @@ with TestClient(app) as c:
     r = c.post("/api/company/ai/test", json={**form, "azure_endpoint": "revenueforge"}, headers=H).json()
     ok("bad endpoint caught before any call", not r["ok"] and "endpoint" in r["message"], str(r))
     r = c.post("/api/company/ai/test", json={**form, "embed_deployment": "text-embedding-3-small"}, headers=H).json()
-    ok("test connection also checks the embedding deployment", r["ok"] and "Embeddings (text-embedding-3-small) work too" in r["message"], str(r))
+    ok("test connection also checks the embedding deployment", r["ok"] and "Smart matching (text-embedding-3-small) works too" in r["message"], str(r))
     r = c.post("/api/company/ai/test", json={**form, "embed_deployment": "nope-embed"}, headers=H).json()
-    ok("wrong embedding deployment: chat works, embeddings named as the problem", not r["ok"] and r["message"].startswith("Chat works, but the embedding"), str(r))
+    ok("wrong embedding deployment: chat works, embeddings named as the problem", not r["ok"] and r["message"].startswith("The chat model works, but the smart matching model doesn't"), str(r))
     ok("save works after a good test", c.put("/api/company/ai", json={**form, "embed_deployment": "text-embedding-3-small"}, headers=H).status_code == 200)
     ok("the embedding deployment is saved and shown", c.get("/api/company/ai", headers=H).json().get("embed_deployment") == "text-embedding-3-small")
     r = c.post("/api/company/ai/test", json={**form, "api_key": ""}, headers=H).json()

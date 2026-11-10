@@ -234,7 +234,7 @@ function AiEngine({ c }: { c: any }) {
             <div className="font-bold">AI engine</div>
             {c.llm.enabled ? (
               <>
-                <div className="text-ink-soft mt-1">Using <b className="capitalize">{c.llm.provider}</b> ({c.llm.model}) {c.llm.source === "company" ? "with your company's own key" : "from the server's default AI"} to read RFPs, judge capability fit, plan mitigations, design the architecture and write answers. Semantic matching: {c.llm.embeddings ? "on (embeddings)" : "off (text matching)"}. If a call fails, that step falls back to the rules engine and the deal still completes.</div>
+                <div className="text-ink-soft mt-1">Using <b className="capitalize">{c.llm.provider}</b> ({c.llm.model}) {c.llm.source === "company" ? "with your company's own key" : "from the server's default AI"} to read RFPs, judge capability fit, plan mitigations, design the architecture and write answers. Smart matching (by meaning): {c.llm.embeddings ? "on" : "off, matching by shared words"}. If a call fails, that step falls back to the rules engine and the deal still completes.</div>
                 <div className="mt-3 grid sm:grid-cols-4 gap-3 text-[12.5px]">
                   <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">Tier</div><div className="font-semibold">{c.llm.paid ? "Paid" : "Free"}</div></div>
                   <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">Rate limit used</div><div className="font-semibold num">{c.llm.rpm}/min</div></div>
@@ -280,7 +280,7 @@ function AiEngine({ c }: { c: any }) {
               </label>
             )}
             {f.provider !== "none" && (
-              <label className="text-[13px]"><span className="label">{f.provider === "azure" ? "Deployment" : "Model"}</span>
+              <label className="text-[13px]"><span className="label">{f.provider === "azure" ? "Chat model (deployment name)" : "Model"}</span>
                 <input className="input" value={f.model} onChange={(e) => setF({ ...f, model: e.target.value })} placeholder={MODEL_HINT[f.provider]} />
               </label>
             )}
@@ -330,7 +330,7 @@ function CompanyAi() {
   const [f, setF] = useState<any>(null);
   const [test, setTest] = useState<{ ok: boolean; message: string } | null>(null);
   useEffect(() => {
-    if (cfg && !f) setF({ provider: cfg.provider, api_key: "", model: cfg.model || "", rpm: cfg.rpm || 8, paid: !!cfg.paid, azure_endpoint: cfg.azure_endpoint || "", embed_deployment: cfg.embed_deployment || "" });
+    if (cfg && !f) setF({ provider: cfg.provider, api_key: "", model: cfg.model || "", rpm: cfg.rpm || 8, paid: !!cfg.paid, azure_endpoint: cfg.azure_endpoint || "", embed_deployment: cfg.embed_deployment || "", embed_endpoint: cfg.embed_endpoint || "", embed_api_key: "" });
   }, [cfg]);
   const done = (r: any, msg: string) => { qc.setQueryData(["company-ai"], r); qc.invalidateQueries({ queryKey: ["company"] }); setF(null); setTest(null); toast("ok", msg); };
   const save = useMutation({
@@ -375,7 +375,7 @@ function CompanyAi() {
             <input className="input" type="password" autoComplete="off" value={f.api_key} onChange={(e) => setF({ ...f, api_key: e.target.value })}
               placeholder={hint ? `Key ${hint} saved. Leave empty to keep it` : "Paste your API key"} />
           </label>
-          <label className="text-[13px]"><span className="label">{f.provider === "azure" ? "Deployment" : "Model"}</span>
+          <label className="text-[13px]"><span className="label">{f.provider === "azure" ? "Chat model (deployment name)" : "Model"}</span>
             <input className="input" value={f.model} onChange={(e) => setF({ ...f, model: e.target.value })} placeholder={MODEL_HINT[f.provider]} />
           </label>
           {f.provider === "azure" && (
@@ -385,10 +385,22 @@ function CompanyAi() {
             </label>
           )}
           {f.provider === "azure" && (
-            <label className="text-[13px]"><span className="label">Embedding deployment (optional)</span>
-              <input className="input" value={f.embed_deployment} onChange={(e) => setF({ ...f, embed_deployment: e.target.value })} placeholder="e.g. text-embedding-3-small" />
-              <span className="block text-[11.5px] text-ink-muted mt-1">An embedding model on the same resource lets matching understand meaning, not just shared words. Leave empty to use word matching.</span>
+            <label className="text-[13px]"><span className="label">Smart matching model (optional)</span>
+              <input className="input" value={f.embed_deployment} onChange={(e) => setF({ ...f, embed_deployment: e.target.value })} placeholder="Deployment name, e.g. text-embedding-3-small" />
+              <span className="block text-[11.5px] text-ink-muted mt-1">Matches RFP requirements to your library by meaning, so "exchange data between applications" finds your integration work even with different words. In Azure this is an "embedding" model. Leave empty to match by shared words only.</span>
             </label>
+          )}
+          {f.provider === "azure" && f.embed_deployment && (
+            <>
+              <label className="text-[13px]"><span className="label">Smart matching endpoint (optional)</span>
+                <input className="input" value={f.embed_endpoint} onChange={(e) => setF({ ...f, embed_endpoint: e.target.value })} placeholder="Leave empty to use the endpoint above" />
+                <span className="block text-[11.5px] text-ink-muted mt-1">The "Endpoint" on that model's Details page in Foundry, if it differs from the one above.</span>
+              </label>
+              <label className="text-[13px]"><span className="label">Smart matching key (optional)</span>
+                <input className="input" type="password" autoComplete="off" value={f.embed_api_key} onChange={(e) => setF({ ...f, embed_api_key: e.target.value })}
+                  placeholder={cfg.embed_key_hint ? `Key ${cfg.embed_key_hint} saved. Leave empty to keep it` : "Leave empty to use the API key above"} />
+              </label>
+            </>
           )}
           <label className="text-[13px]"><span className="label">Requests per minute</span>
             <input className="input num w-32" type="number" min={1} max={1000} value={f.rpm} onChange={(e) => setF({ ...f, rpm: Number(e.target.value) || 1 })} />
