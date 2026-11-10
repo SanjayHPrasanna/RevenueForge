@@ -15,6 +15,7 @@ can't be a strong match.
 """
 from __future__ import annotations
 
+import math
 import re
 import threading
 from collections import Counter, defaultdict
@@ -28,6 +29,8 @@ from .matching import _GENERIC, _STEMMED_STOP, _covered, _domain_terms, _stem, _
 
 BANDS = [(60, "Strong match"), (35, "Possible match"), (0, "Weak match")]
 RENEWAL_FROM, RENEWAL_TO = 182, 548  # days: about 6 to 18 months ahead
+RARE_SHARE = 0.05  # a term in more than 5% of notices is too common to count as evidence
+RARE_MIN_DOCS = 300
 SHOW_FROM = 35
 
 _index = {"key": None, "vec": None, "X": None, "meta": []}
@@ -126,6 +129,22 @@ def find(db, tenant, product: dict, regions: list[str] | None = None) -> dict:
     if idx["vec"] is None:
         return {**base, "buying_now": [], "bought_before": [], "renewals": [], "customers": [], "coverage": _coverage(db, 0, 0),
                 "hidden_weak": 0}
+    # Evidence must be specific. In a large set of notices, a word or technology found in more than 5% of them ("data",
+    # "management", "Azure") says little about whether a notice is about this product, so it can't count as evidence;
+    # rare ones ("TIBCO EBX", "golden records", "HL7") can. Small sets (tests, a fresh install) skip this check.
+    voc, idf, n_docs = idx["vec"].vocabulary_, idx["vec"].idf_, len(idx["meta"])
+
+    def specific(term: str) -> bool:
+        if n_docs < RARE_MIN_DOCS:
+            return True
+        vals = [idf[voc[t]] for t in _stem_text(term.lower()).split() if t in voc]
+        if not vals:
+            return True
+        df = (1 + n_docs) / math.exp(max(vals) - 1) - 1  # TF-IDF's smoothed idf, turned back into a document count
+        return df / n_docs <= RARE_SHARE
+
+    specific_techs = {t for t in ptechs if specific(t)}
+    specific_terms = {st for st, w in pterms.items() if specific(w)}
     q = idx["vec"].transform([ptext])
     sims = (idx["X"] @ q.T).toarray().ravel()
     order = sims.argsort()[::-1][:1500]
@@ -144,17 +163,20 @@ def find(db, tenant, product: dict, regions: list[str] | None = None) -> dict:
         words = _words(txt)
         techs = [x for x in K.find_technologies(txt) if x not in K.COMMODITY_TECH]
         shared = [t for t in ptechs if t in techs] + [pterms[s] for s in pterms if s in words]
-        if len(shared) < need or not any(pterms[s] in shared for s in pterms) and len([t for t in ptechs if t in techs]) < 2:
+        ev_techs = [t for t in ptechs if t in techs and t in specific_techs]
+        ev_terms = [pterms[s] for s in pterms if s in words and s in specific_terms]
+        if len(ev_techs) + len(ev_terms) < need or not ev_terms and len(ev_techs) < 2:
             hidden += 1
-            continue  # one shared word (a product name, "managed", "hospital") is not a match
+            continue  # one specific shared thing (a product name, "hospital"), or only common words, is not a match
+        shared = ev_techs + ev_terms + [x for x in shared if x not in ev_techs and x not in ev_terms]
         nterms = _domain_terms(txt, techs)
         hit = [x for x in nterms if _covered(x, vocab)]
         cov = len(hit) / len(nterms) if nterms else 0.0
         s = min(1.0, sim / 0.22)
-        score = (0.7 * s + 0.3 * min(1.0, len(shared) / 4)) * (0.5 + 0.5 * min(1.0, cov / 0.6))
+        score = (0.7 * s + 0.3 * min(1.0, (len(ev_techs) + len(ev_terms)) / 4)) * (0.5 + 0.5 * min(1.0, cov / 0.6))
         score = int(round(min(1.0, score) * 100))
         notes = []
-        if score >= 60 and (cov < 0.5 or len(shared) < 3):
+        if score >= 60 and (cov < 0.5 or len(ev_techs) + len(ev_terms) < 3):
             score = 59
         if not english and score > 55:
             score = 55

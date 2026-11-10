@@ -166,6 +166,29 @@ with TestClient(app, raise_server_exceptions=False) as cl:
         AF.prune(db)
         ok("prune: old finished contracts removed, running ones kept", not db.query(Award).filter(Award.source_id == "OLD").count()
            and db.query(Award).filter(Award.source_id == "OLD-RUNNING").count() == 1)
+    # Common words don't count as evidence once there are enough notices to tell common from specific
+    with SessionLocal() as db:
+        import random
+        rnd = random.Random(7)
+        filler = ("cloud hosting office licences network support data management analytics services platform migration "
+                  "application development maintenance helpdesk storage backup reporting").split()
+        for i in range(400):
+            db.add(Award(source="ted", source_id=f"BULK-{i}", title=" ".join(rnd.sample(filler, 5)) + " Microsoft Azure",
+                         description="Data management and application development services on Microsoft Azure. " + " ".join(rnd.sample(filler, 8)),
+                         language="en", buyer=f"Council {i}", country="United Kingdom", region="United Kingdom", suppliers=["Big Vendor"],
+                         awarded=now - timedelta(days=100), contract_end=now + timedelta(days=300)))
+        db.add(Award(source="ted", source_id="MDM-1", title="Master data management on TIBCO EBX for golden customer records",
+                     description="Build and support a TIBCO EBX master data hub producing golden customer records and reference data.",
+                     language="en", buyer="National Bank", country="United Kingdom", region="United Kingdom", suppliers=["MDM Ltd"],
+                     awarded=now - timedelta(days=100), contract_end=now + timedelta(days=300)))
+        db.commit()
+    mdm = cl.post("/api/insights/customers", json={"name": "MDM service", "description": "Master data management on TIBCO EBX: golden customer "
+                  "records and a reference data hub for banks, built on Microsoft Azure with data management and application development."},
+                  headers=A).json()
+    titles = [x["title"] for x in mdm["bought_before"]]
+    ok("specific evidence: the EBX golden-records award is found", any("TIBCO EBX" in t for t in titles), str(titles[:3]))
+    ok("common words alone (Azure, data management, application development) don't make a match",
+       not any(t.endswith("Microsoft Azure") for t in titles), str([t for t in titles if t.endswith("Microsoft Azure")][:3]))
     src = cl.get("/api/radar/sources", headers=A).json()
     ok("sources panel lists award sources", len(src.get("awards", [])) == 3, str(src.get("awards"))[:200])
 

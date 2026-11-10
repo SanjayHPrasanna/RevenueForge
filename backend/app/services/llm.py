@@ -196,7 +196,7 @@ def reset_state(all_keys: bool = True) -> None:
     with _state_lock:
         if all_keys:
             for st in _states.values():
-                st.update({"gemini_model": None, "disabled_reason": "", "embed_ok": None, "last_error": ""})
+                st.update({"gemini_model": None, "disabled_reason": "", "embed_ok": None, "last_error": "", "cooling": {}})
         else:
             _states.pop(current_profile().key, None)
 
@@ -259,6 +259,22 @@ def _gemini_pick_model(client: httpx.Client, p: Profile) -> str:
     return st["gemini_model"]
 
 
+COOL_SECONDS = 600  # how long a model Google called overloaded is skipped
+
+
+def _cooling(p: Profile) -> set[str]:
+    now = time.time()
+    hot = _st(p).setdefault("cooling", {})
+    for m in [m for m, until in hot.items() if until <= now]:
+        hot.pop(m, None)
+    return set(hot)
+
+
+def _cool_down(p: Profile, model: str | None) -> None:
+    if model and not p.gemini_model:
+        _st(p).setdefault("cooling", {})[model] = time.time() + COOL_SECONDS
+
+
 def _fast_thinking(model: str) -> list[dict]:
     """Thinking settings to try, in order, for a quick reply from this Gemini model."""
     m = re.search(r"gemini-(\d+)", model)
@@ -283,12 +299,18 @@ def _gemini_complete(p: Profile, system: str, prompt: str, max_tokens: int, temp
 def _gemini_call(p: Profile, system: str, prompt: str, max_tokens: int, temperature: float, want_json: bool,
                  timeout: float, fast: bool, alt: int) -> str:
     with httpx.Client(timeout=timeout) as client:
-        model = _gemini_pick_model(client, p)
-        if alt and not p.gemini_model:
-            backups = [m for m in _st(p).get("gemini_backups") or ["gemini-flash-lite-latest"] if m != model]
-            if backups:
-                model = backups[(alt - 1) % len(backups)]
-                log.info("Main Gemini model busy; trying %s", model)
+        model = main = _gemini_pick_model(client, p)
+        if not p.gemini_model:  # a model chosen in the settings is always used as chosen
+            # Models Google recently called overloaded (or out of quota) are skipped for a while; each retry moves one
+            # step down the list: the newest Flash, the previous Flash, then Flash-Lite.
+            chain = [main] + [m for m in _st(p).get("gemini_backups") or ["gemini-flash-lite-latest"] if m != main]
+            cool = _cooling(p)
+            ready = [m for m in chain if m not in cool] or chain
+            # a failure that put a model on the skip list has already moved us along; only other failures (timeouts) step on
+            step = max(0, alt - sum(1 for m in chain if m in cool))
+            model = ready[step % len(ready)]
+            if model != main:
+                log.info("Gemini %s is %s; using %s", main, "busy" if main in cool else "failing", model)
         body = {
             "systemInstruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
@@ -391,13 +413,13 @@ def complete(system: str, prompt: str, max_tokens: int = 4000, temperature: floa
     if st["disabled_reason"] and not api_key:
         raise LLMUnavailable(st["disabled_reason"])
     last = None
+    alt = 0  # which model in the fallback list to use: moves on after "overloaded", "out of quota" or a timeout
     for attempt in range(max(1, attempts)):
         _throttle(p)
         try:
             st["calls"] += 1
             if name == "gemini":
-                return _gemini_complete(p, system, prompt, max_tokens, temperature, want_json, timeout or 180, fast,
-                                        attempt if fast else 0)
+                return _gemini_complete(p, system, prompt, max_tokens, temperature, want_json, timeout or 180, fast, alt)
             return _other_complete(p, name, system, prompt, max_tokens, temperature, want_json)
         except _HttpError as e:
             last = e
@@ -413,6 +435,10 @@ def complete(system: str, prompt: str, max_tokens: int = 4000, temperature: floa
             elif e.retry_after and e.retry_after.isdigit():
                 wait = int(e.retry_after) + 1
             if e.status in (429, 500, 502, 503, 504):
+                if name == "gemini":
+                    _cool_down(p, st.get("last_model"))
+                    alt += 1
+                    wait = min(wait, 5)  # the next try goes to another model, so there is no need to wait long
                 if attempt + 1 >= attempts:
                     break
                 wait = min(wait, 65, max_wait)
@@ -423,6 +449,8 @@ def complete(system: str, prompt: str, max_tokens: int = 4000, temperature: floa
         except Exception as e:
             last = e
             log.warning("AI call failed (attempt %s): %s", attempt + 1, e)
+            if name == "gemini" and isinstance(e, TimeoutError):
+                alt += 1  # too slow: try the next model rather than the same one again
             if attempt + 1 < attempts:
                 time.sleep(min(3 * (attempt + 1), max_wait))
     st["failures"] += 1

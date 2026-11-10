@@ -110,13 +110,15 @@ def region_for(iso2: str = "", country_name: str = "") -> str:
 
 # --------------------------------------------------------------------------- helpers
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
-PHONE_RE = re.compile(r"(?:\+|\b00)?\d[\d\s().-]{7,}\d")
+PHONE_RE = re.compile(r"(?<![A-Za-z0-9/])(?:\+|\b00|\()?\d[\d\s().-]{7,}\d")  # not inside a code such as W8486-123456
 
 
 def _phone(m) -> str:
     raw = m.group(0)
     digits = sum(ch.isdigit() for ch in raw)
     if digits < 9 or re.fullmatch(r"\d{4}\s*[-–]\s*\d{2,4}", raw.strip()):  # years, date ranges, amounts
+        return raw
+    if re.fullmatch(r"\d{5,}-\d{5,}", raw.strip()):  # a solicitation or contract reference (24062-250123), not a phone number
         return raw
     return "[phone removed]"
 
