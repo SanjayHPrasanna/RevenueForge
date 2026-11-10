@@ -259,9 +259,29 @@ def _gemini_pick_model(client: httpx.Client, p: Profile) -> str:
     return st["gemini_model"]
 
 
+def _fast_thinking(model: str) -> list[dict]:
+    """Thinking settings to try, in order, for a quick reply from this Gemini model."""
+    m = re.search(r"gemini-(\d+)", model)
+    if m and int(m.group(1)) < 3:
+        return [{"thinkingBudget": 0}]
+    if m:
+        return [{"thinkingLevel": "minimal"}, {"thinkingLevel": "low"}]
+    return [{"thinkingLevel": "minimal"}, {"thinkingBudget": 0}]  # an alias such as gemini-flash-latest: version unknown
+
+
 def _gemini_complete(p: Profile, system: str, prompt: str, max_tokens: int, temperature: float, want_json: bool,
                      timeout: float = 180, fast: bool = False, alt: int = 0) -> str:
     """`alt` > 0 uses a stand-in model (for quick calls whose main model is overloaded)."""
+    model = "?"
+    try:
+        return _gemini_call(p, system, prompt, max_tokens, temperature, want_json, timeout, fast, alt)
+    except httpx.TimeoutException as e:
+        # Name the model, so the log says which one was too slow ("Maahi chat failed: gemini-x timed out after 20s").
+        raise TimeoutError(f"{_st(p).get('last_model') or model} timed out after {timeout:.0f}s") from e
+
+
+def _gemini_call(p: Profile, system: str, prompt: str, max_tokens: int, temperature: float, want_json: bool,
+                 timeout: float, fast: bool, alt: int) -> str:
     with httpx.Client(timeout=timeout) as client:
         model = _gemini_pick_model(client, p)
         if alt and not p.gemini_model:
@@ -276,18 +296,27 @@ def _gemini_complete(p: Profile, system: str, prompt: str, max_tokens: int, temp
         }
         if want_json:
             body["generationConfig"]["responseMimeType"] = "application/json"
+        _st(p)["last_model"] = model
         url = f"{settings.gemini_base_url}/models/{model}:generateContent"
-        if fast:  # quick replies (chat): skip the model's "thinking" step; models that can't switch it off get a normal call
-            fast_body = {**body, "generationConfig": {**body["generationConfig"], "thinkingConfig": {"thinkingBudget": 0}}}
-            r = client.post(url, headers=_gemini_headers(p), json=fast_body)
-            if r.status_code == 400:  # some models reject the switch (wording varies): ask again the normal way
+        if fast:
+            # Quick replies (chat) keep the model's "thinking" step as short as the model allows. Gemini 3 and later think
+            # at "high" unless told otherwise and use thinkingLevel; older models switch thinking off with thinkingBudget 0.
+            # A model that rejects one setting (400) gets the next, and finally a plain call.
+            r = None
+            for tc in _fast_thinking(model):
+                fast_body = {**body, "generationConfig": {**body["generationConfig"], "thinkingConfig": tc}}
+                r = client.post(url, headers=_gemini_headers(p), json=fast_body)
+                if r.status_code != 400:
+                    break
+                log.info("Gemini %s rejected thinkingConfig %s; trying the next setting", model, tc)
+            if r is None or r.status_code == 400:
                 r = client.post(url, headers=_gemini_headers(p), json=body)
         else:
             r = client.post(url, headers=_gemini_headers(p), json=body)
         if r.status_code == 404 and not p.gemini_model:
             _st(p)["gemini_model"] = None
         if r.status_code >= 400:
-            raise _HttpError(r.status_code, r.text, r.headers.get("retry-after"))
+            raise _HttpError(r.status_code, f"{model}: {r.text}", r.headers.get("retry-after"))
         data = r.json()
         cands = data.get("candidates") or []
         if not cands:

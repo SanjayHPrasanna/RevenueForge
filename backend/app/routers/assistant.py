@@ -94,12 +94,15 @@ def _check_rate_limit(client_ip: str):
 def _unavailable(e: Exception) -> HTTPException:
     """Say what actually went wrong, instead of calling every failure 'busy'."""
     m = str(e).lower()
-    if any(x in m for x in ("api key", "api_key", "permission", "401", "403", "unauthenticated", "invalid")):
+    if any(x in m for x in ("api key", "api_key", "permission_denied", "http 401", "http 403", "unauthenticated")):
         return HTTPException(503, "Maahi can't reach its AI service: the AI key isn't accepted. An admin needs to check it.")
-    if any(x in m for x in ("quota", "429", "resource_exhausted", "rate")):
+    if any(x in m for x in ("quota", "http 429", "resource_exhausted", "rate limit", "rate-limit")):
         return HTTPException(503, "Maahi has used up its AI allowance for now. Please try again later.")
     if any(x in m for x in ("timed out", "timeout", "deadline")):
         return HTTPException(503, "Maahi's AI service is taking too long to answer. Please try again in a minute.")
+    if "http 400" in m or "http 404" in m:
+        return HTTPException(503, "Maahi's AI service refused the request (a setup problem, not a busy service). An admin can see "
+                                  "the reason in the server log under 'Maahi chat failed'.")
     return HTTPException(503, "Maahi is busy right now (the AI service is overloaded). Please try again in a minute.")
 
 
@@ -121,8 +124,8 @@ def chat(body: ChatRequest, request: Request):
             max_tokens=500,
             temperature=0.45,
             api_key=key,
-            attempts=2,  # main model, then a lighter stand-in if Google says it's busy: about 30 seconds at most
-            timeout=13,
+            attempts=2,  # main model, then a lighter stand-in if Google says it's busy: about 40 seconds at most
+            timeout=20,
             max_wait=1,
             fast=True,
         )
@@ -154,8 +157,8 @@ def workspace_chat(body: ChatRequest, ctx: Ctx = Depends(current_ctx)):
             max_tokens=900,
             temperature=0.2,
             api_key=key,
-            attempts=2,  # at most about 45 seconds, then a clear "try again" instead of a spinner that never ends
-            timeout=20,
+            attempts=2,  # at most about 55 seconds, then a clear "try again" instead of a spinner that never ends
+            timeout=25,
             max_wait=1,
             fast=True,
         )
