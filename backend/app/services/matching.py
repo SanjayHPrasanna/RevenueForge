@@ -33,19 +33,22 @@ class CompanyKB:
         """tech -> {people, avg_level, capabilities, case_studies}"""
         inv: dict[str, dict] = defaultdict(lambda: {"people": 0, "levels": [], "capabilities": [], "case_studies": [], "available": 0})
         for e in self.employees:
+            held: dict[str, int] = {}
             for s in e.get("skills", []):
-                t = K.canonical_tech(s["name"])
-                if s.get("level", 0) >= 2:
+                for t in K.techs_in(s["name"]):
+                    held[t] = max(held.get(t, 0), s.get("level", 0))
+            for t, lvl in held.items():  # once per person, even if two of their skills name the same technology
+                if lvl >= 2:
                     inv[t]["people"] += 1
-                    inv[t]["levels"].append(s.get("level", 3))
+                    inv[t]["levels"].append(lvl)
                     if e.get("availability", 100) >= 50:
                         inv[t]["available"] += 1
         for c in self.capabilities:
-            for t in c.get("technologies", []):
-                inv[K.canonical_tech(t)]["capabilities"].append(c["name"])
+            for t in {x for name in c.get("technologies", []) for x in K.techs_in(name)}:
+                inv[t]["capabilities"].append(c["name"])
         for cs in self.case_studies:
-            for t in cs.get("technologies", []):
-                inv[K.canonical_tech(t)]["case_studies"].append(cs["title"])
+            for t in {x for name in cs.get("technologies", []) for x in K.techs_in(name)}:
+                inv[t]["case_studies"].append(cs["title"])
         out = {}
         for t, v in inv.items():
             out[t] = {"people": v["people"], "available": v["available"],
@@ -343,7 +346,8 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
         have = [t for t in req_techs if t in company_techs]
         missing = [t for t in req_techs if t not in company_techs]
         tech_cov = (len(have) / len(req_techs)) if req_techs else None
-        people = sorted({e["code"] for e in kb.employees for s in e.get("skills", []) if s["name"] in have and s.get("level", 0) >= 3})
+        people = sorted({e["code"] for e in kb.employees for s in e.get("skills", [])
+                         if s.get("level", 0) >= 3 and K.techs_in(s["name"]) & set(have)})
 
         industry_bonus = 0.04 if industry and any(industry.lower() in " ".join(c.get("industries", [])).lower() for c in caps) else 0
         if tech_cov is None:
@@ -476,8 +480,10 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
 
 JUDGE_SYSTEM = ("You are the bid director of an IT services company deciding, requirement by requirement, whether the company can deliver. "
                 "Judge ONLY from the evidence listed for each requirement (the company's capabilities, case studies, accelerators, certifications "
-                "and people). Never assume a capability, product or certification that is not listed. Be strict but fair: a capability in the same "
-                "domain with relevant people is 'partial' unless the evidence clearly covers it.")
+                "and people, each with what it covers). Never assume a capability, product or certification that is not listed. "
+                "'strong' = the listed evidence covers what the requirement asks (the named technology or practice appears in a capability, "
+                "case study or accelerator, or skilled people hold it). 'partial' = related evidence that covers only part of it. "
+                "'gap' = nothing listed covers it. Do not mark a requirement down only because the evidence is worded differently.")
 
 
 def ai_judge(reqs: list[dict], kb: CompanyKB, inv: dict, guidance: str = "", progress=None) -> None:
@@ -485,6 +491,14 @@ def ai_judge(reqs: list[dict], kb: CompanyKB, inv: dict, guidance: str = "", pro
     todo = [r for r in reqs if r["category"] != "Commercial" and r.get("subcategory") not in CONFIRM_SUBS and r["match_status"] != "confirm"
             and r["match"].get("judged_by") != "register"]  # certificate checks are facts, not judgement
     certs = [c["name"] for c in kb.certifications]
+    # What each piece of evidence covers, so the judge isn't deciding from a capability's name alone.
+    covers: dict[str, str] = {}
+    for c in kb.capabilities:
+        covers[c["name"]] = "; ".join(x for x in (", ".join(c.get("technologies", [])[:8]), (c.get("description") or "")[:140]) if x)
+    for c in kb.case_studies:
+        covers[c["title"]] = "; ".join(x for x in (", ".join(c.get("technologies", [])[:6]), c.get("industry", ""), (c.get("summary") or "")[:120]) if x)
+    for a in kb.accelerators:
+        covers[a["name"]] = "; ".join(x for x in (", ".join(a.get("technologies", [])[:6]), (a.get("description") or "")[:120]) if x)
     batches = [todo[i:i + 18] for i in range(0, len(todo), 18)]
     for n, chunk in enumerate(batches, start=1):
         if progress:
@@ -493,8 +507,9 @@ def ai_judge(reqs: list[dict], kb: CompanyKB, inv: dict, guidance: str = "", pro
         for k, r in enumerate(chunk):
             ev = [e["name"] for e in r["match"]["evidence"][:4]]
             allowed.append(set(ev) | set(certs))
+            ev_text = " | ".join(f"{e} ({covers[e]})" if covers.get(e) else e for e in ev)
             ppl = "; ".join(f"{t}: {inv[t]['people']} people (avg level {inv[t]['avg_level']})" for t in r.get("technologies", []) if t in inv) or "none listed"
-            lines.append(f"[{k}] {r['text'][:420]}\n  candidate evidence: {' | '.join(ev) or 'none'}\n  people with named technologies: {ppl}\n"
+            lines.append(f"[{k}] {r['text'][:420]}\n  candidate evidence: {ev_text or 'none'}\n  people with named technologies: {ppl}\n"
                          f"  technologies not in company inventory: {', '.join(r['match']['technologies_missing']) or 'none'}")
         prompt = (f"Company certifications: {', '.join(certs) or 'none'}\n\nRequirements:\n" + "\n".join(lines) +
                   '\n\nReturn a JSON array, one object per requirement: {"i": index, "status": "strong|partial|gap", "score": 0-100, '

@@ -15,6 +15,7 @@ const STEPS = [
   { key: "certifications", title: "Certifications" },
   { key: "rates", title: "Rate card" },
   { key: "case_studies", title: "Case studies" },
+  { key: "accelerators", title: "Accelerators & IP" },
   { key: "template", title: "Proposal template" },
 ];
 

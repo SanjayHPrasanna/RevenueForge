@@ -49,7 +49,7 @@ export default function SettingsPage() {
         <div className="flex flex-wrap gap-4">
           {[["target_margin", "Target margin"], ["min_margin", "Margin floor"], ["travel_pct", "Travel & living (% of onsite cost)"]].map(([k, l]) => (
             <label key={k} className="text-[13px]"><span className="label">{l}</span>
-              <div className="relative"><input className="input w-32 num pr-7" type="number" value={s[k]} onChange={(e) => setS({ ...s, [k]: Number(e.target.value) })} disabled={!isAdmin} /><span className="absolute right-2.5 top-2.5 text-ink-faint text-[12px]">%</span></div>
+              <div className="relative"><input className="input w-32 num pr-7" type="number" aria-label={`${l} (%)`} value={s[k]} onChange={(e) => setS({ ...s, [k]: Number(e.target.value) })} disabled={!isAdmin} /><span className="absolute right-2.5 top-2.5 text-ink-faint text-[12px]">%</span></div>
             </label>
           ))}
         </div>

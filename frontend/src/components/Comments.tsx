@@ -3,18 +3,11 @@ import clsx from "clsx";
 import { AtSign, MessageSquare, Send, Trash2 } from "lucide-react";
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { api } from "../lib/api";
+import { ago } from "../lib/format";
 import { Spinner, useToast } from "./ui";
 
 type Comment = { id: string; author: string; text: string; created_at: string; mine: boolean };
 type Person = { id: string; name: string; email: string; role: string; active: boolean };
-
-function ago(iso: string) {
-  const s = (Date.now() - new Date(iso).getTime()) / 1000;
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
-}
 
 const handle = (p: Person) => p.email.split("@")[0];
 
@@ -117,7 +110,7 @@ export function CommentsPanel({ dealId, req }: { dealId: string; req: any }) {
           </ul>
         )}
         <div className="flex items-end gap-2 rounded-2xl border border-line bg-paper px-3 py-2 transition-all focus-within:border-brand-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-brand-500/10">
-          <label className="sr-only" htmlFor={`c-${req.id}`}>Comment on {req.code}</label>
+          <label className="sr-only" htmlFor={`c-${req.id}`}>Comment on {req.source_ref || req.code}</label>
           <textarea id={`c-${req.id}`} ref={box} rows={2} value={text} placeholder={`Comment on ${req.source_ref || req.code}… (@ to mention)`}
             onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); }} onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
             onClick={(e) => setCaret(e.currentTarget.selectionStart)} onKeyDown={onKey}

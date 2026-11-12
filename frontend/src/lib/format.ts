@@ -59,3 +59,9 @@ export const CAT_STYLE: Record<string, string> = {
   Commercial: "bg-ember-50 text-ember-600",
 };
 export const CATEGORIES = ["Functional", "Non-functional", "Compliance", "Commercial"];
+
+
+/** "1 person", "3 people", "1 engineer", "2 engineers". */
+export function plural(n: number, one: string, many?: string): string {
+  return `${n} ${n === 1 ? one : many || `${one}s`}`;
+}

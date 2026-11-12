@@ -94,6 +94,9 @@ function TemplateTab() {
   );
 }
 
+/** "Accelerators & IP" -> "accelerators & IP": lower-case for use mid-sentence, but acronyms stay as they are. */
+const lowerTitle = (t: string) => t.split(" ").map((w) => (/^[A-Z]{2,}$/.test(w) ? w : w.toLowerCase())).join(" ");
+
 export default function Library() {
   const { kind = "capabilities" } = useParams();
   const folderInput = useRef<HTMLInputElement>(null);
@@ -156,10 +159,10 @@ export default function Library() {
               <div className="relative flex-1 min-w-[200px] max-w-sm"><Search className="h-4 w-4 absolute left-2.5 top-2.5 text-ink-faint" /><input className="input h-9 pl-8" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} /></div>
               <span className="text-[13px] text-ink-muted num">{rows.length} of {data?.length ?? 0}</span>
               <div className="flex-1" />
-              <button className="btn-primary" onClick={() => setUp(true)}><Upload className="h-4 w-4" /> Upload {KIND_INFO[kind].title.toLowerCase()}</button>
+              <button className="btn-primary" onClick={() => setUp(true)}><Upload className="h-4 w-4" /> Upload {lowerTitle(KIND_INFO[kind].title)}</button>
             </div>
             {isLoading ? <PageLoader /> : !rows.length ? (
-              <Empty title={data?.length ? "Nothing matches your search" : `No ${KIND_INFO[kind].title.toLowerCase()} yet`} action={!data?.length && <button className="btn-primary" onClick={() => setUp(true)}>Upload</button>}>
+              <Empty title={data?.length ? "Nothing matches your search" : `No ${lowerTitle(KIND_INFO[kind].title)} yet`} action={!data?.length && <button className="btn-primary" onClick={() => setUp(true)}>Upload</button>}>
                 {!data?.length && KIND_INFO[kind].what}
               </Empty>
             ) : (
@@ -185,7 +188,7 @@ export default function Library() {
         <FolderImport onDone={() => { setFolder(false); setDriveSync(null); qc.invalidateQueries({ queryKey: ["drive"] }); }} compact autoStartFiles={pickedFiles} driveSync={driveSync} />
       </Modal>
       {drive && <GoogleDriveImport onClose={() => setDrive(false)} onImported={() => { setDrive(false); setFolder(true); }} />}
-      <Modal open={up} onClose={() => setUp(false)} title={`Upload ${KIND_INFO[kind]?.title.toLowerCase()}`} wide>
+      <Modal open={up} onClose={() => setUp(false)} title={`Upload ${lowerTitle(KIND_INFO[kind]?.title || "")}`} wide>
         {kind !== "template" && <UploadReview kind={kind} onImported={() => setTimeout(() => setUp(false), 900)} />}
       </Modal>
     </div>

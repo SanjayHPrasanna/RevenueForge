@@ -118,7 +118,8 @@ def context(db: Session, deal: Deal) -> dict:
     cases = sorted(kb.case_studies, key=lambda c: (c["title"] not in cited, cited.index(c["title"]) if c["title"] in cited else 99))
     return {
         "deal": {"id": deal.id, "name": mask(deal.name), "client_display": (deal.client_alias or "the Client") if deal.confidential else (deal.client_name or "the Client"),
-                 "engagement_type": deal.engagement_type, "doc_type": deal.doc_type, "industry": deal.industry, "region": deal.region},
+                 "engagement_type": deal.engagement_type, "doc_type": deal.doc_type, "industry": deal.industry, "region": deal.region,
+                 "show_names": not (tenant.settings or {}).get("hide_employee_names", True)},
         "company": {"name": tenant.name, "about": tenant.about},
         "meta": mask(deal.meta or {}),
         "requirements": mask(reqs),

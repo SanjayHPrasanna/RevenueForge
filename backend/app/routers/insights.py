@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+import time
 from collections import Counter, defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -16,13 +17,56 @@ from ..services.masking import deal_masker
 router = APIRouter(prefix="/api", tags=["insights"])
 
 
+_AGG: dict[str, tuple] = {}  # tenant -> (fingerprint, saved at, aggregates)
+
+
+def _req_aggregates(ctx, tid: str, deals) -> dict:
+    """Counts over every requirement of the company. Reading them means decoding each one's match details, which grows
+    with every deal, so the result is kept until a requirement or deal changes (checked with one cheap query), or 5 min."""
+    from sqlalchemy import case
+    fp = tuple(ctx.db.execute(select(func.count(), func.sum(case((Requirement.verified, 1), else_=0)), func.count(Requirement.match_status),
+                                     func.sum(case((Requirement.category == Requirement.original_category, 1), else_=0)),
+                                     func.sum(func.length(Requirement.category)),
+                                     *[func.sum(case((Requirement.match_status == m, 1), else_=0)) for m in ("strong", "partial", "gap", "confirm")])
+                              .where(Requirement.tenant_id == tid)).one())
+    fp += (len(deals), max((str(d.updated_at) for d in deals), default=""))
+    hit = _AGG.get(tid)
+    if hit and hit[0] == fp and time.time() - hit[1] < 300:
+        return hit[2]
+    # Only the columns this page counts: loading whole requirement rows decoded every JSON field of every requirement.
+    reqs = ctx.db.execute(select(Requirement.deal_id, Requirement.category, Requirement.original_category, Requirement.match_status,
+                                 Requirement.verified, Requirement.match).where(Requirement.tenant_id == tid)).all()
+    per_deal = defaultdict(Counter)
+    for r in reqs:
+        if r.match_status:
+            per_deal[r.deal_id][r.match_status] += 1
+    cat = Counter(r.category for r in reqs)
+    match = Counter(r.match_status for r in reqs if r.match_status)
+    reviewed = [r for r in reqs if r.verified]
+    acc = round(sum(1 for r in reviewed if r.category == r.original_category) / len(reviewed) * 100, 1) if reviewed else None
+    missing = Counter()
+    for r in reqs:
+        for t in (r.match or {}).get("technologies_missing", []):
+            missing[t] += 1
+    demand = Counter()
+    for r in reqs:
+        for e in (r.match or {}).get("evidence", [])[:1]:
+            if e["type"] == "Capability":
+                demand[e["name"]] += 1
+
+    per_deal = {k: dict(v) for k, v in per_deal.items()}
+    out = {"per_deal": per_deal, "cat": dict(cat), "match": dict(match), "missing": missing, "demand": demand, "total": len(reqs),
+           "reviewed": len(reviewed), "acc": acc}
+    _AGG[tid] = (fp, time.time(), out)
+    return out
+
+
 @router.get("/dashboard")
 def dashboard(ctx: Ctx = Depends(current_ctx)):
     tid = ctx.tenant_id
     deals = ctx.db.scalars(select(Deal).where(Deal.tenant_id == tid).order_by(Deal.created_at.desc())).all()
-    stages = defaultdict(dict)
-    for s in ctx.db.scalars(select(DealStage).where(DealStage.tenant_id == tid)):
-        stages[s.deal_id][s.stage] = s
+    from .deals import _summaries
+    pre = _summaries(ctx, [d.id for d in deals])  # statuses for every stage, content only for pricing and gaps
     pipeline_value = 0.0
     weighted = 0.0
     rows = []
@@ -30,16 +74,16 @@ def dashboard(ctx: Ctx = Depends(current_ctx)):
     readiness = []
     first_draft = []
     for d in deals:
-        st = stages.get(d.id, {})
-        pr = st.get("pricing").data if "pricing" in st else {}
-        g = st.get("gaps").data if "gaps" in st else {}
+        st = pre[d.id]["stages"]
+        pr = pre[d.id]["pricing"]
+        g = pre[d.id]["gaps"]
         sel = next((s for s in pr.get("scenarios", []) if s["name"] == pr.get("selected", "Target")), None) if pr else None
         base = pr.get("currency") or ctx.tenant.currency or "USD"
         price = sel["price"] if sel else 0
         # pipeline totals in the company's currency; each deal shown in its RFP's currency
         val_usd = price / FX_PER_USD.get(base, 1) * FX_PER_USD.get(ctx.tenant.currency or "USD", 1)
         deal_val, deal_ccy = price * pr.get("fx_to_rfp", 1), pr.get("rfp_currency") or base
-        if d.status not in ("lost", "no_bid"):
+        if d.status not in ("won", "lost", "no_bid"):  # the pipeline is open deals; a decided deal has left it
             pipeline_value += val_usd
             weighted += val_usd * (g.get("mitigated_readiness", 50) / 100)
         if g.get("readiness") is not None:
@@ -58,26 +102,11 @@ def dashboard(ctx: Ctx = Depends(current_ctx)):
     for row in rows:
         oid = owner_of.get(row["id"])
         row["owner"] = {"id": oid, "name": names[oid]} if oid in names else None
-    reqs = ctx.db.scalars(select(Requirement).where(Requirement.tenant_id == tid)).all()
-    per_deal = defaultdict(Counter)
-    for r in reqs:
-        if r.match_status:
-            per_deal[r.deal_id][r.match_status] += 1
+    agg = _req_aggregates(ctx, tid, deals)
     for row in rows:
-        row["match_mix"] = dict(per_deal.get(row["id"], {}))
-    cat = Counter(r.category for r in reqs)
-    match = Counter(r.match_status for r in reqs if r.match_status)
-    reviewed = [r for r in reqs if r.verified]
-    acc = round(sum(1 for r in reviewed if r.category == r.original_category) / len(reviewed) * 100, 1) if reviewed else None
-    missing = Counter()
-    for r in reqs:
-        for t in (r.match or {}).get("technologies_missing", []):
-            missing[t] += 1
-    demand = Counter()
-    for r in reqs:
-        for e in (r.match or {}).get("evidence", [])[:1]:
-            if e["type"] == "Capability":
-                demand[e["name"]] += 1
+        row["match_mix"] = agg["per_deal"].get(row["id"], {})
+    cat, match, missing, demand = agg["cat"], agg["match"], agg["missing"], agg["demand"]
+    reviewed_n, acc, req_total = agg["reviewed"], agg["acc"], agg["total"]
     won = status_counts.get("won", 0)
     lost = status_counts.get("lost", 0)
     team = ctx.db.scalar(select(func.count()).select_from(Employee).where(Employee.tenant_id == tid))
@@ -85,10 +114,10 @@ def dashboard(ctx: Ctx = Depends(current_ctx)):
     return {
         "kpis": {"deals": len(deals), "active": sum(1 for d in deals if d.status in ("processing", "in_review", "submitted")),
                  "pipeline_value": round(pipeline_value, 2), "weighted_pipeline": round(weighted, 2), "currency": ctx.tenant.currency,
-                 "requirements": len(reqs), "avg_readiness": round(sum(readiness) / len(readiness)) if readiness else None,
+                 "requirements": req_total, "avg_readiness": round(sum(readiness) / len(readiness)) if readiness else None,
                  "avg_first_draft_seconds": round(sum(first_draft) / len(first_draft), 1) if first_draft else None,
                  "win_rate": round(won / (won + lost) * 100) if (won + lost) else None, "won": won, "lost": lost,
-                 "classification_accuracy": acc, "reviewed": len(reviewed), "people": team, "available_people": bench},
+                 "classification_accuracy": acc, "reviewed": reviewed_n, "people": team, "available_people": bench},
         "deals": rows[:50],
         "status_counts": dict(status_counts),
         "requirement_categories": dict(cat),
@@ -142,7 +171,12 @@ def win_loss(ctx: Ctx = Depends(current_ctx)):
         g, pr = stages[d.id].get("gaps", {}), stages[d.id].get("pricing", {})
         sel = next((s for s in pr.get("scenarios", []) if s["name"] == pr.get("selected", "Target")), None) if pr else None
         base = pr.get("currency") or ccy
-        value = (sel["price"] / FX_PER_USD.get(base, 1) * FX_PER_USD.get(ccy, 1)) if sel else (d.final_value or 0)
+        if d.final_value and d.status in ("won", "lost"):
+            # the contract value recorded at the outcome (entered in the RFP's currency) beats the price we proposed
+            rccy = pr.get("rfp_currency") or base
+            value = d.final_value / FX_PER_USD.get(rccy, 1) * FX_PER_USD.get(ccy, 1)
+        else:
+            value = (sel["price"] / FX_PER_USD.get(base, 1) * FX_PER_USD.get(ccy, 1)) if sel else (d.final_value or 0)
         mask = deal_masker(d)
         rows.append({"id": d.id, "name": mask(d.name), "client": d.client_alias if d.confidential else d.client_name, "status": d.status,
                      "industry": d.industry or "Not set", "engagement_type": d.engagement_type or "not_set", "value": round(value),

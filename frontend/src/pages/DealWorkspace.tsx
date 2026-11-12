@@ -1,14 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { ArrowLeft, Check, ChevronDown, Download, EyeOff, Mail, RefreshCw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Modal, PageLoader, Spinner, StageStatus, useToast } from "../components/ui";
 import { useAuthConfig } from "../components/GoogleButton";
 import { ApiError, api, download } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { ENGAGEMENT, money, STAGES } from "../lib/format";
+import { ENGAGEMENT, money, plural, STAGES } from "../lib/format";
 import { DealStatus } from "./Dashboard";
+import { prefetchStages } from "../lib/prefetch";
 import { DueDate, LeftToFix, OwnerPicker, ReviewNotes } from "../components/review";
 import { OverviewStage } from "./Overview";
 import { ArchitectureStage, EstimationStage, GapsStage, HandoffStage, MatchingStage, PricingStage, ProposalStage, RequirementsStage } from "./stages";
@@ -44,7 +45,7 @@ function useMetrics(deal: any) {
       matching: deal.coverage_pct != null ? `${deal.coverage_pct}% covered` : "",
       gaps: gaps == null ? "" : gaps ? `${gaps} gap${gaps === 1 ? "" : "s"}` : partial ? `${partial} to mitigate` : "No gaps",
       architecture: "",
-      estimation: e?.headcount ? `${e.headcount} people` : "",
+      estimation: e?.headcount ? plural(e.headcount, "person", "people") : "",
       pricing: deal.value ? money(deal.value, deal.value_currency) : "",
       proposal: answers ? `${answers} answers` : "",
       handoff: "",
@@ -103,7 +104,7 @@ function Standfirst({ deal, est }: { deal: any; est: any }) {
   parts.push(`Bid readiness is ${deal.readiness}% today and ${deal.mitigated_readiness}% with the mitigation plan.`);
   if (deal.value) {
     let s = `Priced at ${money(deal.value, deal.value_currency)} with a ${deal.margin_pct}% margin`;
-    if (est?.headcount) s += `, delivered by ${est.headcount} people over ${est.contract_months || est.duration_months} months`;
+    if (est?.headcount) s += `, delivered by ${plural(est.headcount, "person", "people")} over ${est.contract_months || est.duration_months} months`;
     parts.push(s + ".");
   }
   return <p className="font-display text-[17px] md:text-[19px] leading-snug text-ink-soft mt-3 max-w-[72ch]">{parts.join(" ")}</p>;
@@ -153,6 +154,9 @@ export default function DealWorkspace() {
     queryFn: () => api.get(`/deals/${id}`),
     refetchInterval: (q) => ((q.state.data as any)?.status === "processing" ? 1200 : false),
   });
+  const qc = useQueryClient();
+  const ready = deal && (deal as any).status !== "processing";
+  useEffect(() => { if (ready && id) prefetchStages(qc, id); }, [ready, id]);
   if (isLoading || !deal) return <PageLoader />;
   return <Workspace deal={deal} stage={stage} />;
 }
@@ -172,9 +176,9 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
         return await api.post(`/deals/${id}/stages/${stage}/approve`);
       } catch (e) {
         if (e instanceof ApiError && e.status === 409 && confirm(`${e.message}\n\nApprove this stage anyway?`)) {
-          return api.post(`/deals/${id}/stages/${stage}/approve`, { despite_open_notes: true });
+          return api.post(`/deals/${id}/stages/${stage}/approve`, { despite_open_notes: true, despite_over_budget: true });
         }
-        if (e instanceof ApiError && e.status === 409) throw new Error("Not approved. Resolve the open review notes first.");
+        if (e instanceof ApiError && e.status === 409) throw new Error("Not approved.");
         throw e;
       }
     },
@@ -228,7 +232,7 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
         </div>
         <div className="flex gap-2 relative">
           <button className="btn-outline" onClick={() => setMenu(menu === "dl" ? null : "dl")} disabled={processing}><Download className="h-4 w-4" /> Download <ChevronDown className="h-3.5 w-3.5" /></button>
-          <button className="btn-outline" onClick={() => setMenu(menu === "outcome" ? null : "outcome")}>Outcome <ChevronDown className="h-3.5 w-3.5" /></button>
+          <button className="btn-outline" aria-haspopup="menu" aria-expanded={menu === "outcome"} onClick={() => setMenu(menu === "outcome" ? null : "outcome")}>Outcome <ChevronDown className="h-3.5 w-3.5" /></button>
           {menu === "dl" && (
             <div className="absolute right-24 top-10 z-20 card shadow-lift w-72 py-1 text-sm" onMouseLeave={() => setMenu(null)}>
               {[["proposal", "Proposal (.docx)"], ["proposal_pack", "Proposal + solution video (.zip)"], ["story", "Solution video (.mp4)"], ["handoff", "Delivery handoff (.docx)"], ["requirements", "Requirements & compliance (.xlsx)"]].map(([k, l]) => (
@@ -237,17 +241,19 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
             </div>
           )}
           {menu === "outcome" && (
-            <div className="absolute right-0 top-10 z-20 card shadow-lift w-56 py-1 text-sm" onMouseLeave={() => setMenu(null)}>
+            <div role="menu" aria-label="Outcome" className="absolute right-0 top-10 z-20 card shadow-lift w-56 py-1 text-sm" onMouseLeave={() => setMenu(null)}>
               {[["submitted", "Mark as submitted"], ["won", "Mark as won"], ["lost", "Mark as lost"], ["no_bid", "Decided not to bid"]].map(([k, l]) => (
-                <button key={k} className="w-full text-left px-3 py-2 hover:bg-paper" onClick={() => {
+                <button key={k} role="menuitem" className="w-full text-left px-3 py-2 hover:bg-paper" onClick={() => {
                   setMenu(null);
-                  if (k === "won" || k === "lost") setOutcome({ status: k, final_value: deal.final_value ? String(deal.final_value) : "", actual_effort_days: "", outcome_notes: deal.outcome_notes || "" });
-                  else update.mutate({ status: k });
+                  if (k === "won" || k === "lost") {
+                    update.reset();
+                    setOutcome({ status: k, final_value: deal.final_value ? String(deal.final_value) : "", actual_effort_days: "", outcome_notes: deal.outcome_notes || "" });
+                  } else update.mutate({ status: k });
                 }}>{l}</button>
               ))}
               <div className="border-t border-line-soft my-1" />
-              <button className="w-full text-left px-3 py-2 hover:bg-paper flex items-center gap-2" onClick={() => { setMenu(null); rerun.mutate("requirements"); }}><RefreshCw className="h-3.5 w-3.5" /> Re-run from the start</button>
-              <button className="w-full text-left px-3 py-2 hover:bg-paper text-fit-gap-ink flex items-center gap-2" onClick={() => confirm("Delete this deal and its outputs? This can't be undone.") && del.mutate()}><Trash2 className="h-3.5 w-3.5" /> Delete deal</button>
+              <button role="menuitem" className="w-full text-left px-3 py-2 hover:bg-paper flex items-center gap-2" onClick={() => { setMenu(null); rerun.mutate("requirements"); }}><RefreshCw className="h-3.5 w-3.5" /> Re-run from the start</button>
+              <button role="menuitem" className="w-full text-left px-3 py-2 hover:bg-paper text-fit-gap-ink flex items-center gap-2" onClick={() => confirm("Delete this deal and its outputs? This can't be undone.") && del.mutate()}><Trash2 className="h-3.5 w-3.5" /> Delete deal</button>
             </div>
           )}
         </div>
@@ -255,7 +261,7 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
 
       <Modal open={!!outcome} onClose={() => setOutcome(null)} title={outcome?.status === "won" ? "Record a win" : "Record a loss"}>
         {outcome && (
-          <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); update.mutate({ status: outcome.status, final_value: outcome.final_value || 0, outcome_notes: outcome.outcome_notes, ...(outcome.actual_effort_days ? { actual_effort_days: outcome.actual_effort_days } : {}) }); setOutcome(null); }}>
+          <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); update.mutate({ status: outcome.status, final_value: outcome.final_value || 0, outcome_notes: outcome.outcome_notes, ...(outcome.actual_effort_days ? { actual_effort_days: outcome.actual_effort_days } : {}) }, { onSuccess: () => setOutcome(null) }); }}>
             <p className="text-[13px] text-ink-muted">RevenueForge learns from outcomes: answers from wins rank higher, and actual effort calibrates future estimates.</p>
             {outcome.status === "won" && (
               <div className="grid grid-cols-2 gap-3">
@@ -264,7 +270,8 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
               </div>
             )}
             <div><label className="label">{outcome.status === "won" ? "Why we won" : "Why we lost"}</label><textarea className="input h-20 py-2" value={outcome.outcome_notes} onChange={(e) => setOutcome({ ...outcome, outcome_notes: e.target.value })} placeholder={outcome.status === "won" ? "e.g. strongest references, best transition plan" : "e.g. price, missing certification"} /></div>
-            <button className="btn-primary">Save outcome</button>
+            {update.isError && <div role="alert" className="text-[13px] text-rose-700">{(update.error as any)?.message}</div>}
+            <button className="btn-primary" disabled={update.isPending}>Save outcome</button>
           </form>
         )}
       </Modal>

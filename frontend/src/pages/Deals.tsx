@@ -7,6 +7,7 @@ import { api } from "../lib/api";
 import { ago, ENGAGEMENT, money } from "../lib/format";
 import { DealStatus } from "./Dashboard";
 import { OwnerTag } from "../components/review";
+import { prefetchDeal } from "../lib/prefetch";
 
 function NewDeal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
@@ -88,10 +89,11 @@ function NewDeal({ open, onClose }: { open: boolean; onClose: () => void }) {
           </div>
           <div className="rounded-md border border-line p-3.5">
             <label className="flex items-start gap-3 cursor-pointer">
-              <input type="checkbox" className="mt-1 h-4 w-4 accent-[#118AC3]" checked={f.confidential} onChange={set("confidential")} />
+              <input type="checkbox" className="mt-1 h-4 w-4 accent-[#118AC3]" checked={f.confidential} onChange={set("confidential")}
+                aria-label="Keep the client confidential" aria-describedby="conf-help" />
               <span>
                 <span className="font-semibold text-sm flex items-center gap-1.5"><EyeOff className="h-4 w-4 text-brand-600" /> Keep the client confidential</span>
-                <span className="block text-[12.5px] text-ink-muted mt-0.5">The client's names are replaced with an alias on every screen, in AI prompts and in generated documents.</span>
+                <span id="conf-help" className="block text-[12.5px] text-ink-muted mt-0.5">The client's names are replaced with an alias on every screen, in AI prompts and in generated documents.</span>
               </span>
             </label>
             {f.confidential && (
@@ -127,7 +129,10 @@ function NewDeal({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 export default function Deals() {
   const [sp, setSp] = useSearchParams();
-  const { data, isLoading } = useQuery({ queryKey: ["deals"], queryFn: () => api.get("/deals"), refetchInterval: 5000 });
+  const qc = useQueryClient();
+  // Refresh every few seconds only while a deal is being worked on; otherwise once a minute.
+  const { data, isLoading } = useQuery({ queryKey: ["deals"], queryFn: () => api.get("/deals"),
+    refetchInterval: (q) => (((q.state.data as any[]) || []).some((d) => d.status === "processing") ? 3000 : 60000) });
   const open = sp.get("new") === "1";
   return (
     <div className="px-4 lg:px-8 py-6 max-w-[1400px]">
@@ -155,7 +160,7 @@ export default function Deals() {
               {data.map((d: any) => (
                 <tr key={d.id} className="hover:bg-paper">
                   <td className="td max-w-[420px]">
-                    <div className="flex items-center gap-2 min-w-0"><Link to={`/app/deals/${d.id}`} className="font-semibold hover:text-brand-700 line-clamp-1 min-w-0">{d.name}</Link><OwnerTag owner={d.owner} className="shrink-0" />{d.open_notes > 0 && <span className="chip bg-ember-100 text-ember-600 shrink-0" title="Open review notes">{d.open_notes} to fix</span>}</div>
+                    <div className="flex items-center gap-2 min-w-0"><Link to={`/app/deals/${d.id}`} onMouseEnter={() => prefetchDeal(qc, d.id)} className="font-semibold hover:text-brand-700 line-clamp-1 min-w-0">{d.name}</Link><OwnerTag owner={d.owner} className="shrink-0" />{d.open_notes > 0 && <span className="chip bg-ember-100 text-ember-600 shrink-0" title="Open review notes">{d.open_notes} to fix</span>}</div>
                     <div className="text-[12px] text-ink-muted flex items-center gap-1">
                       {d.confidential && <EyeOff className="h-3 w-3" />} {d.client} · {d.industry || "—"}{d.region ? ` · ${d.region}` : ""}
                     </div>

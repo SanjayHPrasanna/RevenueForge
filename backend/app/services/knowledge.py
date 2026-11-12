@@ -146,7 +146,8 @@ def priority(text: str) -> str:
 TECHNOLOGIES: dict[str, list[str]] = {
     # integration platforms
     "Rhapsody": ["rhapsody"], "MuleSoft": ["mulesoft", "mule esb", "anypoint"], "Boomi": ["boomi"], "TIBCO": ["tibco"],
-    "Workato": ["workato"], "Apigee": ["apigee"], "Azure Integration Services": ["azure integration", "logic apps", "azure service bus"],
+    "Workato": ["workato"], "Apigee": ["apigee"], "Azure API Management": ["azure api management", "azure apim", "apim"],
+    "AWS API Gateway": ["aws api gateway", "amazon api gateway"], "Azure Integration Services": ["azure integration", "logic apps", "azure service bus"],
     "WSO2": ["wso2"], "IBM App Connect": ["ibm app connect", "ibm integration bus", "iib"], "Kafka": ["kafka"], "RabbitMQ": ["rabbitmq"],
     "Kong": ["kong gateway", "kong"], "Mirth Connect": ["mirth"], "Postman": ["postman"], "Neo4j": ["neo4j"], "Confluence": ["confluence"], "Informatica": ["informatica"], "SAP PI/PO": ["sap pi", "sap po", "sap cpi"],
     # healthcare
@@ -204,12 +205,24 @@ def find_technologies(text: str, extra: list[str] | None = None) -> list[str]:
     return found
 
 
+VENDOR_PREFIX_RE = re.compile(r"^(apache|confluent|the)\s+", re.I)
+
+
 def canonical_tech(name: str) -> str:
-    n = name.strip().lower()
-    for canon, aliases in TECHNOLOGIES.items():
-        if n == canon.lower() or n in aliases:
-            return canon
+    """One name per technology for matching: "Apache Kafka", "kafka" and "Kafka" are all "Kafka"."""
+    n = re.sub(r"\s+", " ", name.strip().lower())
+    for cand in (n, VENDOR_PREFIX_RE.sub("", n)):
+        for canon, aliases in TECHNOLOGIES.items():
+            if cand == canon.lower() or cand in aliases:
+                return canon
     return name.strip()
+
+
+def techs_in(name: str) -> set[str]:
+    """Every technology a listed name stands for: itself, plus any known technology it names ("Java and Spring Boot")."""
+    if not name or not name.strip():
+        return set()
+    return {canonical_tech(name)} | set(find_technologies(name))
 
 
 # --------------------------------------------------------------------------- synonyms for matching
@@ -275,7 +288,7 @@ def normalize_role(title: str) -> str:
 # Technology families: used to tell "we know the neighbourhood" (upskill) from "new territory" (hire/partner).
 FAMILIES: dict[str, list[str]] = {
     "Integration platforms": ["Rhapsody", "Mirth Connect", "MuleSoft", "Boomi", "TIBCO", "Workato", "WSO2", "IBM App Connect", "Azure Integration Services",
-                              "SAP PI/PO", "Informatica", "Kafka", "RabbitMQ", "Apigee", "Kong"],
+                              "SAP PI/PO", "Informatica", "Kafka", "RabbitMQ", "Apigee", "Kong", "Azure API Management", "AWS API Gateway"],
     "Healthcare standards": ["HL7 v2", "HL7 FHIR", "IHE", "DICOM", "MLLP", "EHR/EMR", "HIS", "LIS", "RIS", "PACS"],
     "Cloud & infrastructure": ["Microsoft Azure", "AWS", "Google Cloud", "Kubernetes", "Docker", "Terraform", "Linux", "Windows Server", "VMware"],
     "Fraud & identity intelligence": ["Behavioral Biometrics", "Device Fingerprinting", "Geolocation Intelligence", "Bot Detection", "Fraud Monitoring Platform",

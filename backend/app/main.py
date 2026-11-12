@@ -123,9 +123,28 @@ def health():
     return {"status": "ok"} if DB_STATE["ok"] else {"status": "degraded", "database": "damaged - see DEPLOY.md, 'Repairing the database'"}
 
 
+PUBLIC_PAGES = ["/", "/trust", "/privacy", "/terms", "/signup", "/login"]
+
+
+def _origin(request: Request) -> str:
+    from .config import settings
+    url = (settings.app_url or "").rstrip("/")
+    return url if url and not url.startswith("http://localhost") else str(request.base_url).rstrip("/")
+
+
 @app.get("/robots.txt", include_in_schema=False)
-def robots():
-    return PlainTextResponse("User-agent: *\nAllow: /$\nDisallow: /app\nDisallow: /api/\n")
+def robots(request: Request):
+    return PlainTextResponse("User-agent: *\nAllow: /$\nAllow: /trust\nAllow: /privacy\nAllow: /terms\nDisallow: /app\nDisallow: /api/\n"
+                             f"Sitemap: {_origin(request)}/sitemap.xml\n")
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+def sitemap(request: Request):
+    from fastapi.responses import Response
+    base = _origin(request)
+    urls = "".join(f"<url><loc>{base}{p}</loc></url>" for p in PUBLIC_PAGES)
+    return Response('<?xml version="1.0" encoding="UTF-8"?>'
+                    f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>', media_type="application/xml")
 
 
 app.include_router(auth.router)

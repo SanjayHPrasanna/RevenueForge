@@ -109,7 +109,7 @@ def list_tenders(q: str = "", region: str = "", source: str = "", status: str = 
                                 .where(TenderFit.tenant_id == ctx.tenant_id, or_(Tender.deadline.is_(None), Tender.deadline >= now),
                                        TenderFit.status != "dismissed").group_by(TenderFit.score >= 60)).all())
     return {"total": total, "items": [tender_out(t, f) for t, f in rows], "strong": bands.get(True, 0),
-            "live": sum(bands.values())}
+            "live": sum(bands.values()), "scoring": radar.progress(ctx.tenant_id)}
 
 
 @router.get("/{tender_id}")

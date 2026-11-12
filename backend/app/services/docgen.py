@@ -30,6 +30,16 @@ def _is_standard_name(t: str) -> bool:
     return _is_standard(t)
 
 
+def client_ref(r: dict) -> str:
+    """The reference a client recognises: the RFP's own ID, else its section number, else its page. Never our REQ-0xx codes."""
+    if r.get("source_ref"):
+        return r["source_ref"]
+    m = re.match(r"\s*(\d+(?:\.\d+)*)[.)]?\s", (r.get("section") or "") + " ")
+    if m:
+        return f"§{m.group(1)}"
+    return f"p.{r['page']}" if r.get("page") else ""
+
+
 def compliance_label(r: dict) -> str:
     """The compliance column. "Fully compliant" needs evidence: a held certificate, the AI check, a reviewer, or the rules
     engine's direct match. A match the AI was meant to check but couldn't is never presented as fully compliant."""
@@ -38,7 +48,8 @@ def compliance_label(r: dict) -> str:
     if st == "strong" and m.get("unverified") and not r.get("verified"):
         return COMPLIANCE["partial"]
     if st == "confirm" and r.get("category") == "Compliance" and r.get("subcategory") != "Submission":
-        return "Will comply"
+        # A promise to comply needs something behind it; without evidence the position is stated honestly.
+        return "Will comply" if (m.get("evidence") or m.get("held_certificates")) else "To be confirmed"
     return COMPLIANCE.get(st, "")
 
 
@@ -102,7 +113,9 @@ def response_text(r: dict, company: str) -> str:
         lead = "This is delivered through" if commit else "Delivered through"
         parts.append(f"{lead} our {caps[0]} capability" + (f", accelerated by {acc[0]}" if acc else "") + ".")
     if m.get("people_count"):
-        parts.append(f"{m['people_count']} engineers with {', '.join(m.get('technologies_have', [])[:3])} skills are available to the programme.")
+        n = m["people_count"]
+        parts.append(f"{n} engineer{'s' if n != 1 else ''} with {', '.join(m.get('technologies_have', [])[:3])} skills "
+                     f"{'are' if n != 1 else 'is'} available to the programme.")
     if cs:
         parts.append(f"Reference: {cs[0]}.")
     if st in ("partial", "gap") and r.get("gap", {}).get("options"):
@@ -137,7 +150,9 @@ def ai_responses(reqs: list[dict], company: dict, client: str, guidance: str = "
         for k, r in enumerate(chunk):
             m = r.get("match", {})
             ev = "; ".join(f"{e['type']}: {e['name']}" for e in m.get("evidence", [])[:4]) or "none"
-            plan = r.get("gap", {}).get("options", [{}])[0].get("detail", "") if r.get("match_status") in ("gap", "partial") else ""
+            opt = (r.get("gap", {}).get("options") or [{}])[0] if r.get("match_status") in ("gap", "partial") else {}
+            # "Strengthen evidence" is our own to-do (add a reference to the bid), not something to tell the client.
+            plan = opt.get("detail", "") if opt.get("type") not in (None, "Strengthen evidence") else ""
             lines.append(f"[{k}] REQUIREMENT: {r['text'][:400]}\n  fit: {r.get('match_status')} | evidence: {ev} | "
                          f"people: {m.get('people_count', 0)} with {', '.join(m.get('technologies_have', [])[:3]) or 'relevant skills'}"
                          + (f"\n  plan to close gap: {plan[:240]}" if plan else ""))
@@ -145,7 +160,9 @@ def ai_responses(reqs: list[dict], company: dict, client: str, guidance: str = "
                   '\n\nWrite the response for each requirement as it will appear in the proposal compliance matrix: 2-3 sentences, confident, '
                   "specific, first person plural (we). Mention the cited capability, reference project or certification by name. For a gap or "
                   "partial fit, describe the plan to close it (a partner, new hires, a build) plainly: never say or imply the company already has "
-                  "a capability, certificate or reference it doesn't have, and never invent facts. JSON array: "
+                  "a capability, certificate or reference it doesn't have, and never invent facts. This text goes to the client as it is: "
+                  "never mention our internal review, evidence-gathering, adding references or demos to the bid, hiring status, "
+                  "employee codes or requirement IDs, and cite a reference project only where it does the same kind of work. JSON array: "
                   '[{"i": index, "response": "..."}]' + guidance)
         res = None
         for _ in range(2):  # one retry, then move on: a failed batch keeps the rules answer and later batches still run
@@ -161,10 +178,19 @@ def ai_responses(reqs: list[dict], company: dict, client: str, guidance: str = "
             res = next((v for v in res.values() if isinstance(v, list)), [])
         for it in res if isinstance(res, list) else []:
             try:
-                out[chunk[int(it["i"])]["id"]] = str(it["response"]).strip()[:1200]
+                text = str(it["response"]).strip()[:1200]
+                if INTERNAL_RE.search(text):
+                    continue  # reads like an internal note: the rules answer stays in the proposal instead
+                out[chunk[int(it["i"])]["id"]] = text
             except Exception:
                 continue
     return out
+
+
+# Wording that belongs in our own notes, never in a client document.
+INTERNAL_RE = re.compile(r"\b(we (?:plan|intend|will need) to add (?:a )?(?:reference|demo|named expert)|reference project, demo|named expert to (?:our|the) "
+                         r"(?:response|bid)|to (?:our|the) response|\(\+\d+ to hire\)|to be hired|knowledge library|evidence is thin|"
+                         r"REQ-\d{2,4}|KD\d{3})", re.I)
 
 
 def executive_summary(ctx: dict) -> str:
@@ -564,7 +590,14 @@ class Content:
     def team(self, w):
         phased = len({t.get("phase") for t in self.est["team"]}) > 1
         def people(t):
-            return ", ".join(p["code"] for p in t["assigned"]) + (f" (+{t['unfilled']} to hire)" if t["unfilled"] else "")
+            # Client-facing: real names only when the company shows them; never internal codes or hiring status.
+            n, open_ = len(t["assigned"]), t["unfilled"]
+            if self.d.get("show_names"):
+                named = ", ".join(p["name"] for p in t["assigned"] if p.get("name"))
+            else:
+                named = f"{n} named consultant{'s' if n != 1 else ''}" if n else ""
+            more = f"{open_} to be named at mobilisation" if open_ else ""
+            return "; ".join(x for x in (named, more) if x) or "To be named at mobilisation"
         if phased:
             w.table(["Phase", "Role", "FTE", "Location", "Responsibility", "Proposed people"], widths=[1.6, 3.0, 1.0, 1.7, 5.4, 4.0], rows=[
                 [t.get("phase", ""), t["role"], t["fte"], t["location"], t["responsibility"], people(t)] for t in self.est["team"]])
@@ -578,7 +611,7 @@ class Content:
         if certs:
             w.p("Certifications relevant to security and compliance: " + ", ".join(c["name"] for c in certs) + ".")
         if sec:
-            w.table(["Ref", "Requirement", "Our response"], [[r.get("source_ref") or r["code"], _clip(r["text"], 220), _clip(r.get("response") or response_text(r, self.cname), 420)]
+            w.table(["Ref", "Requirement", "Our response"], [[client_ref(r), _clip(r["text"], 220), _clip(r.get("response") or response_text(r, self.cname), 420)]
                                                               for r in sec[:20]], widths=[1.8, 6.4, 8.5], font=8)
         elif not certs:
             w.p("Security controls are covered requirement by requirement in the compliance matrix.")
@@ -652,7 +685,7 @@ class Content:
                 w.bullets([o[:1].upper() + o[1:] for o in outs[:4]])
 
     def compliance(self, w):
-        rows = [[r.get("source_ref") or r["code"], _clip(r["text"], 300), f"p.{r['page']}", compliance_label(r),
+        rows = [[client_ref(r), _clip(r["text"], 300), f"p.{r['page']}", compliance_label(r),
                  _clip(r.get("response") or response_text(r, self.cname), 700)] for r in self.reqs if r["category"] != "Commercial"]
         self.compliance_rows = len(rows)
         w.table(["Ref", "Requirement", "Source", "Compliance", "Our response"], rows, widths=[1.6, 6.0, 1.1, 2.2, 5.8], font=7.5)
@@ -674,7 +707,7 @@ class Content:
     def commercial_conditions(self, w):
         commercial = [r for r in self.reqs if r["category"] == "Commercial"]
         if commercial:
-            w.table(["Ref", "Condition", "Source", "Position"], [[r.get("source_ref") or r["code"], _clip(r["text"], 300), f"p.{r['page']}",
+            w.table(["Ref", "Condition", "Source", "Position"], [[client_ref(r), _clip(r["text"], 300), f"p.{r['page']}",
                                                                  condition_position(r, self.pr)] for r in commercial],
                     widths=[1.8, 10.0, 1.4, 3.5], font=7.5)
 

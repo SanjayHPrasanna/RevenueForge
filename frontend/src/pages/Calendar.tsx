@@ -7,6 +7,7 @@ import { OwnerTag } from "../components/review";
 import { Spinner, useToast } from "../components/ui";
 import { api, download } from "../lib/api";
 import { money } from "../lib/format";
+import { calendarQuery } from "../lib/prefetch";
 
 type Ev = any;
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -124,15 +125,8 @@ export default function CalendarPage() {
   const [view, setView] = pref<"month" | "list">("rf-cal-view", "month");
   const [tenders, setTenders] = pref<"saved_strong" | "saved" | "none">("rf-cal-tenders", "saved_strong");
   const [hideClosed, setHideClosed] = pref<"1" | "0">("rf-cal-hide-closed", "1");
-  const first = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
-  const gridStart = new Date(first); gridStart.setDate(1 - ((first.getDay() + 6) % 7));
-  const gridEnd = new Date(gridStart); gridEnd.setDate(gridStart.getDate() + 41);
-  const range = view === "month" ? [iso(gridStart), iso(gridEnd)] : [iso(first), iso(new Date(cursor.getFullYear(), cursor.getMonth() + 3, 0))];
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ["calendar", range[0], range[1], tenders],
-    queryFn: () => api.get<any>(`/calendar?start=${range[0]}&end=${range[1]}&tenders=${tenders}`),
-    placeholderData: (p) => p,
-  });
+  const cq = calendarQuery(cursor, view, tenders);
+  const { data, isLoading, isFetching } = useQuery({ queryKey: cq.key, queryFn: () => api.get<any>(cq.url), placeholderData: (p) => p });
   const events: Ev[] = (data?.events || []).filter((e: Ev) => hideClosed === "0" || !e.closed);
   const monthLabel = view === "month" ? cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" })
     : `${cursor.toLocaleDateString(undefined, { month: "short", year: "numeric" })} – ${new Date(cursor.getFullYear(), cursor.getMonth() + 2, 1).toLocaleDateString(undefined, { month: "short", year: "numeric" })}`;

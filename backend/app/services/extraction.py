@@ -290,6 +290,37 @@ def llm_extract(doc: ParsedDocument, mask_fn=lambda x: x, guidance: str = "", pr
 
 
 # --------------------------------------------------------------------------- metadata
+_CCY = {"inr": "INR", "rs": "INR", "rs.": "INR", "₹": "INR", "usd": "USD", "us$": "USD", "$": "USD", "aed": "AED", "eur": "EUR", "€": "EUR",
+        "gbp": "GBP", "£": "GBP", "sar": "SAR", "qar": "QAR", "kwd": "KWD", "omr": "OMR", "bhd": "BHD", "sgd": "SGD", "aud": "AUD", "cad": "CAD"}
+_UNIT = {"crore": 1e7, "crores": 1e7, "cr": 1e7, "lakh": 1e5, "lakhs": 1e5, "lac": 1e5, "lacs": 1e5, "million": 1e6, "mn": 1e6, "m": 1e6,
+         "billion": 1e9, "bn": 1e9, "k": 1e3, "thousand": 1e3}
+_BUDGET_RE = re.compile(
+    r"(?P<c1>inr|rs\.?|₹|usd|us\$|\$|aed|eur|€|gbp|£|sar|qar|kwd|omr|bhd|sgd|aud|cad)?\s*"
+    r"(?P<a>\d[\d,]*(?:\.\d+)?)\s*(?P<u1>crores?|cr|lakhs?|lacs?|million|mn|m|billion|bn|k|thousand)?\b\s*"
+    r"(?:(?:-|–|—|to)\s*(?P<c2>inr|rs\.?|₹|usd|\$|aed|eur|€|gbp|£|sar|qar|kwd)?\s*(?P<b>\d[\d,]*(?:\.\d+)?)\s*(?P<u2>crores?|cr|lakhs?|lacs?|million|mn|m|billion|bn|k|thousand)?\b)?"
+    r"\s*(?P<c3>inr|usd|aed|eur|gbp|sar|qar|kwd|omr|bhd|sgd|aud|cad)?", re.I)
+
+
+def find_budget(text: str) -> dict | None:
+    """The budget the RFP states, e.g. "Indicative budget: INR 3.5–4.5 crore" -> {low: 35000000, high: 45000000, currency: INR}.
+    Only amounts within a sentence that mentions a budget (or an estimated / indicative contract value) count."""
+    for m in re.finditer(r"(?:budget|estimated (?:contract |project )?value|indicative (?:contract )?value|not to exceed|ceiling)[^\n]{0,160}", text, re.I):
+        chunk = re.split(r"\.\s+(?=[A-Z])", m.group(0))[0]  # this sentence only; "3.5" keeps its decimal point
+        for a in _BUDGET_RE.finditer(chunk):
+            ccy = next((_CCY.get((a.group(k) or "").lower().rstrip(".")) for k in ("c1", "c2", "c3") if a.group(k)), None)
+            unit = (a.group("u1") or a.group("u2") or "").lower()
+            if not ccy or (not unit and float(a.group("a").replace(",", "")) < 1000):
+                continue  # a bare "4" or "2026" isn't a budget
+            mult = _UNIT.get(unit, 1)
+            lo = float(a.group("a").replace(",", "")) * _UNIT.get((a.group("u1") or unit).lower(), mult)
+            hi = float(a.group("b").replace(",", "")) * _UNIT.get((a.group("u2") or unit).lower(), mult) if a.group("b") else lo
+            if hi < lo:
+                lo, hi = hi, lo
+            text = re.sub(r"\s*\|\s*", ": ", chunk.strip())[:160]  # "Indicative budget | INR 3.5 crore" from a table row
+            return {"low": round(lo, 2), "high": round(hi, 2), "currency": ccy, "text": text[:1].upper() + text[1:]}
+    return None
+
+
 def extract_metadata(doc: ParsedDocument) -> dict:
     text = doc.text
     head = text[:5000]
@@ -352,7 +383,8 @@ def extract_metadata(doc: ParsedDocument) -> dict:
 
     m = re.search(r"(\d+|one|two|three|four|five)\s*\(?\d*\)?\s*(year|month)s?\s*(contract|term|duration|period)", low) or \
         re.search(r"(?:contract|initial|service|managed service)?\s*(term|duration|period) of (?:an? )?(?:initial )?(\d+|one|two|three|four|five)\s*\(?\d*\)?\s*(year|month)", low) or \
-        re.search(r"contract (term|duration|period) (of )?(\d+)\s*(year|month)", low)
+        re.search(r"contract (term|duration|period) (of )?(\d+)\s*(year|month)", low) or \
+        re.search(r"(?:contract|initial|service)\s+(term|duration|period)\s+(?:is|will be|shall be)\s+(?:an? )?(?:initial )?(\d+|one|two|three|four|five)\s*\(?\d*\)?\s*(year|month)", low)
     words = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
     term_months = None
     if m:
@@ -369,7 +401,18 @@ def extract_metadata(doc: ParsedDocument) -> dict:
             term_months = n * 12 if unit.startswith("year") else n
         except Exception:
             term_months = None
+    # "9 months build + 24 months support", "24 months of managed services", "two years of support": in a build-and-run
+    # contract the run period is the term the run team is priced for.
+    num = r"(\d{1,2}|one|two|three|four|five)"
+    run_m = re.search(num + r"[- ]?(year|month)s?\s+(?:of\s+)?(?:post[- ]go[- ]live\s+)?(support|managed services?|run|operations|maintenance|ams\b|application support)", low)
+    if run_m:
+        n = int(run_m.group(1)) if run_m.group(1).isdigit() else words[run_m.group(1)]
+        run_months = n * 12 if run_m.group(2) == "year" else n
+        if 3 <= run_months <= 120 and (term_months is None or term_months == run_months or re.search(r"build|implement", low[max(0, run_m.start() - 80):run_m.start()])):
+            term_months = run_months
+    stated_run = bool(run_m)
     meta["contract_term_months"] = term_months
+    meta["budget"] = find_budget(text)
 
     scores = {
         "managed_services": len(re.findall(r"managed service|steady[- ]state|24\s?x\s?7|\bsla\b|incident management|run and maintain|operations support", low)),
@@ -381,7 +424,7 @@ def extract_metadata(doc: ParsedDocument) -> dict:
         scores["consulting"] += 3
     # How long the build is meant to take: "complete within 12 months of contract signature", "a 9-month implementation".
     bm = re.search(r"(?:build|implementation|migration|delivery|deploy\w*)[^.]{0,80}?(?:within|in|over)\s+(\d{1,2})\s+months", low) or \
-        re.search(r"(\d{1,2})[- ]month (?:build|implementation|programme|program|project|migration)", low)
+        re.search(r"(\d{1,2})[- ]months? (?:of )?(?:build|implementation|programme|program|project|migration|development)", low)
     meta["build_months"] = int(bm.group(1)) if bm and 2 <= int(bm.group(1)) <= 36 else None
     # Pricing instructions: "price the build as fixed price by milestone and the managed service as a fixed monthly fee".
     meta["pricing_model"] = {
@@ -408,6 +451,8 @@ def extract_metadata(doc: ParsedDocument) -> dict:
     runs = scores["managed_services"] >= 3 and (meta["pricing_model"]["monthly_fee"] or re.search(r"operate[^.]{0,60}managed service|managed service[^.]{0,80}(term|years)", low))
     if eng in ("implementation", "managed_services") and builds and runs:
         eng = "build_run"
+    elif meta["build_months"] and stated_run and meta["contract_term_months"]:
+        eng = "build_run"  # the RFP states both lengths: "9 months build + 24 months support"
     meta["engagement_type"] = eng
     meta["engagement_scores"] = scores
 
@@ -433,6 +478,34 @@ def extract_metadata(doc: ParsedDocument) -> dict:
     return meta
 
 
+def _tidy(reqs: list[dict]) -> list[dict]:
+    """Last pass over extracted requirements, whichever engine found them:
+    - an RFP ID used twice (a requirement ID quoted again in an eligibility or appendix line) keeps its first, fuller row;
+    - the same wording twice is kept once;
+    - sentence fragments ("must explain why") that start mid-sentence and say too little to answer are dropped."""
+    out, refs, texts = [], {}, set()
+    for r in reqs:
+        text = (r.get("text") or "").strip()
+        ref = (r.get("source_ref") or "").strip()
+        key = _norm(text)[:180]
+        if key in texts:
+            continue
+        words = len(re.findall(r"[A-Za-z]{2,}", text))
+        if not ref and text[:1].islower() and words < 7:
+            continue
+        if ref:
+            first = refs.get(ref.upper())
+            if first is not None:
+                # keep whichever row says more, in the first row's place
+                if len(text) > len(first["text"]) * 1.5 and r.get("section") == first.get("section"):
+                    first.update({k: v for k, v in r.items() if k != "block_idx"})
+                continue
+            refs[ref.upper()] = r
+        texts.add(key)
+        out.append(r)
+    return out
+
+
 def extract_requirements(doc: ParsedDocument, use_llm: bool = True, mask_fn=lambda x: x, guidance: str = "",
                          progress=None) -> tuple[list[dict], dict, str]:
     """Returns (requirements, metadata, engine)."""
@@ -454,6 +527,7 @@ def extract_requirements(doc: ParsedDocument, use_llm: bool = True, mask_fn=lamb
                     lreqs.append(r)
             lreqs.sort(key=lambda r: (r["block_idx"]))
             reqs, engine = lreqs, "ai"
+    reqs = _tidy(reqs)
     for r in reqs:
         b = doc.blocks[r["block_idx"]] if 0 <= r["block_idx"] < len(doc.blocks) else None
         context = f"{r['text']} {r['section']}"

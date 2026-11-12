@@ -120,6 +120,11 @@ def _phone(m) -> str:
         return raw
     if re.fullmatch(r"\d{5,}-\d{5,}", raw.strip()):  # a solicitation or contract reference (24062-250123), not a phone number
         return raw
+    if re.fullmatch(r"\d{8}(?:-\d)?(?:[,;\s]+\d{8}(?:-\d)?)*", raw.strip()):  # EU CPV codes (72262000-9), alone or listed
+        return raw
+    before = m.string[max(0, m.start() - 12):m.start()].lower()
+    if "cpv" in before:  # "CPV: 72262000-9, 48000000-8"
+        return raw
     return "[phone removed]"
 
 
