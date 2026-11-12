@@ -212,11 +212,11 @@ export function TemplateUpload({ onDone }: { onDone?: () => void }) {
       <p className="text-ink-soft text-[14.5px]">
         Your Word template keeps its branding, styles, header and footer. RevenueForge works with either kind of template: one with your own
         section headings and placeholders such as <code className="mx-1 text-[12.5px] bg-paper px-1 rounded">[Insert Solution Overview Here]</code>,
-        which it fills section by section, or one with a
-        <code className="mx-1 text-[12.5px] bg-paper px-1 rounded">{"{{CONTENT}}"}</code> marker where the whole proposal goes.
-        <code className="mx-1 text-[12.5px] bg-paper px-1 rounded">{"{{TITLE}}"}</code>
-        <code className="mx-1 text-[12.5px] bg-paper px-1 rounded">{"{{CLIENT}}"}</code>
-        <code className="mx-1 text-[12.5px] bg-paper px-1 rounded">{"{{DATE}}"}</code> are filled anywhere, including headers.
+        which it fills section by section, or one with a{" "}
+        <code className="text-[12.5px] bg-paper px-1 rounded">{"{{CONTENT}}"}</code> marker where the whole proposal goes.{" "}
+        <code className="text-[12.5px] bg-paper px-1 rounded">{"{{TITLE}}"}</code>,{" "}
+        <code className="text-[12.5px] bg-paper px-1 rounded">{"{{CLIENT}}"}</code> and{" "}
+        <code className="text-[12.5px] bg-paper px-1 rounded">{"{{DATE}}"}</code> are filled anywhere, including headers.
       </p>
       <Dropzone accept=".docx" onFile={(f) => up.mutate(f)} busy={up.isPending} hint="Word (.docx)" label="Drop your proposal template or browse" />
       {res && (

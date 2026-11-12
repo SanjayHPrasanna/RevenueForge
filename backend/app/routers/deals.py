@@ -33,17 +33,42 @@ def _deal(ctx: Ctx, deal_id: str) -> Deal:
     return d
 
 
-def deal_out(ctx: Ctx, d: Deal, full: bool = False) -> dict:
+class _St:
+    """The few stage fields a deal summary needs (status and approval), without the stage's full content."""
+    __slots__ = ("status", "approved_by", "approved_at", "duration_ms")
+
+    def __init__(self, status, approved_by, approved_at, duration_ms):
+        self.status, self.approved_by, self.approved_at, self.duration_ms = status, approved_by, approved_at, duration_ms
+
+
+def _summaries(ctx: Ctx, ids: list[str]) -> dict:
+    """Everything deal_out needs for many deals, in five queries instead of several per deal.
+    Only the gaps and pricing stages' content is read (for coverage and price); the rest stays on disk."""
+    pre = {i: {"stages": {}, "gaps": {}, "pricing": {}, "reqs": 0, "notes": {}} for i in ids}
+    if not ids:
+        return pre
+    for did, stage, status, by, at, ms in ctx.db.execute(select(DealStage.deal_id, DealStage.stage, DealStage.status, DealStage.approved_by,
+                                                                DealStage.approved_at, DealStage.duration_ms).where(DealStage.deal_id.in_(ids))):
+        pre[did]["stages"][stage] = _St(status, by, at, ms)
+    for did, stage, data in ctx.db.execute(select(DealStage.deal_id, DealStage.stage, DealStage.data)
+                                           .where(DealStage.deal_id.in_(ids), DealStage.stage.in_(("gaps", "pricing")))):
+        pre[did][stage] = data or {}
+    for did, n in ctx.db.execute(select(Requirement.deal_id, func.count()).where(Requirement.deal_id.in_(ids)).group_by(Requirement.deal_id)):
+        pre[did]["reqs"] = n
+    for did, stage, n in ctx.db.execute(select(StageComment.deal_id, StageComment.stage, func.count())
+                                        .where(StageComment.deal_id.in_(ids), StageComment.status == "open").group_by(StageComment.deal_id, StageComment.stage)):
+        pre[did]["notes"][stage] = n
+    return pre
+
+
+def deal_out(ctx: Ctx, d: Deal, full: bool = False, pre: dict | None = None, users: dict | None = None) -> dict:
     mask = deal_masker(d)
-    stages = {s.stage: s for s in ctx.db.scalars(select(DealStage).where(DealStage.deal_id == d.id))}
-    req_count = ctx.db.scalar(select(func.count()).select_from(Requirement).where(Requirement.deal_id == d.id))
-    notes = dict(ctx.db.execute(select(StageComment.stage, func.count()).where(StageComment.deal_id == d.id, StageComment.status == "open")
-                                .group_by(StageComment.stage)).all())
-    owner = ctx.db.get(User, d.owner_id) if d.owner_id else None
+    p = pre if pre is not None else _summaries(ctx, [d.id])[d.id]
+    stages, req_count, notes = p["stages"], p["reqs"], p["notes"]
+    owner = (users.get(d.owner_id) if users is not None else ctx.db.get(User, d.owner_id)) if d.owner_id else None
     if owner and owner.tenant_id != d.tenant_id:
         owner = None
-    gaps = stages.get("gaps").data if "gaps" in stages else {}
-    pricing = stages.get("pricing").data if "pricing" in stages else {}
+    gaps, pricing = p["gaps"], p["pricing"]
     sel = None
     if pricing and pricing.get("scenarios"):
         sel = next((s for s in pricing["scenarios"] if s["name"] == pricing.get("selected", "Target")), None)
@@ -72,7 +97,9 @@ def deal_out(ctx: Ctx, d: Deal, full: bool = False) -> dict:
 @router.get("")
 def list_deals(ctx: Ctx = Depends(current_ctx)):
     rows = ctx.db.scalars(select(Deal).where(Deal.tenant_id == ctx.tenant_id).order_by(Deal.created_at.desc())).all()
-    return [deal_out(ctx, d) for d in rows]
+    pre = _summaries(ctx, [d.id for d in rows])
+    users = {u.id: u for u in ctx.db.scalars(select(User).where(User.tenant_id == ctx.tenant_id))}
+    return [deal_out(ctx, d, pre=pre[d.id], users=users) for d in rows]
 
 
 @router.post("/detect")
@@ -562,8 +589,24 @@ def approve(deal_id: str, stage: str, body: dict | None = None, ctx: Ctx = Depen
     st = ctx.db.scalar(select(DealStage).where(DealStage.deal_id == d.id, DealStage.stage == stage))
     if not st or st.status not in ("draft", "approved"):
         raise HTTPException(400, "This stage has no draft to approve yet.")
+    # Stages build on each other (gaps on the match, pricing on the effort...), so they're approved in order.
+    earlier = STAGES[:STAGES.index(stage)]
+    done = {x.stage for x in ctx.db.scalars(select(DealStage).where(DealStage.deal_id == d.id, DealStage.status == "approved"))}
+    waiting = [x for x in earlier if x not in done]
+    if waiting:
+        names = {"requirements": "Requirements", "matching": "Capability match", "gaps": "Gaps & risks", "architecture": "Architecture",
+                 "estimation": "Effort & team", "pricing": "Pricing", "proposal": "Proposal", "handoff": "Delivery handoff"}
+        raise HTTPException(400, f"Approve {names.get(waiting[0], waiting[0])} first: this stage is built from it.")
     still_open = ctx.db.scalar(select(func.count()).select_from(StageComment).where(
         StageComment.deal_id == d.id, StageComment.stage == stage, StageComment.status == "open"))
+    if stage == "pricing" and not (body or {}).get("despite_over_budget"):
+        pdata = st.data or {}
+        bud = pdata.get("budget") or {}
+        sel = next((x for x in pdata.get("scenarios", []) if x["name"] == pdata.get("selected", "Target")), None)
+        if bud.get("high") and sel and sel["price"] > bud["high"]:
+            over = round((sel["price"] / bud["high"] - 1) * 100)
+            raise HTTPException(409, f"The {sel['name']} price is {over}% above the budget the RFP states ({bud.get('stated') or 'see Pricing'}). "
+                                     "Check the term and scope, or approve anyway.")
     if still_open and not (body or {}).get("despite_open_notes"):
         raise HTTPException(409, f"{still_open} review note{'s are' if still_open > 1 else ' is'} still open on this stage. "
                                  "Resolve them first, or approve anyway.")
@@ -573,10 +616,9 @@ def approve(deal_id: str, stage: str, body: dict | None = None, ctx: Ctx = Depen
     ctx.audit("stage.approve", f"{d.id}:{stage}", **({"open_notes": still_open} if still_open else {}))
     learned = {}
     if stage == "requirements":
-        # Approval confirms the categories: they become training data for the company's own classifier.
-        for r in ctx.db.scalars(select(Requirement).where(Requirement.deal_id == d.id)):
-            r.verified = True
-        ctx.db.flush()
+        # Only rows a person actually reviewed (edited, or ticked as checked) count as reviewed and train the company's own
+        # classifier. Approving the stage doesn't mark the rest: training on the AI's own labels would teach it nothing, and
+        # counting them would inflate the accuracy figure.
         learned["classifier"] = learning.train_classifier(ctx.db, ctx.tenant_id)
     if stage == "proposal":
         learned["answers_added"] = learning.harvest_answers(ctx.db, d, ctx.user.name)

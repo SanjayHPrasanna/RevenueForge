@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api", tags=["library"])
 
 MODEL = {"capabilities": Capability, "skills": Employee, "certifications": Certification, "rates": RateCard,
          "case_studies": CaseStudy, "accelerators": Accelerator}
-ONBOARDING_STEPS = ["profile", "capabilities", "skills", "certifications", "rates", "case_studies", "template"]
+ONBOARDING_STEPS = ["profile", "capabilities", "skills", "certifications", "rates", "case_studies", "accelerators", "template"]
 ALLOWED = {".pdf", ".docx", ".xlsx", ".xlsm", ".csv", ".pptx", ".txt", ".md"}
 
 
@@ -60,7 +60,7 @@ def _onboarding_status(ctx: Ctx) -> dict:
     steps = {
         "profile": bool(t.about and t.industry),
         "capabilities": counts["capabilities"] > 0, "skills": counts["skills"] > 0, "certifications": counts["certifications"] > 0,
-        "rates": counts["rates"] > 0, "case_studies": counts["case_studies"] > 0, "template": has_template,
+        "rates": counts["rates"] > 0, "case_studies": counts["case_studies"] > 0, "accelerators": counts["accelerators"] > 0, "template": has_template,
     }
     required = ["capabilities", "skills", "rates", "template"]
     return {"steps": steps, "counts": counts, "complete": all(steps[s] for s in required), "required": required,
@@ -143,6 +143,9 @@ def update_company(body: dict, ctx: Ctx = Depends(require_roles())):
                 if not 0 <= v <= hi:
                     raise HTTPException(400, f"{k.replace('_', ' ')} must be between 0 and {hi}.")
             s[k] = v
+        floor_, target_ = float(s.get("min_margin", 18)), float(s.get("target_margin", 28))
+        if floor_ > target_:
+            raise HTTPException(400, f"The margin floor ({floor_:g}%) can't be above the target margin ({target_:g}%). Lower the floor or raise the target.")
         t.settings = s
     ctx.audit("company.update", t.id)
     ctx.db.commit()

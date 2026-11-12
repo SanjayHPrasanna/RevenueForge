@@ -90,8 +90,30 @@ def _norm(s: str) -> str:
 def _split_list(v: str) -> list[str]:
     if not v:
         return []
-    parts = re.split(r"[,;/|\n]+|\s+&\s+|\band\b", str(v))
+    # Split on list separators only. "CI/CD", "Retail & Distribution" and "Android and iOS release" stay whole.
+    parts = re.split(r"[,;|\n•]+|\s+/\s+", str(v))
     return [p.strip(" .-•") for p in parts if p and p.strip(" .-•")]
+
+
+def _dedupe(names: list[str]) -> list[str]:
+    """Names as uploaded, without exact repeats (ignoring case)."""
+    seen, out = set(), []
+    for n in names:
+        if n.lower() not in seen:
+            seen.add(n.lower())
+            out.append(n)
+    return out
+
+
+def _holders(v) -> int:
+    """How many people hold a certificate. The column may hold a number ("3") or the holders themselves
+    ("Lakshmi Varma (KD002)", "KD008", "Asha, Ravi"): count the people, never read digits out of an employee code."""
+    t = str(v or "").strip()
+    if not t or re.fullmatch(r"[-–—]+|n/?a|none|nil", t, re.I):
+        return 0
+    if re.fullmatch(r"\d+(?:\.0+)?", t):
+        return int(float(t))
+    return len([p for p in re.split(r"[,;\n/|]+|\s+and\s+|\s+&\s+", t) if re.search(r"[A-Za-z]", p)])
 
 
 def _num(v) -> float | None:
@@ -209,7 +231,7 @@ def records_from_table(kind: str, rows: list[list[str]], analysis: dict) -> list
             if not name:
                 continue
             desc = _cell(r, mapping, "description")
-            techs = [K.canonical_tech(t) for t in _split_list(_cell(r, mapping, "technologies"))]
+            techs = _dedupe(_split_list(_cell(r, mapping, "technologies")))
             techs = list(dict.fromkeys(techs + K.find_technologies(f"{name} {desc}")))
             recs.append({"name": name, "service_line": _cell(r, mapping, "service_line"), "description": desc,
                          "technologies": techs, "industries": _split_list(_cell(r, mapping, "industries")),
@@ -241,17 +263,17 @@ def records_from_table(kind: str, rows: list[list[str]], analysis: dict) -> list
             if pair_mode:
                 s = _cell(r, mapping, "skill")
                 if s:
-                    p["skills"].append({"name": K.canonical_tech(s), "level": _level(_cell(r, mapping, "proficiency")) or 3})
+                    p["skills"].append({"name": s.strip(), "level": _level(_cell(r, mapping, "proficiency")) or 3})
             for col in ("skills", "secondary_skills"):
                 for s in _split_list(_cell(r, mapping, col)):
                     m = re.match(r"(.+?)\s*[\(\[:-]\s*(\d|beginner|intermediate|advanced|expert)\s*[\)\]]?$", s, re.I)
                     name, lvl = (m.group(1), _level(m.group(2))) if m else (s, 4 if col == "skills" else 3)
-                    p["skills"].append({"name": K.canonical_tech(name), "level": lvl or 3})
+                    p["skills"].append({"name": name.strip(), "level": lvl or 3})
             for i in wide:
                 if i < len(r):
                     lvl = _level(r[i])
                     if lvl:
-                        p["skills"].append({"name": K.canonical_tech(header[i]), "level": lvl})
+                        p["skills"].append({"name": header[i].strip(), "level": lvl})
         for p in people.values():
             seen = {}
             for s in p["skills"]:
@@ -271,7 +293,7 @@ def records_from_table(kind: str, rows: list[list[str]], analysis: dict) -> list
             if not kind_v:
                 kind_v = "company" if re.search(r"\biso|cmmi|soc ?2|pci", name, re.I) else "partner" if re.search(r"partner", name, re.I) else "individual"
             recs.append({"name": name, "kind": kind_v, "issuer": _cell(r, mapping, "issuer"),
-                         "holders": int(_num(_cell(r, mapping, "holders")) or 0), "valid_until": _cell(r, mapping, "valid_until")})
+                         "holders": _holders(_cell(r, mapping, "holders")), "valid_until": _cell(r, mapping, "valid_until")})
 
     elif kind == "rates":
         rate_hdr = header[mapping["day_rate"]].lower() if "day_rate" in mapping else ""
@@ -303,7 +325,7 @@ def records_from_table(kind: str, rows: list[list[str]], analysis: dict) -> list
             if not title:
                 continue
             summary = _cell(r, mapping, "summary")
-            techs = [K.canonical_tech(t) for t in _split_list(_cell(r, mapping, "technologies"))]
+            techs = _dedupe(_split_list(_cell(r, mapping, "technologies")))
             recs.append({"title": title, "client": _cell(r, mapping, "client"), "industry": _cell(r, mapping, "industry"),
                          "region": _cell(r, mapping, "region"), "year": _cell(r, mapping, "year"), "summary": summary,
                          "technologies": list(dict.fromkeys(techs + K.find_technologies(f"{title} {summary}"))),
@@ -315,7 +337,7 @@ def records_from_table(kind: str, rows: list[list[str]], analysis: dict) -> list
             if not name:
                 continue
             desc = _cell(r, mapping, "description")
-            techs = [K.canonical_tech(t) for t in _split_list(_cell(r, mapping, "technologies"))]
+            techs = _dedupe(_split_list(_cell(r, mapping, "technologies")))
             recs.append({"name": name, "description": desc, "technologies": list(dict.fromkeys(techs + K.find_technologies(f'{name} {desc}'))),
                          "effort_saving_pct": _num(_cell(r, mapping, "effort_saving_pct")) or 0})
     return recs

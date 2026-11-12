@@ -124,6 +124,11 @@ with TestClient(app) as c:
     ok("…and the server agrees", c.post(f"/api/deals/{D}/notes/{n1['id']}/resolve", headers=AR).status_code == 403)
 
     r = c.post(f"/api/deals/{D}/stages/pricing/approve", headers=FI)
+    ok("pricing can't be approved before the stages it's built from", r.status_code == 400 and "Approve Requirements first" in r.text, r.text[:160])
+    for stg in ("requirements", "matching", "gaps", "architecture", "estimation"):
+        r = c.post(f"/api/deals/{D}/stages/{stg}/approve", headers=A)
+        ok(f"admin approves {stg} in order", r.status_code == 200, r.text[:120])
+    r = c.post(f"/api/deals/{D}/stages/pricing/approve", headers=FI)
     ok("approval is held while notes are open", r.status_code == 409 and "2 review notes" in r.text, r.text[:160])
     r = c.post(f"/api/deals/{D}/notes/{n1['id']}/resolve", headers=PR)
     ok("owner resolves a note", r.status_code == 200 and r.json()["status"] == "resolved" and r.json()["resolved_by"] == "Pres")
@@ -138,6 +143,26 @@ with TestClient(app) as c:
     ok("author deletes own note", c.delete(f"/api/deals/{D}/notes/{n2['id']}", headers=AR).status_code == 200)
     r = c.post(f"/api/deals/{D}/stages/requirements/approve", headers=PR)
     ok("a stage with no notes approves as before (no body)", r.status_code == 200, r.text[:120])
+    r = c.post(f"/api/deals/{D}/stages/proposal/approve", headers=PR)
+    ok("proposal approves once pricing is approved", r.status_code == 200, r.text[:120])
+
+    # ---------------------------------------------------------------- home page numbers stay right with its cache
+    d1 = c.get("/api/dashboard", headers=A).json()
+    reqs = c.get(f"/api/deals/{D}/requirements", headers=A).json()
+    r0 = next(r for r in reqs if r["category"] == "Functional")
+    r1 = next(r for r in reqs if r["match_status"] and r["match_status"] != "gap")
+    ok("category edit accepted", c.patch(f"/api/deals/{D}/requirements/{r0['id']}", json={"category": "Commercial"}, headers=A).status_code == 200)
+    ok("match edit accepted", c.patch(f"/api/deals/{D}/requirements/{r1['id']}", json={"match_status": "gap"}, headers=A).status_code == 200)
+    d2 = c.get("/api/dashboard", headers=A).json()
+    c1, c2 = d1["requirement_categories"], d2["requirement_categories"]
+    ok("home page counts a changed category at once", c2["Functional"] == c1["Functional"] - 1 and c2["Commercial"] == c1.get("Commercial", 0) + 1, (c1, c2))
+    ok("home page counts a changed match at once", d2["match_mix"].get("gap", 0) == d1["match_mix"].get("gap", 0) + 1, (d1["match_mix"], d2["match_mix"]))
+    m1 = next(x for x in d1["deals"] if x["id"] == D)["match_mix"]
+    m2 = next(x for x in d2["deals"] if x["id"] == D)["match_mix"]
+    ok("…and in that deal's row", m2.get("gap", 0) == m1.get("gap", 0) + 1, (m1, m2))
+    row = next(x for x in c.get("/api/deals", headers=A).json() if x["id"] == D)
+    ok("deal list summary matches the single deal", {k: row[k] for k in ("requirement_count", "coverage_pct", "value", "open_notes")}
+       == {k: c.get(f"/api/deals/{D}", headers=A).json()[k] for k in ("requirement_count", "coverage_pct", "value", "open_notes")})
 
     # ---------------------------------------------------------------- calendar
     from app.db import SessionLocal
@@ -180,7 +205,7 @@ with TestClient(app) as c:
     rem_vi = c.get("/api/calendar/reminders", headers=VI).json()
     ok("viewer has nothing waiting", rem_vi["count"] == 0, rem_vi)
     arch_rem = c.get("/api/calendar/reminders", headers=AR).json()
-    ok("architect is reminded of stages waiting for them", any("Architecture" in i["why"] or "Capability match" in i["why"] for i in arch_rem["items"]), arch_rem)
+    ok("architect has nothing waiting once their stages are approved", not any("Architecture" in i.get("why", "") or "Capability match" in i.get("why", "") for i in arch_rem["items"]), arch_rem)
 
     # undated deals
     c.patch(f"/api/deals/{D}", json={"due_date": "sometime soon"}, headers=PR)

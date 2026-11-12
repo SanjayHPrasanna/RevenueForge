@@ -7,7 +7,7 @@ import { Bars, CoverageMap, FitLegend, Gantt, PriceLadder, ReadinessScale, Share
 import { useSearchParams } from "react-router-dom";
 import StoryVideo, { ProposalDownload } from "../components/StoryVideo";
 import { api, download } from "../lib/api";
-import { CATEGORIES, ENGAGEMENT, money } from "../lib/format";
+import { CATEGORIES, ENGAGEMENT, money, plural } from "../lib/format";
 import { MatchMixBar } from "./Dashboard";
 import { CommentsPanel } from "../components/Comments";
 import { Clarifications } from "../components/Clarifications";
@@ -368,7 +368,7 @@ export function MatchingStage({ deal }: P) {
                         const I = EV_ICON[e.type] || Boxes;
                         return <span key={i} className="chip bg-paper border border-line text-ink-soft font-medium"><I className="h-3 w-3 text-brand-600" />{e.name}</span>;
                       })}
-                      {r.match?.people_count > 0 && <span className="chip bg-paper border border-line text-ink-soft font-medium"><Users className="h-3 w-3 text-brand-600" />{r.match.people_count} people</span>}
+                      {r.match?.people_count > 0 && <span className="chip bg-paper border border-line text-ink-soft font-medium"><Users className="h-3 w-3 text-brand-600" />{plural(r.match.people_count, "person", "people")}</span>}
                       {(r.match?.technologies_missing || []).map((t: string) => <span key={t} className="chip bg-[#FBE7E5] text-fit-gap-ink">Missing: {t}</span>)}
                     </div>
                   </div>
@@ -522,6 +522,10 @@ const SRC_STYLE: Record<string, string> = {
 };
 export function ArchitectureStage({ deal }: P) {
   const { data: st } = useStage(deal.id, "architecture");
+  const { data: reqs } = useQuery({ queryKey: ["reqs", deal.id], queryFn: () => api.get<any[]>(`/deals/${deal.id}/requirements`) });
+  // Show the RFP's own IDs (FR-06), not our internal REQ-0xx codes.
+  const ref = useMemo(() => { const m: Record<string, string> = {}; (reqs || []).forEach((r: any) => { m[r.code] = r.source_ref || r.code; }); return m; }, [reqs]);
+  const refs = (codes: string[]) => codes.map((c) => ref[c] || c);
   if (!st) return <PageLoader />;
   const a = st.data;
   return (
@@ -550,7 +554,7 @@ export function ArchitectureStage({ deal }: P) {
               <div className="rounded-md bg-paper border border-line-soft p-2 flex flex-wrap gap-2">
                 {l.components.map((c: any) => (
                   <div key={c.name} className={clsx("rounded border-2 px-2.5 py-1.5 text-[12.5px] font-semibold", SRC_STYLE[c.source] || SRC_STYLE.Proposed)}
-                    title={c.requirements.length ? `Driven by ${c.requirements.join(", ")}` : c.source}>
+                    title={c.requirements.length ? `Driven by ${refs(c.requirements).join(", ")}` : c.source}>
                     {c.name}
                     {c.requirements.length > 0 && <span className="ml-1.5 num text-[10.5px] font-medium opacity-70">{c.requirements.length} req</span>}
                   </div>
@@ -566,7 +570,7 @@ export function ArchitectureStage({ deal }: P) {
           <thead><tr><th className="th">Area</th><th className="th">Choice</th><th className="th">Basis</th><th className="th">Rationale</th><th className="th">Driven by</th></tr></thead>
           <tbody>
             {a.choices.map((c: any) => (
-              <tr key={c.area}><td className="td font-semibold">{c.area}</td><td className="td">{c.choice}</td><td className="td text-[13px]">{c.basis}</td><td className="td text-[13px] text-ink-soft">{c.rationale}</td><td className="td text-[12px] num text-ink-muted">{(c.requirements || []).slice(0, 5).join(", ")}</td></tr>
+              <tr key={c.area}><td className="td font-semibold">{c.area}</td><td className="td">{c.choice}</td><td className="td text-[13px]">{c.basis}</td><td className="td text-[13px] text-ink-soft">{c.rationale}</td><td className="td text-[12px] num text-ink-muted">{refs((c.requirements || []).slice(0, 5)).join(", ")}</td></tr>
             ))}
           </tbody>
         </table>
@@ -626,7 +630,7 @@ export function EstimationStage({ deal }: P) {
         isBR && e.build_months
           ? { label: "Build, then run", value: `${e.build_months} + ${e.run_months} months`, sub: ENGAGEMENT[e.engagement_type] }
           : { label: isMS ? "Contract term" : "Duration", value: `${e.contract_months} months`, sub: ENGAGEMENT[e.engagement_type] },
-        { label: "Team", value: `${e.headcount} people`, sub: phased && e.fte_by_phase
+        { label: "Team", value: plural(e.headcount, "person", "people"), sub: phased && e.fte_by_phase
             ? `${Object.entries(e.fte_by_phase).map(([k, v]) => `${k} ${v} FTE`).join(", ")}, ${onsite}% onsite`
             : `${e.fte} FTE, ${onsite}% onsite` },
         { label: "Effort", value: `${Math.round(e.total_person_days).toLocaleString()}`, sub: "person-days, whole team" },
@@ -727,6 +731,18 @@ export function PricingStage({ deal }: P) {
           { key: "travel_pct", label: "Travel", suffix: "%" },
         ]} />
       </div>
+      {p.budget && (() => {
+        const sel = p.scenarios.find((s: any) => s.name === (p.selected || "Target"));
+        const over = sel && sel.price > p.budget.high;
+        const range = p.budget.low === p.budget.high ? m(p.budget.high) : `${m(p.budget.low)} – ${m(p.budget.high)}`;
+        return (
+          <div role={over ? "alert" : undefined} className={clsx("card px-5 py-3.5 text-[13px]", over ? "border-rose-200 bg-rose-50/60 text-rose-800" : "border-emerald-200 bg-emerald-50/50 text-emerald-800")}>
+            <b>{over ? `The ${sel.name} price is ${sel.vs_budget_pct}% above the RFP's budget.` : `The ${sel?.name || "selected"} price is within the RFP's budget.`}</b>{" "}
+            Stated budget: {range} ("{p.budget.stated}").
+            {over && (p.budget.all_over ? " Every price option is above it: check the contract term, team size and scope before you bid." : " A lower option fits: compare the options below.")}
+          </div>
+        );
+      })()}
       {p.rates_from && p.rates_from !== "rate_card" && (
         <div role="alert" className="card px-5 py-3.5 border-ember-300 bg-ember-50/60 text-[13px] text-ember-700">
           <b>{p.rates_from === "benchmark" ? "These prices use generic benchmark rates, not yours." : "Some roles use generic benchmark rates."}</b>{" "}
@@ -839,7 +855,7 @@ function ResponseRow({ dealId, r, onSaved }: { dealId: string; r: any; onSaved: 
         <div className="text-[13px] text-ink-soft mt-1.5 leading-snug">{r.text}</div>
       </div>
       <div>
-        <textarea className="input h-auto min-h-[84px] py-2 text-[13.5px] leading-snug" value={v} onChange={(e) => { setV(e.target.value); setDirty(true); }} aria-label={`Answer for ${r.code}`} />
+        <textarea className="input h-auto min-h-[84px] py-2 text-[13.5px] leading-snug" value={v} onChange={(e) => { setV(e.target.value); setDirty(true); }} aria-label={`Answer for ${r.source_ref || r.code}`} />
         {dirty && <div className="flex gap-2 mt-1.5"><button className="btn-primary h-8" disabled={save.isPending} onClick={() => save.mutate()}>{save.isPending && <Spinner />} Save answer</button><button className="btn-ghost h-8" onClick={() => { setV(r.response || ""); setDirty(false); }}>Cancel</button></div>}
       </div>
     </li>

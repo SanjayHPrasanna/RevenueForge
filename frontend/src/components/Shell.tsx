@@ -1,11 +1,12 @@
 import clsx from "clsx";
 import { NoticeBar } from "./GoogleButton";
 import { BookOpen, Brain, Briefcase, CalendarDays, ChevronDown, ChevronLeft, ChevronRight, LayoutDashboard, FileSearch, LogOut, Menu, Network, Radar, Settings, ShieldCheck, Sparkles, TrendingUp, Trophy, Users, X } from "lucide-react";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { prefetchRoute, warmPages } from "../lib/prefetch";
 import { PageLoader, ProductMark } from "./ui";
 import LandingAssistant from "./LandingAssistant";
 
@@ -53,6 +54,8 @@ export default function Shell() {
   const { data: company } = useQuery({ queryKey: ["company"], queryFn: () => api.get("/company") });
   const isBuyer = user?.tenant.kind === "buyer";
   const ob = isBuyer ? null : company?.onboarding;
+  const qc = useQueryClient();
+  useEffect(() => { if (user) warmPages({ buyer: isBuyer, platformAdmin: !!user.platform_admin }); }, [user?.id]);
   const { data: due } = useQuery({ queryKey: ["reminders"], queryFn: () => api.get<any>("/calendar/reminders"), enabled: !!user && !isBuyer, refetchInterval: 300000 });
   const badge: Record<string, { n: number; hot: boolean } | undefined> = { "/app/calendar": due?.count ? { n: due.count, hot: due.overdue > 0 } : undefined };
   const nav = [...(isBuyer ? BUYER_NAV : NAV), ...(user?.platform_admin ? [{ to: "/app/platform", label: "Platform console", icon: ShieldCheck, end: false }] : [])];
@@ -70,6 +73,8 @@ export default function Shell() {
             key={n.to}
             to={n.to}
             end={n.end}
+            onMouseEnter={() => prefetchRoute(qc, n.to)}
+            onFocus={() => prefetchRoute(qc, n.to)}
             onClick={() => setOpen(false)}
             title={mini ? n.label : undefined}
             className={({ isActive }) =>
@@ -198,12 +203,14 @@ export default function Shell() {
             )}
           </div>
         </header>
-        <main key={loc.pathname.split("/").slice(0, 3).join("/")} className="flex-1 min-w-0 page-enter pb-20">
-          <Suspense fallback={<PageLoader />}>
+        {/* The loading boundary sits outside the per-page <main>, so while the next page gets ready the current one
+            stays on screen (navigation runs as a transition) instead of flashing a loading screen. */}
+        <Suspense fallback={<PageLoader />}>
+          <main key={loc.pathname.split("/").slice(0, 3).join("/")} className="flex-1 min-w-0 page-enter pb-20">
             {isBuyer && !BUYER_PATHS.some((p) => loc.pathname.startsWith(p)) ? <Navigate to="/app/buyer" replace />
               : !isBuyer && loc.pathname.startsWith("/app/buyer") ? <Navigate to="/app" replace /> : <Outlet />}
-          </Suspense>
-        </main>
+          </main>
+        </Suspense>
         {!isBuyer && <LandingAssistant mode="workspace" company={company?.name} />}
       </div>
     </div>

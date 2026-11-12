@@ -300,7 +300,8 @@ export default function RadarPage() {
   useEffect(() => setPage(0), [qDebounced, region, source, minScore, due, status, sort]);
   const params = useMemo(() => new URLSearchParams({ q: qDebounced, region, source, min_score: minScore, due_days: due, status, sort, limit: "50", offset: String(page * 50) }).toString(),
     [qDebounced, region, source, minScore, due, status, sort, page]);
-  const { data, isLoading, isFetching } = useQuery({ queryKey: ["radar", params], queryFn: () => api.get<any>(`/radar?${params}`), placeholderData: (p) => p });
+  const { data, isLoading, isFetching } = useQuery({ queryKey: ["radar", params], queryFn: () => api.get<any>(`/radar?${params}`), placeholderData: (p) => p,
+    refetchInterval: (q) => ((q.state.data as any)?.scoring ? 3000 : false) });  // follow background scoring until it's done
   const { data: src } = useQuery({ queryKey: ["radar-sources"], queryFn: () => api.get<any>("/radar/sources") });
   const sel_ = (k: string, v: string, set: (v: string) => void, opts: [string, string][], label: string) => (
     <label className="text-[12px] text-ink-muted"><span className="sr-only">{label}</span>
@@ -337,9 +338,18 @@ export default function RadarPage() {
         <div className="flex-1" />
         {sel_("so", sort, setSort, SORTS, "Sort")}
       </div>
+      {data?.scoring && (
+        <div role="status" className="card px-5 py-3 text-[13px] text-brand-800 bg-brand-50/60 border-brand-100 flex items-center gap-3">
+          <Spinner />
+          <span>Scoring tenders against your library: {data.scoring.done.toLocaleString()} of {data.scoring.total.toLocaleString() || "…"} done,
+            soonest deadlines first. The list updates as it goes.</span>
+        </div>
+      )}
       <div className={clsx("grid gap-4", sel ? "lg:grid-cols-[minmax(0,1fr)_460px]" : "")}>
         <div className="card overflow-x-auto min-w-0">
-          {isLoading ? <PageLoader label="Scoring tenders against your library" /> : !data?.items?.length ? (
+          {isLoading ? <PageLoader label="Loading tenders" /> : !data?.items?.length && data?.scoring ? (
+            <div className="p-10 text-center text-[13.5px] text-ink-muted">The first tenders appear here in a few seconds.</div>
+          ) : !data?.items?.length ? (
             <Empty icon={<RadarIcon className="h-8 w-8" />} title={src?.total ? "No tenders match these filters" : "No tenders read yet"}>
               {src?.total ? "Try a wider region, a lower fit or another status." : "The sources are read a minute after the server starts and then every 12 hours. An admin can also click Refresh now."}
             </Empty>

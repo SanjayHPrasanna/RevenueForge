@@ -101,7 +101,7 @@ def build_architecture(reqs: list[dict], kb: CompanyKB, meta: dict) -> dict:
                         "rationale": f"{v.get('people', 0)} engineers with {t} skills" if v.get("people") else f"No in-house {t} skills yet: upskill/hire plan required",
                         "requirements": tech_reqs[t][:8]})
     elif any(r.get("subcategory") == "Integration & APIs" for r in reqs):
-        own = best_in_family("Integration platforms")
+        own = best_in_family("Integration platforms", exclude=("Azure API Management", "AWS API Gateway", "Apigee", "Kong"))  # gateways aren't engines
         if own:
             choices.append({"area": "Integration engine", "choice": own[0], "basis": "Company strength",
                             "rationale": f"{inv[own[0]]['people']} engineers; used in {len(inv[own[0]]['case_studies'])} reference projects",
@@ -114,10 +114,19 @@ def build_architecture(reqs: list[dict], kb: CompanyKB, meta: dict) -> dict:
                         "rationale": "Standards-based interfaces across clinical systems", "requirements": sum((tech_reqs[t][:3] for t in std), [])})
 
     if re.search(r"\bapi", text_all):
-        api = [t for t in ("Apigee", "MuleSoft", "Kong", "Azure Integration Services") if t in inv]
+        gateways = ("Azure API Management", "Apigee", "AWS API Gateway", "Kong", "MuleSoft", "Azure Integration Services")
+        named = [t for t in gateways if t in tech_reqs]
+        if named:  # the RFP names its gateway
+            api, basis = named, "Specified in the RFP"
+        else:  # the gateway the company has the most evidence for, not the first one on a list
+            weight = {t: inv[t]["people"] + 3 * len(inv[t]["capabilities"]) + 2 * len(inv[t]["case_studies"]) for t in gateways if t in inv}
+            api, basis = sorted(weight, key=lambda t: -weight[t]), "Company strength"
         if api:
-            choices.append({"area": "API management", "choice": api[0], "basis": "Company strength",
-                            "rationale": "Secure, governed exposure of services with OAuth 2.0", "requirements": []})
+            v = inv.get(api[0], {})
+            ev = ", ".join(x for x in (f"{v['people']} engineers" if v.get("people") else "", f"{len(v['capabilities'])} capabilities" if v.get("capabilities") else "",
+                                        f"{len(v['case_studies'])} reference projects" if v.get("case_studies") else "") if x)
+            choices.append({"area": "API management", "choice": api[0], "basis": basis,
+                            "rationale": "Secure, governed exposure of services with OAuth 2.0" + (f"; in-house evidence: {ev}" if ev else ""), "requirements": []})
             add("Experience & APIs", f"{api[0]} API gateway", "Proposed", [])
 
     ops = [t for t in best_in_family("Operations") if t not in ("ITIL", "Confluence", "Jira")][:2]
@@ -301,18 +310,30 @@ def _complexity(r: dict) -> str:
     return "High" if score >= 2 else "Medium" if score >= 1 else "Low"
 
 
+# Titles that can fill a role when nobody holds the exact title.
+ROLE_EQUIV = {
+    "Project Manager": ("Engagement Manager", "Delivery Manager", "Programme Manager", "Program Manager"),
+    "Engagement Manager": ("Delivery Manager", "Programme Manager", "Program Manager", "Project Manager"),
+    "Support Engineer": ("Integration Engineer", "Software Engineer", "DevOps Engineer"),
+    "Software Engineer": ("Integration Engineer",),
+    "QA Engineer": ("Test Engineer", "QA Lead", "Test Lead"),
+}
+
+
 def _assign_people(kb: CompanyKB, role: str, n: int, skills: list[str], used: set[str]) -> tuple[list[dict], int]:
     cand = []
     for e in kb.employees:
         if e["code"] in used:
             continue
         nr = K.normalize_role(e.get("role", ""))
-        role_ok = nr == role or (role == "Support Engineer" and nr in ("Integration Engineer",)) or \
-            (role == "Software Engineer" and nr in ("Integration Engineer",)) or (role == "Solution Architect" and "architect" in e.get("role", "").lower())
+        role_ok = nr == role or nr in ROLE_EQUIV.get(role, ()) or (role == "Solution Architect" and "architect" in e.get("role", "").lower())
         if not role_ok:
             continue
-        sk = {s["name"]: s.get("level", 3) for s in e.get("skills", [])}
-        fit = sum(sk.get(s, 0) for s in skills)
+        sk: dict[str, int] = {}
+        for s in e.get("skills", []):
+            for t in K.techs_in(s["name"]):
+                sk[t] = max(sk.get(t, 0), s.get("level", 3))
+        fit = sum(sk.get(s, 0) for s in skills) + (2 if nr == role else 0)  # the exact title first
         cand.append((e.get("availability", 100) >= 50, fit, e.get("years", 0), e))
     cand.sort(key=lambda x: (x[0], x[1], x[2]), reverse=True)
     picked = []
@@ -512,6 +533,30 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
         used.update(p["code"] for p in people)
         team.append({"role": role, "fte": round(fte, 2), "headcount": n_people, "location": loc, "responsibility": resp, "phase": phase,
                      "months": m, "person_days": round(fte * m * 21, 1), "assigned": people, "unfilled": unfilled})
+    # Part-time rows of the same job in one phase (a Project Manager split 0.25 onsite + 0.75 offshore, or engagement and
+    # project management) can be one person, as long as their total load stays within one full-time person. This stops
+    # roles showing "to hire" while a named person still has the time.
+    mgmt = {"Engagement Manager", "Project Manager"}
+    for ph in {t["phase"] for t in team}:
+        rows = [t for t in team if t["phase"] == ph]
+        load: dict[str, float] = defaultdict(float)
+        for t in rows:
+            for p in t["assigned"]:
+                load[p["code"]] += t["fte"] / max(1, len(t["assigned"]))
+        for t in rows:
+            if t["assigned"] or not t["unfilled"] or t["headcount"] != 1:
+                continue
+            for o in rows:
+                same_job = o["role"] == t["role"] or {o["role"], t["role"]} <= mgmt
+                if o is t or not same_job or len(o["assigned"]) != 1:
+                    continue
+                person = o["assigned"][0]
+                if load[person["code"]] + t["fte"] <= 1.0 + 1e-6:
+                    note = "" if o["role"] == t["role"] else f"; also {o['role'].lower()}"
+                    t["assigned"] = [dict(person, status=person["status"] + note)]
+                    t["unfilled"] = 0
+                    load[person["code"]] += t["fte"]
+                    break
     cal = ov.get("_calibration") or {"factor": 1.0, "deals": 0}
     if cal.get("deals") and abs(cal["factor"] - 1.0) > 0.01 and eng not in ("managed_services",):
         for t in team:
@@ -581,7 +626,30 @@ def _rate_for(kb: CompanyKB, role: str, location: str, overrides: dict) -> tuple
     rate, cost = DEFAULT_RATES.get(role, (450, 220))
     if location == "Onsite":
         rate, cost = rate * 2.1, cost * 2.0
+    scaled = _scale_to_card(kb, rate, cost, location)
+    if scaled:
+        return scaled
     return float(rate), float(cost), "USD", "Benchmark (no rate card row)"
+
+
+def _scale_to_card(kb: CompanyKB, rate: float, cost: float, location: str) -> tuple[float, float, str, str] | None:
+    """A role missing from the rate card gets the benchmark scaled to the company's own price level (same currency, same
+    ratio to benchmark as the roles it does list), not a raw US benchmark converted at the exchange rate."""
+    same, other, ccys = [], [], Counter()
+    for r in kb.rates:
+        role = K.normalize_role(r["role"])
+        if role not in DEFAULT_RATES or not r.get("day_rate"):
+            continue
+        loc = "Onsite" if (r.get("location") or "").lower().startswith("onsi") else "Offshore"
+        b = DEFAULT_RATES[role][0] * (2.1 if loc == "Onsite" else 1)  # each row against the benchmark for its own location
+        (same if loc == location else other).append(float(r["day_rate"]) / b)
+        ccys[(r.get("currency") or "USD").upper()] += 1
+    ratios = same if len(same) >= 2 else same + other  # prefer rows for the same location
+    if len(ratios) < 2 or len(ccys) != 1:
+        return None
+    ratios.sort()
+    k = ratios[len(ratios) // 2]
+    return round(rate * k, 2), round(cost * k, 2), next(iter(ccys)), "Benchmark scaled to your rate card"
 
 
 def _rates_note(company: str, lines: list[dict], rates_from: str) -> str:
@@ -591,7 +659,9 @@ def _rates_note(company: str, lines: list[dict], rates_from: str) -> str:
                 "(Knowledge library) before using this price.")
     bench = sorted({l["role"] for l in lines if l["rate_source"].startswith("Benchmark")})
     if bench:
-        return (f"Rates from the {company} rate card, except {', '.join(bench)}: no rate card row, so a generic market benchmark is used "
+        scaled = all(l["rate_source"] == "Benchmark scaled to your rate card" for l in lines if l["rate_source"].startswith("Benchmark"))
+        how = "a market benchmark scaled to your rate card's level" if scaled else "a generic market benchmark"
+        return (f"Rates from the {company} rate card, except {', '.join(bench)}: no rate card row, so {how} is used "
                 "for these. Add them to your rate card for real figures.")
     return f"Rates from the {company} rate card."
 
@@ -681,6 +751,17 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
     else:
         milestones = [{"name": "Mobilisation", "pct": 10}, {"name": "Design sign-off", "pct": 20}, {"name": "Build complete", "pct": 30},
                       {"name": "UAT sign-off", "pct": 20}, {"name": "Go-live", "pct": 15}, {"name": "Hypercare exit", "pct": 5}]
+    # The RFP's stated budget, in the pricing currency, and how far each price option sits above or below it.
+    budget = None
+    b = meta.get("budget")
+    if b and b.get("high"):
+        to_base = FX_PER_USD.get(base_ccy, 1) / FX_PER_USD.get(b["currency"], 1)
+        lo, hi = b["low"] * to_base, b["high"] * to_base
+        for sc in scenarios:
+            sc["vs_budget_pct"] = round((sc["price"] / hi - 1) * 100, 1)
+        budget = {"low": round(lo, 2), "high": round(hi, 2), "currency": base_ccy, "stated": b.get("text", ""),
+                  "stated_currency": b["currency"], "stated_low": b["low"], "stated_high": b["high"],
+                  "lowest_option": min(sc["price"] for sc in scenarios), "all_over": all(sc["price"] > hi for sc in scenarios)}
     adv = re.search(r"advance payment[^.]*?(\d{1,2})\s?%", " ".join(meta.get("payment_terms", [])) or "", re.I)
     partner_note = "Partner product licences are quoted separately by the partner and excluded from this price." if any(
         t.get("recommendation") == "Partner" for t in meta.get("top_missing", [])) else ""
@@ -689,7 +770,7 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
             "contingency_pct": contingency, "total_cost": round(total_cost, 2), "list_price": round(list_price, 2),
             "implied_rate_card_margin": round(implied, 1), "target_margin": target, "min_margin": floor, "scenarios": scenarios,
             "recommended": "Target", "milestones": milestones, "phase_split": phase_split, "partner_note": partner_note,
-            "rates_from": rates_from,
+            "rates_from": rates_from, "budget": budget,
             "assumptions": [_rates_note(kb.name, lines, rates_from) + (f" Converted to {rfp_ccy} at an indicative {round(fx_to_rfp, 4)} (confirm the rate with finance)."
                                                                         if rfp_ccy != base_ccy else ""),
                             _contingency_note(contingency, est),

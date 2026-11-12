@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
 import { ArrowRight, Briefcase, Plus } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -9,6 +9,7 @@ import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { ENGAGEMENT, FIT, money } from "../lib/format";
 import { OwnerTag } from "../components/review";
+import { prefetchDeal } from "../lib/prefetch";
 
 const MIX = FIT.map((f) => ({ key: f.key, label: f.label, fill: f.fill }));
 
@@ -71,7 +72,9 @@ export default function Dashboard() {
   const { user } = useAuth();
   const { show, hide } = useTip();
   const tilt = useTilt<HTMLDivElement>(1.6);
-  const { data, isLoading } = useQuery({ queryKey: ["dashboard"], queryFn: () => api.get("/dashboard"), refetchInterval: 8000 });
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery({ queryKey: ["dashboard"], queryFn: () => api.get("/dashboard"),
+    refetchInterval: (q) => ((((q.state.data as any)?.deals) || []).some((d: any) => d.status === "processing") ? 4000 : 60000) });
   if (isLoading || !data) return <PageLoader />;
   const k = data.kpis;
   const ccy = k.currency;
@@ -124,7 +127,7 @@ export default function Dashboard() {
                   return (
                     <tr key={d.id} className="hover:bg-brand-50/40">
                       <td className="td">
-                        <div className="flex items-center gap-2 min-w-0"><Link to={`/app/deals/${d.id}`} className="font-semibold hover:text-brand-700 line-clamp-1 min-w-0">{d.name}</Link><OwnerTag owner={d.owner} className="shrink-0" /></div>
+                        <div className="flex items-center gap-2 min-w-0"><Link to={`/app/deals/${d.id}`} onMouseEnter={() => prefetchDeal(qc, d.id)} className="font-semibold hover:text-brand-700 line-clamp-1 min-w-0">{d.name}</Link><OwnerTag owner={d.owner} className="shrink-0" /></div>
                         <div className="text-[12px] text-ink-muted">{d.client}{d.engagement_type ? `, ${(ENGAGEMENT[d.engagement_type] || "").toLowerCase()}` : ""}{d.due_date ? `. Due ${d.due_date}` : ""}</div>
                       </td>
                       <td className="td"><DealStatus s={d.status} /></td>

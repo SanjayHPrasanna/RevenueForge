@@ -15,8 +15,13 @@ def mask(text: str, client_name: str, aliases: list[str] | None, alias: str) -> 
     if not text:
         return text
     for term in build_terms(client_name, aliases):
-        if len(term) <= 4:  # acronyms: whole word, case-sensitive
-            text = re.sub(rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])", alias, text)
+        if len(term) <= 4:
+            # Acronyms: case-sensitive, and not part of a longer capitalised word ("SHN" but not "SHNX" or "ASHN"). Lower-case
+            # letters next to it still count as a boundary, so text that lost its spaces ("SHNhasan") is masked too.
+            if term.isupper():
+                text = re.sub(rf"(?<![A-Z]){re.escape(term)}(?![A-Z])", alias, text)
+            else:
+                text = re.sub(rf"(?<![A-Za-z]){re.escape(term)}(?![A-Za-z])", alias, text)
         else:
             text = re.sub(re.escape(term), alias, text, flags=re.I)
     return text

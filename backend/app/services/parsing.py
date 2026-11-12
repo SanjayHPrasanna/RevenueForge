@@ -71,6 +71,36 @@ def _is_heading_text(t: str) -> bool:
 
 
 # --------------------------------------------------------------------------- PDF
+def _table_rows(page, t) -> list[list[str]]:
+    """Each cell's text, read word by word inside the cell's box. PyMuPDF's own table text drops the spaces between words
+    in some PDFs ("Contractperiod | 9monthsbuild+24monthssupport"), which broke dates, terms and client-name masking."""
+    import pymupdf
+
+    try:
+        fallback = t.extract()
+    except Exception:
+        fallback = []
+    out = []
+    for i, row in enumerate(t.rows):
+        cells = []
+        for j, box in enumerate(row.cells):
+            text = ""
+            if box is not None:
+                words = page.get_text("words", clip=pymupdf.Rect(box))
+                lines: dict[tuple, list] = {}
+                for w in sorted(words, key=lambda w: (w[5], w[6], w[7])):
+                    lines.setdefault((w[5], w[6]), []).append(w[4])
+                text = "\n".join(" ".join(ws) for ws in lines.values())
+            if not text.strip():
+                try:
+                    text = fallback[i][j] or ""
+                except (IndexError, TypeError):
+                    text = ""
+            cells.append(_clean(text))
+        out.append(cells)
+    return out
+
+
 def parse_pdf(data: bytes, filename: str) -> ParsedDocument:
     import pymupdf
 
@@ -85,8 +115,7 @@ def parse_pdf(data: bytes, filename: str) -> ParsedDocument:
         rects = []
         try:
             for t in page.find_tables().tables:
-                rows = t.extract()
-                rows = [[_clean(c or "") for c in r] for r in rows]
+                rows = _table_rows(page, t)
                 tables.append((t.bbox[1], rows))
                 rects.append(pymupdf.Rect(t.bbox))
         except Exception:
@@ -150,6 +179,7 @@ def parse_pdf(data: bytes, filename: str) -> ParsedDocument:
         items.sort(key=lambda it: it[1])
         cur: dict | None = None
         prev_line = None
+        last_head = None
 
         def flush():
             nonlocal cur
@@ -162,6 +192,7 @@ def parse_pdf(data: bytes, filename: str) -> ParsedDocument:
         for kind, _, obj in items:
             if kind == "table":
                 flush()
+                last_head = None
                 last: dict[int, str] = {}
                 header = None
                 for r in obj:
@@ -201,10 +232,22 @@ def parse_pdf(data: bytes, filename: str) -> ParsedDocument:
             numbered_bold = l["bold"] and len(t) < 90 and not t.endswith((".", ",", ";")) and re.match(r"^\d{1,2}[.)]\s+[A-Z]", t)
             if is_heading and (not BULLET_RE.match(t) or numbered_bold):
                 flush()
+                # A long title or heading wraps onto a second line in the same size, straight below: join it back
+                # ("Digital Patient Engagement and" + "Integration Platform") instead of keeping only the first line.
+                lh = last_head
+                if lh is not None and blocks and blocks[-1].idx == lh["idx"] and abs(lh["size"] - l["size"]) < 0.6 \
+                        and -l["size"] * 0.5 <= l["y"] - lh["y1"] < l["size"] * 0.7 and not NUMBERED_HEADING_RE.match(t) and len(blocks[-1].text) + len(t) < 200:
+                    blocks[-1].text = f"{blocks[-1].text} {t}"
+                    blocks[-1].section = section = blocks[-1].text.rstrip(":")
+                    last_head = {**lh, "y1": l["y1"]}
+                    prev_line = None
+                    continue
                 section = t.rstrip(":")
                 blocks.append(Block(len(blocks), pno, "heading", t, section))
+                last_head = {"idx": blocks[-1].idx, "size": l["size"], "y1": l["y1"]}
                 prev_line = None
                 continue
+            last_head = None
             bullet_only = BULLET_RE.fullmatch(t + " ") is not None and len(t) <= 4
             if bullet_only:
                 flush()

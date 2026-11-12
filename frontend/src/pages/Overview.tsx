@@ -115,7 +115,7 @@ export function OverviewStage({ deal }: { deal: any }) {
             </Panel>
           )}
           {e && (
-            <Panel title="Team" sub={`${e.headcount} people, ${e.fte} FTE, over ${e.contract_months || e.duration_months} months. ${Math.round(e.onsite_ratio * 100)}% onsite.`}
+            <Panel title="Team" sub={`${e.headcount} people, ${e.fte} FTE, over ${e.contract_months || e.duration_months} months. ${Math.round((e.onsite_share ?? e.onsite_ratio) * 100)}% onsite.`}
               action={<Link to={`/app/deals/${deal.id}/estimation`} className="text-[13px] font-semibold text-brand-700 hover:underline whitespace-nowrap">Open team</Link>}>
               <TeamBars team={e.team} />
               {e.unfilled_roles > 0 && <p className="text-[12.5px] text-fit-gap-ink mt-3">{e.unfilled_roles} roles still need someone.</p>}
