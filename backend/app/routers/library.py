@@ -129,10 +129,21 @@ def update_company(body: dict, ctx: Ctx = Depends(require_roles())):
         for k, v in body["settings"].items():
             # Only the commercial policy is set here. The AI key (/company/ai), the network listing (/network/profile), the
             # demo flag and learned history are system-managed, so they can't be overwritten through this route.
-            if k not in ("target_margin", "min_margin", "travel_pct", "hide_employee_names"):
+            if k not in ("target_margin", "min_margin", "travel_pct", "hide_employee_names", "generalised_response", "fte_per_24x7_seat"):
                 continue
-            if k == "hide_employee_names":
+            if k in ("hide_employee_names", "generalised_response"):
                 s[k] = bool(v)
+                if k == "generalised_response":
+                    ctx.audit("feature.switch", k, value=bool(v))
+                continue
+            if k == "fte_per_24x7_seat":
+                try:
+                    v = float(v)
+                except (TypeError, ValueError):
+                    raise HTTPException(400, "FTE per 24x7 seat must be a number.")
+                if not 3 <= v <= 6:
+                    raise HTTPException(400, "FTE per 24x7 seat must be between 3 and 6.")
+                s[k] = v
                 continue
             if k in ("target_margin", "min_margin", "travel_pct"):
                 try:

@@ -10,8 +10,11 @@ Run from the `backend` folder. Each one makes a throwaway database, so it never 
 | `python tests/qa_e2e.py` | A whole deal by a 6-person team (each role approving its own stage), overrides and price arithmetic, downloads, comments, clarifications, outcomes and learning, the opportunity radar with broken sources, the supplier network with a buyer team, market insights. |
 | `python tests/qa_drive_sync.py` | The connected Google Drive folder: connect, an unchanged refresh, then a changed file, a new file and deleted files; only those are touched, items added in the app are kept, edits made in the app are reported, deletions only happen when ticked, other companies can't see or change it. |
 | `python tests/qa_compliance.py` | Trust facts come from the real setup, tender licences, the free-tier AI confirmation, company export (no secrets, nothing from other companies) and permanent delete. |
+| `python tests/qa_domains.py` | Five-domain IT acceptance pack: a software, cybersecurity, cloud-migration, network + NOC and data-platform RFP run against one supplier library, scored on the output (understanding, bid decision, team, proposal, commercial). `--mode off|on|both` runs with the `generalised_response` switch off/on; `--strict` fails on any miss. Scores are kept in `DOMAIN_SCORECARD.md`. |
 | `python tests/qa_db_tools.py` | Damages a real SQLite file, then checks detection, that background writes stop, `repair_db` rescue and switch-over, and (with `QA_POSTGRES_URL`) `copy_db` to PostgreSQL. |
 
 Any suite can run on PostgreSQL: set `DATABASE_URL` to an empty database first.
 
 Each prints `N passed, M failed` and exits non-zero on any failure.
+
+`bash tests/run_all.sh` runs every suite and prints one line each.
