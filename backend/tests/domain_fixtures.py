@@ -94,7 +94,7 @@ DOMAINS = {
                    "build_months": 0, "run_months": 36, "transition_months": 3,
                    "techs": ["Microsoft Sentinel", "CrowdStrike Falcon", "Microsoft Entra ID", "CyberArk", "Active Directory"],
                    "standards": ["MITRE ATT&CK", "OWASP Top 10", "ISO/IEC 27001", "CISSP", "OSCP"],
-                   "gates_fail": ["CMP-02", "EL-01"], "verdict_ok": {"No bid", "Bid as subcontractor"},
+                   "gates_fail": ["CMP-02", "EL-01"], "not_held": ["CERT-In empanelled", "CISSP", "OSCP", "SOC 2"], "verdict_ok": {"No bid", "Bid as subcontractor"},
                    "role_families": [r"analyst|soc", r"identity|iam|security engineer", r"lead|manager"],
                    "licences": False, "partner": True},
     },
@@ -144,7 +144,7 @@ DOMAINS = {
                    "build_months": 6, "run_months": 48, "transition_months": 0,
                    "techs": ["Fortinet FortiGate", "FortiSwitch", "SD-WAN", "BGP", "OSPF", "SolarWinds", "NetFlow"],
                    "standards": ["802.1X", "Cyber Essentials Plus"],
-                   "gates_fail": ["EL-01", "EL-02"], "verdict_ok": {"No bid", "Bid as subcontractor"},
+                   "gates_fail": ["EL-01", "EL-02"], "not_held": ["Fortinet Expert Partner", "Cyber Essentials Plus"], "verdict_ok": {"No bid", "Bid as subcontractor"},
                    "role_families": [r"network", r"noc|operations|analyst", r"field"],
                    "licences": True, "partner": True},
     },
@@ -169,7 +169,7 @@ DOMAINS = {
                    "build_months": 8, "run_months": 12, "transition_months": 0,
                    "techs": ["Snowflake", "Fivetran", "dbt", "Apache Airflow", "Great Expectations", "Power BI"],
                    "standards": [],
-                   "gates_fail": ["EL-01"], "verdict_ok": {"No bid", "Bid as subcontractor"},
+                   "gates_fail": ["EL-01"], "not_held": ["Snowflake Select Partner"], "verdict_ok": {"No bid", "Bid as subcontractor"},
                    "role_families": [r"data engineer|analytics engineer", r"bi|report|power bi|analyst", r"architect"],
                    "licences": True, "partner": True},
     },
@@ -265,18 +265,20 @@ RATES = [{"role": r, "level": "", "location": loc, "day_rate": rate * (2.2 if lo
 
 # Approved answers from earlier healthcare and logistics deals: realistic, but wrong for any other domain.
 OLD_ANSWERS = [
-    ("The bidder shall build SOAR playbooks for automated data consolidation from hospital systems.",
+    ("The bidder shall build SOAR playbooks for phishing, ransomware and account takeover using automation.",
      "We will build a data platform consolidating data from the HIS, laboratory system, and billing system, leveraging our Data Engineering & Analytics and Healthcare Interoperability capabilities."),
-    ("Bidders must have delivered two similar healthcare implementations in the last five years.",
+    ("Bidders must have operated managed services for at least three clients in the last five years.",
      "We leverage our dedicated Healthcare Interoperability capability and Healthcare KPI Dashboard Pack accelerator to deliver robust domain solutions. To fully substantiate our experience with two similar healthcare implementations in the last five years, we will add a reference project, demo, or named expert."),
-    ("The bidder shall provide 24x7 L1 support with a 15-minute response time.",
+    ("The bidder shall operate a 24x7 Network Operations Centre with P1 response within 15 minutes.",
      "We bring proven expertise through our Application Managed Services capability and relevant project experience. To address the thin evidence for 24x7 L1 support with a 15-minute response time, we will add a reference project, demo, or named expert to our final response."),
     ("The bidder shall hold ISO/IEC 27001 certification.",
      "We hold a current ISO/IEC 27001:2022 Information Security certification, demonstrating our ongoing commitment to robust information security management across all operations."),
-    ("The bidder shall build a shipment tracking portal where customers can see live consignment status.",
+    ("The bidder shall build a responsive citizen portal where customers can track the status of requests.",
      "We will deliver a responsive patient web portal for appointment booking, report download, and bill payment, leveraging our Patient & Customer Portals capability."),
-    ("Operations dashboards shall be built in Power BI with daily refresh.",
+    ("The bidder shall deliver 25 Power BI reports for operations with daily refresh.",
      "We will provide Power BI dashboards for bed occupancy, OPD footfall, report turnaround time, and revenue cycle, using our Healthcare KPI Dashboard Pack."),
+    ("The bidder shall be a CERT-In empanelled information security auditing organisation.",
+     "Kestrel Test Works is a CERT-In empanelled auditing organisation with a dedicated security assurance practice."),
 ]
 
 # Words that only belong to the earlier deals' domains: none of these five RFPs uses them.

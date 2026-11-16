@@ -193,7 +193,7 @@ def build_architecture(reqs: list[dict], kb: CompanyKB, meta: dict) -> dict:
     return {"style": style, "engagement_type": eng, "summary": summary, "layers": layers_out, "choices": choices}
 
 
-def ai_architecture(draft: dict, reqs: list[dict], kb: CompanyKB, meta: dict, guidance: str = "") -> dict | None:
+def ai_architecture(draft: dict, reqs: list[dict], kb: CompanyKB, meta: dict, guidance: str = "", generalised: bool = False) -> dict | None:
     """AI refines the rules-based draft: better grouping, missing components, sharper rationale; every item traced to requirements."""
     from . import llm
 
@@ -208,7 +208,11 @@ def ai_architecture(draft: dict, reqs: list[dict], kb: CompanyKB, meta: dict, gu
               f"Technologies this company has people for: {company}\n\nDraft architecture (JSON):\n"
               f"{__import__('json').dumps({k: draft[k] for k in ('layers', 'choices')})[:9000]}\n\nRequirements:\n{req_lines}\n\n"
               "Improve the draft into a credible solution architecture. Keep technologies the RFP mandates; prefer the company's own technologies "
-              "where the RFP leaves the choice open; mark packaged products the company lacks as 'Partner product'. Every component and choice must "
+              "where the RFP leaves the choice open; mark packaged products the company lacks as 'Partner product'. "
+              + ("Only include technologies the requirements actually need: no favourite tools the RFP doesn't call for. Use the basis "
+                 "'Company strength' only for a technology in the company list above; a product the RFP names is 'Specified in the RFP'. "
+                 if generalised else "") +
+              "Every component and choice must "
               "list the requirement codes that drive it (codes from the list only). Return JSON: "
               '{"summary": "<3 sentences>", "layers": [{"layer": "<name>", "components": [{"name": "...", "source": "RFP-mandated|Proposed|Client-owned|Partner product", '
               '"requirements": ["REQ-001"], "detail": "<short>"}]}], "choices": [{"area": "...", "choice": "...", "basis": "Specified in the RFP|Company strength|Partner|To confirm", '
@@ -264,6 +268,49 @@ def check_against_library(arch: dict, reqs: list[dict], kb: CompanyKB) -> dict:
                 comp["not_in_library"] = missing
                 unbacked.extend(missing)
     arch["not_in_library"] = sorted(set(unbacked))
+    return arch
+
+
+def _evidence_terms(kb: CompanyKB) -> set[str]:
+    """Every technology or skill name the company can show: people's skills, capabilities, case studies, accelerators."""
+    out = set()
+    for e in kb.employees:
+        out |= {_n(s.get("name", "")) for s in e.get("skills", [])}
+    for c in kb.capabilities:
+        out |= {_n(t) for t in c.get("technologies", [])}
+    for c in kb.case_studies:
+        out |= {_n(t) for t in c.get("technologies", [])}
+    for a in kb.accelerators:
+        out |= {_n(t) for t in a.get("technologies", [])}
+    return {t for t in out if len(t) > 1}
+
+
+def _n(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def _held(term: str, have: set[str]) -> bool:
+    t = _n(term)
+    t2 = re.sub(r"^(microsoft|apache|confluent|amazon|aws|google|the)\s+", "", t)
+    return bool(t) and any(t == h or t2 == h or (len(h) > 3 and re.search(r"(?<![a-z0-9])" + re.escape(h) + r"(?![a-z0-9])", t)) or
+                           (len(t2) > 3 and re.search(r"(?<![a-z0-9])" + re.escape(t2) + r"(?![a-z0-9])", h)) for h in have)
+
+
+def verify_strength_claims(arch: dict, kb: CompanyKB, rfp_text: str) -> dict:
+    """'Company strength' must be backed by the library for every product in the choice (open vocabulary, not the fixed
+    technology list); otherwise the basis says where the choice really comes from."""
+    have = _evidence_terms(kb)
+    rfp_n = _n(rfp_text)
+    for c in arch.get("choices", []):
+        if c.get("basis") != "Company strength":
+            continue
+        parts = [p for p in re.split(r"\s*(?:,|/|\band\b|\+|&|\bwith\b)\s*", c.get("choice", "")) if p.strip()]
+        unbacked = [p.strip() for p in parts if not _held(p, have)]
+        if unbacked:
+            in_rfp = all(_n(p) and _n(p) in rfp_n for p in unbacked)
+            c["basis"] = "Specified in the RFP" if in_rfp else "To validate"
+            c["not_in_library"] = sorted(set(c.get("not_in_library", []) + unbacked))
+            arch["not_in_library"] = sorted(set(arch.get("not_in_library", []) + unbacked))
     return arch
 
 
@@ -460,18 +507,27 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
 
     plan: list[tuple] = []  # (role, fte, location, responsibility, phase, months)
     build_months = None
+    prof_term = (meta.get("profile") or {}).get("term") or {}
+    stated_transition = float(prof_term.get("transition_months") or 0)
     if eng == "managed_services":
         roles, is_247, p1_fast, _ = _run_roles(text_all, ws_reqs, onsite_ratio, after_build=False)
         transition_weeks = 6 if re.search(r"4\s?[–-]\s?6 weeks|6 weeks", text_all) else 4
+        if stated_transition:
+            transition_weeks = round(stated_transition * 4.33, 1)
         phases = [
             {"name": "Transition & onboarding", "weeks": transition_weeks, "detail": "Knowledge transfer, access, baselining, governance set-up"},
             {"name": "Steady-state operations", "weeks": max(4, term * 4.33 - transition_weeks), "detail": "SLA-based run services" + (" 24x7" if is_247 else "")},
             {"name": "Change & enhancement delivery", "weeks": max(4, term * 4.33 - transition_weeks), "detail": "Sprint-based interface delivery", "parallel": True},
             {"name": "Lifecycle & continuous improvement", "weeks": max(4, term * 4.33 - transition_weeks), "detail": "Quarterly upgrade, patch and improvement cycles", "parallel": True},
         ]
-        months = term
+        months = term + (int(round(stated_transition)) if stated_transition else 0)
         plan = [(*r, "Run", term) for r in roles]
-        assumptions_extra = [f"Contract term of {term} months{' (assumed: not stated in the RFP)' if not meta.get('contract_term_months') else ' as stated in the RFP'}.",
+        if stated_transition:
+            phases[0]["detail"] += f" ({stated_transition:g} months, as the RFP states)"
+            for i, p in enumerate(phases[1:], start=1):
+                phases[i] = {**p, "weeks": round(term * 4.33, 1)}
+        assumptions_extra = [(f"{stated_transition:g}-month transition, then " if stated_transition else "") +
+                             f"a service term of {term} months{' (assumed: not stated in the RFP)' if not meta.get('contract_term_months') else ' as stated in the RFP'}.",
                              f"{'24x7' if is_247 else 'Business-hours'} coverage{' with P1 response within 15–30 minutes' if p1_fast else ''}.",
                              "Volume of change requests is absorbed by the change squad; surges beyond 20% trigger a capacity review."]
     elif eng == "build_run":
@@ -483,7 +539,7 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
             {"name": "Service transition", "weeks": 4, "detail": "Runbooks, monitoring and support handed from the build team to the run team", "parallel": True},
             {"name": "Managed service (run)", "weeks": term * 4.33, "detail": "SLA-based run services" + (" 24x7" if is_247 else "") + ", enhancements and continuous improvement"},
         ]
-        months = build_months + term
+        months = build_months + term + (int(round(stated_transition)) if stated_transition else 0)
         assumptions_extra = [
             f"Build and migration over {build_months} months{' as required by the RFP' if meta.get('build_months') and not ov.get('duration_months') else ''}, "
             f"from {round(build)} person-days of requirement-level effort plus project management, architecture and testing.",

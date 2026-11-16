@@ -127,9 +127,40 @@ def score_domain(c, h, dom: str, did: str) -> list[tuple[str, str, bool, str]]:
     r = c.get(f"/api/deals/{did}/download/proposal", headers=h)
     prop = docx_text(r.content) if r.status_code == 200 else ""
     add("proposal", "proposal produced", len(prop) > 500, r.status_code)
-    foreign = [w for w in F.FOREIGN_TERMS if re.search((r"\b" + re.escape(w) + r"\b"), prop, 0 if w.isupper() else re.I)
+    # Relevant Experience lists real projects by their real names, and an answer may name its own evidence: both are
+    # checked separately below. Everything else must not borrow another domain's wording.
+    body = re.sub(r"\n\d+\.\s*Relevant Experience\n.*?(?=\n\d+\.\s+[A-Z])", "\n", prop, flags=re.S | re.I)
+    for name in [x["name"] for x in F.CAPABILITIES] + [x["title"] for x in F.CASE_STUDIES] + [x["name"] for x in F.ACCELERATORS]:
+        body = body.replace(name, " ")
+    foreign = [w for w in F.FOREIGN_TERMS if re.search((r"\b" + re.escape(w) + r"\b"), body, 0 if w.isupper() else re.I)
                and not re.search(re.escape(w), src, re.I)]
     add("proposal", "no wording from other domains", not foreign, foreign)
+    names = {x["name"]: "Capability" for x in F.CAPABILITIES} | {x["title"]: "Case study" for x in F.CASE_STUDIES} | {x["name"]: "Accelerator" for x in F.ACCELERATORS}
+    unsupported = []
+    for q in reqs:
+        txt = q.get("response") or ""
+        ev = {e.get("name") for e in (q.get("match") or {}).get("evidence", [])}
+        unsupported += [f"{q.get('source_ref')}: {n}" for n in names if n.lower() in txt.lower() and n not in ev]
+    add("proposal", "answers cite only their own evidence", not unsupported, unsupported[:4])
+    shown = re.search(r"\n\d+\.\s*Relevant Experience\n(.*?)(?=\n\d+\.\s+[A-Z])", prop, flags=re.S | re.I)
+    rel_bad = []
+    if shown:
+        exp_t = {norm(t) for t in exp["techs"]}
+        for cs in F.CASE_STUDIES:
+            if cs["title"] in shown.group(1):
+                from app.services.validation import same_industry
+                if not ({norm(t) for t in cs["technologies"]} & exp_t or any(norm(t) in norm(src) for t in cs["technologies"])
+                        or same_industry(cs["industry"], d.get("industry") or "")):
+                    rel_bad.append(cs["title"])
+    add("proposal", "case studies shown are relevant", not rel_bad, rel_bad)
+    neg = re.compile(r"\b(not|no|without|partner|pursu|obtain|working towards)\w*", re.I)
+    claims = []
+    for q in reqs:
+        for sent in re.split(r"(?<=[.!?])\s+", q.get("response") or ""):
+            for cl in exp.get("not_held", []):
+                if cl.lower() in sent.lower() and not neg.search(sent):
+                    claims.append(f"{q.get('source_ref')}: {cl}")
+    add("proposal", "no claim to credentials the company lacks", not claims, claims)
     internal = [p for p in F.INTERNAL_PHRASES if p.lower() in prop.lower()]
     add("proposal", "no internal notes", not internal, internal)
     by_text: dict = {}

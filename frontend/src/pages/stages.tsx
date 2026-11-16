@@ -862,6 +862,32 @@ function ResponseRow({ dealId, r, onSaved }: { dealId: string; r: any; onSaved: 
   );
 }
 
+function ProposalChecks({ checks }: { checks: any }) {
+  const errs: any[] = checks.errors || [];
+  const warns: any[] = checks.warnings || [];
+  return (
+    <div className="card p-5 text-[13px]" aria-live="polite">
+      <div className="font-bold text-[14px] flex items-center gap-2">
+        {errs.length ? <X className="h-4 w-4 text-ember-600" /> : <CheckCircle2 className="h-4 w-4 text-brand-700" />} Proposal checks
+      </div>
+      <div className="text-ink-muted mt-1">
+        {errs.length ? `${plural(errs.length, "answer")} must be fixed before approval` : `${checks.checked} answers checked: claims backed by your library, no internal notes`}
+        {warns.length ? `; ${plural(warns.length, "note")} to review.` : "."}
+      </div>
+      {(errs.length > 0 || warns.length > 0) && (
+        <ul className="mt-3 space-y-2 max-h-56 overflow-auto scroll-thin">
+          {[...errs, ...warns].slice(0, 30).map((x, i) => (
+            <li key={i} className="flex gap-2">
+              <span className={clsx("chip shrink-0", x.severity === "error" ? "bg-ember-50 text-ember-600" : "bg-line-soft text-ink-soft")}>{x.ref || x.code}</span>
+              <span className="text-ink-soft">{x.detail}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function ProposalStage({ deal }: P) {
   const toast = useToast();
   const qc = useQueryClient();
@@ -869,6 +895,7 @@ export function ProposalStage({ deal }: P) {
   const { data: reqs } = useReqs(deal.id);
   const [edited, setEdited] = useState(false);
   const [filter, setFilter] = useState("all");
+  const { data: checks } = useQuery({ queryKey: ["checks", deal.id, reqs?.map((r) => r.response).join("|").length], queryFn: () => api.get(`/deals/${deal.id}/proposal/checks`), enabled: !!reqs });
   const regen = useMutation({ mutationFn: () => api.post(`/deals/${deal.id}/rerun`, { from_stage: "proposal" }), onSuccess: () => qc.invalidateQueries() });
   const rebuild = useMutation({
     mutationFn: () => api.post(`/deals/${deal.id}/proposal/rebuild`),
@@ -904,11 +931,12 @@ export function ProposalStage({ deal }: P) {
             <button className="btn-outline w-full mt-2" onClick={() => download(`/deals/${deal.id}/download/requirements`, "compliance matrix.xlsx").catch((e) => toast("error", e.message))}><Download className="h-4 w-4" /> Compliance matrix .xlsx</button>
             <button className="btn-ghost w-full mt-2" disabled={regen.isPending} onClick={() => regen.mutate()} title="Re-drafts every answer except the ones your team wrote"><RefreshCw className="h-4 w-4" /> Re-draft with AI</button>
           </div>
+          {checks?.enabled && <ProposalChecks checks={checks} />}
           <div className="card p-5 text-[13px]">
             <div className="font-bold text-[14px] mb-2">Where the answers came from</div>
             <ShareBar parts={[["library", "#0C3D55"], ["human", "#F5833A"], ["ai", "#1A82AE"], ["rules", "#9FC6D9"]].map(([k, c]) => ({ label: SRC[k][0], value: counts[k] || 0, color: c }))} />
             {(counts.rules || 0) > 0 && d.engine === "ai" && <div className="text-[12px] text-ember-600 mt-3">{counts.rules} answer{counts.rules === 1 ? "" : "s"} use the template because the AI couldn't write them (busy or out of quota). Use "Re-draft with AI" to try again; your team's edits are kept.</div>}
-            <div className="text-[12px] text-ink-muted mt-3">Approving this stage adds these answers to your library, so the next similar RFP starts from them.</div>
+            <div className="text-[12px] text-ink-muted mt-3">Approving this stage adds these answers to your library, so the next similar RFP starts from them{checks?.enabled ? " (only answers that pass the checks)" : ""}.</div>
           </div>
         </aside>
       </div>

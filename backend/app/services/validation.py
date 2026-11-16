@@ -34,6 +34,7 @@ they this those through time tools under unified using very well were what when 
 year years your users user access across apps application applications mobile online self web replaced point links governed
 api apis rest analytics dashboard dashboards assistant pilot drafting summaries summary summarise local india south north
 east west middle confidential chain
+kpi kpis sla slas api uat sso mfa ui ux bi etl elt crm erp faq sme poc rpo rto itil itsm sdk cli gui dr ha qa ci cd
 """.split())
 
 INTERNAL_RE = re.compile(
@@ -47,7 +48,7 @@ NOT_HELD_RE = re.compile(r"\b(do(?:es)? not|don't|doesn't|not (?:yet|currently)|
                          r"working towards|plan to (?:obtain|achieve)|partner(?:s|ing)? (?:with|that holds?)|via (?:our|a) partner|through (?:our|a) partner)\b", re.I)
 
 INDUSTRY_GROUPS = [
-    {"healthcare", "health", "hospital", "pharma", "life sciences", "medical", "clinical"},
+    {"healthcare", "health", "hospital", "pharma", "life sciences", "medical", "clinical", "patient"},
     {"bfsi", "banking", "bank", "insurance", "insurer", "financial", "finance", "lending", "nbfc", "capital markets", "fintech"},
     {"retail", "distribution", "fmcg", "consumer", "e-commerce", "ecommerce"},
     {"transportation", "logistics", "transport", "rail", "aviation", "shipping", "freight"},
@@ -86,40 +87,62 @@ def same_industry(a: str, b: str) -> bool:
     return ga is not None and ga == gb
 
 
+def _industry_of_text(text: str) -> int | None:
+    l = " " + (text or "").lower() + " "
+    for i, g in enumerate(INDUSTRY_GROUPS):
+        if any(re.search(r"(?<![a-z])" + re.escape(k) + r"(?![a-z])", l) for k in g if len(k) > 3):
+            return i
+    return None
+
+
 def foreign_vocabulary(kb, deal_industry: str, rfp_text: str) -> set[str]:
-    """Words that mark the company's work in other industries and that this RFP never uses. Built from the library's
-    industry-tagged capabilities and case studies: a title or name counts double (it names the domain), a description once;
-    a word needs a weight of 2 (an acronym 1) and must be absent from every item in this deal's industry or with no industry."""
+    """Words that mark the company's work in other industries and that this RFP never uses.
+
+    Domain-marked items: case studies (a client project has an industry) and capabilities or accelerators whose own name or
+    description names an industry ("Healthcare KPI Dashboard Pack: dashboards for hospital KPIs"). Plain IT practices are
+    neutral. A title counts double, a description once; a word needs a weight of 2 (an acronym 1). Excluded: words in any
+    neutral or same-industry item, words used by two or more other industries (generic), technology names (the company's
+    tech vocabulary is never "foreign") and anything this RFP itself says."""
     rfp = {t.lower() for t in tokens(rfp_text)} | set(tokens(rfp_text))
+    deal_g = _group(deal_industry)
     inside: set[str] = set()
     weight: Counter = Counter()
+    groups_of: dict[str, set] = {}
+    tech: set[str] = set()
     items = []
     for c in getattr(kb, "capabilities", []):
-        items.append((c.get("industries") or [], c.get("name", ""), c.get("description", "")))
-    for cs in getattr(kb, "case_studies", []):
-        items.append(([cs.get("industry")] if cs.get("industry") else [], cs.get("title", ""),
-                      " ".join([cs.get("summary", "")] + list(cs.get("outcomes") or []))))
+        txt = c.get("name", "") + " " + c.get("description", "")
+        items.append((_industry_of_text(txt), c.get("name", ""), c.get("description", "")))
+        tech |= {w.lower() for t in c.get("technologies", []) for w in tokens(t)}
     for a in getattr(kb, "accelerators", []):
-        items.append(([], a.get("name", ""), a.get("description", "")))
-    for inds, title, body in items:
-        inds = [i for i in inds if i]
-        neutral = not inds or any("cross" in i.lower() for i in inds)
-        if neutral or any(same_industry(i, deal_industry) for i in inds):
-            inside |= {t.lower() for t in tokens(title + " " + body)} | tokens(title + " " + body)
+        txt = a.get("name", "") + " " + a.get("description", "")
+        items.append((_industry_of_text(txt), a.get("name", ""), a.get("description", "")))
+        tech |= {w.lower() for t in a.get("technologies", []) for w in tokens(t)}
+    for cs in getattr(kb, "case_studies", []):
+        g = _group(cs.get("industry", "")) if cs.get("industry") else _industry_of_text(cs.get("title", "") + " " + cs.get("summary", ""))
+        items.append((g, cs.get("title", ""), " ".join([cs.get("summary", "")] + list(cs.get("outcomes") or []))))
+        tech |= {w.lower() for t in cs.get("technologies", []) for w in tokens(t)}
+    for e in getattr(kb, "employees", []):
+        tech |= {w.lower() for s in e.get("skills", []) for w in tokens(s.get("name", "") if isinstance(s, dict) else str(s))}
+    for g, title, body in items:
+        allt = tokens(title + " " + body)
+        if g is None or g == deal_g:
+            inside |= {t.lower() for t in allt} | allt
             continue
         tt, bt = tokens(title), tokens(body)
         for t in tt:
             weight[t] += 2
         for t in bt - tt:
             weight[t] += 1
-        for i in inds:  # the industry name itself ("Healthcare", "Logistics")
-            for t in tokens(i):
-                weight[t] += 2
+        for t in allt:
+            groups_of.setdefault(t, set()).add(g)
     out = set()
     for t, w in weight.items():
         acronym = t.isupper()
-        if (w >= 2 or acronym) and t not in inside and t.lower() not in inside and t.lower() not in GENERIC \
-                and t not in rfp and t.lower() not in rfp and not t.isdigit():
+        lt = t.lower()
+        if (w >= 2 or acronym) and t not in inside and lt not in inside and lt not in GENERIC and lt not in tech \
+                and t not in rfp and lt not in rfp and not t.isdigit() and len(groups_of.get(t, ())) < 2 \
+                and not re.fullmatch(r"[A-Z]\d", t) and (acronym or len(t) >= 5):
             out.add(t)
     return out
 
@@ -168,7 +191,12 @@ class Checker:
                 continue  # "we do not hold SOC 2 today; we will..." is an honest statement, not a claim
             issues.append({"rule": "unsupported", "severity": "error", "detail": f"claims \"{m.group(0).strip()}\", which is not in the certificate register",
                            "term": m.group(0).strip()})
-        found = sorted({t for t in tokens(text) if t in self.foreign or (t.lower() in self.foreign and not t.isupper())})
+        # names of this requirement's own evidence are facts, not borrowed wording ("our Patient & Customer Portals capability")
+        bare = text
+        for e in ((req or {}).get("match") or {}).get("evidence", []):
+            if e.get("name"):
+                bare = re.sub(re.escape(e["name"]), " ", bare, flags=re.I)
+        found = sorted({t for t in tokens(bare) if t in self.foreign or (t.lower() in self.foreign and not t.isupper())})
         if found:
             issues.append({"rule": "foreign", "severity": "error" if human else "warning",
                            "detail": "uses wording from the company's work in other industries: " + ", ".join(found[:6]), "terms": found})
@@ -182,7 +210,7 @@ class Checker:
         if num:  # ISO 27001 / ISO/IEC 27001:2022: the standard number decides
             return any(num.group(0) in h for h in self.held)
         key = re.sub(r"\b(empanell?ed|empanelment|certified|certification|type|report)\b", " ", c).split()
-        return any(all(k in h for k in key) for h in self.held) if key else True
+        return any(all(k in h.split() for k in key) for h in self.held) if key else True
 
     def clean(self, text: str, issues: list[dict]) -> str:
         """Drop the sentences that carry an issue; what's left must still read as an answer."""
@@ -200,6 +228,17 @@ class Checker:
                 keep.append(s)
         out = " ".join(keep).strip()
         return out if len(out) >= 40 else ""
+
+
+def honest_fallback(req: dict, company: str) -> str:
+    """When nothing else survives the checks: an answer that states the position without claiming anything."""
+    opt = ((req.get("gap") or {}).get("options") or [{}])[0].get("type") if req.get("match_status") in ("gap", "partial") else None
+    return {
+        "Partner": f"We will meet this through a specialist partner that holds the required capability and credentials, with {company} as prime contractor.",
+        "Hire": "We will appoint a specialist who meets this requirement before mobilisation and name them in the delivery plan.",
+        "Certify": f"{company} does not hold this today and is working towards it; please confirm whether it is mandatory at award.",
+        "Upskill": "Our team will complete the training and certification this requires ahead of mobilisation.",
+    }.get(opt or "", f"{company} does not fully meet this requirement today; our mitigation is set out in the risks and mitigations section of this proposal.")
 
 
 def topic_overlap(a: str, b: str) -> float:

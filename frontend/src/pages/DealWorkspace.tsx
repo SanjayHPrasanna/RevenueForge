@@ -176,7 +176,7 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
         return await api.post(`/deals/${id}/stages/${stage}/approve`);
       } catch (e) {
         if (e instanceof ApiError && e.status === 409 && confirm(`${e.message}\n\nApprove this stage anyway?`)) {
-          return api.post(`/deals/${id}/stages/${stage}/approve`, { despite_open_notes: true, despite_over_budget: true });
+          return api.post(`/deals/${id}/stages/${stage}/approve`, { despite_open_notes: true, despite_over_budget: true, despite_validation: true });
         }
         if (e instanceof ApiError && e.status === 409) throw new Error("Not approved.");
         throw e;

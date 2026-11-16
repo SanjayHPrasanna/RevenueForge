@@ -225,8 +225,9 @@ def _neutral(text: str, deal: Deal) -> str:
     return text
 
 
-def harvest_answers(db: Session, deal: Deal, approver: str) -> int:
-    """Approved proposal: keep its answers for reuse."""
+def harvest_answers(db: Session, deal: Deal, approver: str, checker=None) -> int:
+    """Approved proposal: keep its answers for reuse. With a checker (the generalised pipeline), an answer that fails the
+    proposal checks (a claim its evidence doesn't back, wording from another domain, internal notes) is not kept."""
     reqs = db.scalars(select(Requirement).where(Requirement.deal_id == deal.id)).all()
     candidates = [r for r in reqs if r.response and r.category != "Commercial" and r.match_status in ("strong", "partial") or (r.response and r.response_source == "human")]
     if not candidates:
@@ -238,6 +239,8 @@ def harvest_answers(db: Session, deal: Deal, approver: str) -> int:
     n = 0
     for i, r in enumerate(candidates):
         if r.response_source == "library":
+            continue
+        if checker is not None and (r.response.startswith("[NOT COVERED") or checker.check(r.response, {"text": r.text, "match": r.match or {}})):
             continue
         key = re.sub(r"\W+", " ", r.text.lower()).strip()
         if key in seen:

@@ -607,6 +607,16 @@ def approve(deal_id: str, stage: str, body: dict | None = None, ctx: Ctx = Depen
             over = round((sel["price"] / bud["high"] - 1) * 100)
             raise HTTPException(409, f"The {sel['name']} price is {over}% above the budget the RFP states ({bud.get('stated') or 'see Pricing'}). "
                                      "Check the term and scope, or approve anyway.")
+    from ..services import features
+    if stage == "proposal" and features.on(ctx.tenant):
+        from ..services.pipeline import validation_report
+        rep = validation_report(ctx.db, d)
+        if rep["errors"] and not (body or {}).get("despite_validation"):
+            first = rep["errors"][0]
+            raise HTTPException(409, f"{len(rep['errors'])} answer{'s' if len(rep['errors']) != 1 else ''} failed the proposal checks "
+                                     f"(first: {first.get('ref') or ''} {first['detail']}). Fix them, or approve anyway.")
+        if rep["errors"]:
+            ctx.audit("proposal.validation_override", d.id, errors=len(rep["errors"]))
     if still_open and not (body or {}).get("despite_open_notes"):
         raise HTTPException(409, f"{still_open} review note{'s are' if still_open > 1 else ' is'} still open on this stage. "
                                  "Resolve them first, or approve anyway.")
@@ -621,7 +631,11 @@ def approve(deal_id: str, stage: str, body: dict | None = None, ctx: Ctx = Depen
         # counting them would inflate the accuracy figure.
         learned["classifier"] = learning.train_classifier(ctx.db, ctx.tenant_id)
     if stage == "proposal":
-        learned["answers_added"] = learning.harvest_answers(ctx.db, d, ctx.user.name)
+        chk = None
+        if features.on(ctx.tenant):
+            from ..services.pipeline import checker_for
+            chk = checker_for(ctx.db, d)
+        learned["answers_added"] = learning.harvest_answers(ctx.db, d, ctx.user.name, checker=chk)
     ctx.db.commit()
     from ..services import notify
     notify.next_stage_ready(ctx.db, d, exclude_user_id=ctx.user.id, after=stage)  # "your turn" email to the next approvers
@@ -713,8 +727,23 @@ def rebuild_proposal(deal_id: str, ctx: Ctx = Depends(require_roles("presales"))
     if path:
         path.write_bytes(data)
         st.data = {**st.data, **{k: v for k, v in info.items() if k != "executive_summary"}}
+        from ..services import features
+        if features.on(ctx.tenant):
+            st.data = {**st.data, "validation": pipeline.validation_report(ctx.db, d)}
     ctx.db.commit()
     return {"ok": True}
+
+
+@router.get("/{deal_id}/proposal/checks")
+def proposal_checks(deal_id: str, ctx: Ctx = Depends(current_ctx)):
+    """The proposal checks on the answers as they stand now (after any edits)."""
+    d = _deal(ctx, deal_id)
+    from ..services import features
+    if not features.on(ctx.tenant):
+        return {"enabled": False, "errors": [], "warnings": [], "checked": 0}
+    rep = pipeline.validation_report(ctx.db, d)
+    mask = deal_masker(d)
+    return {"enabled": True, **mask(rep)}
 
 
 # --------------------------------------------------------------------------- proposal video

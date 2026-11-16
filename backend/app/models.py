@@ -368,6 +368,23 @@ class AnswerEntry(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
 
 
+class TechTerm(Base):
+    """The company's technology vocabulary, grown from its library and every RFP it reads: canonical name, the spellings
+    seen, and where it came from. Used so an RFP's "Microsoft Sentinel" meets a person's "Microsoft Sentinel" skill
+    without a hard-coded dictionary entry."""
+    __tablename__ = "tech_terms"
+    __table_args__ = (UniqueConstraint("tenant_id", "key", name="uq_tech_term"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    tenant_id: Mapped[str] = mapped_column(String(32), index=True)
+    key: Mapped[str] = mapped_column(String(120))  # normalised name
+    name: Mapped[str] = mapped_column(String(120))
+    aliases: Mapped[list] = mapped_column(JSON, default=list)
+    kind: Mapped[str] = mapped_column(String(30), default="")  # product, platform, protocol, standard, certification
+    source: Mapped[str] = mapped_column(String(20), default="rfp")  # rfp, library
+    seen: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class EmbeddingCache(Base):
     __tablename__ = "embedding_cache"
     __table_args__ = (UniqueConstraint("tenant_id", "key"),)
