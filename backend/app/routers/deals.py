@@ -608,6 +608,20 @@ def approve(deal_id: str, stage: str, body: dict | None = None, ctx: Ctx = Depen
             raise HTTPException(409, f"The {sel['name']} price is {over}% above the budget the RFP states ({bud.get('stated') or 'see Pricing'}). "
                                      "Check the term and scope, or approve anyway.")
     from ..services import features
+    if stage == "pricing" and features.on(ctx.tenant):
+        from ..services.commercial import open_quotes
+        oq = open_quotes(st.data or {})
+        if oq:
+            raise HTTPException(409, f"{len(oq)} cost line{'s need' if len(oq) != 1 else ' needs'} a quote or a confirmed figure first "
+                                     f"(first: {oq[0]['label'][:80]}). Enter the figure or confirm the estimate in Pricing.")
+    if stage == "gaps" and features.on(ctx.tenant):
+        failed = (st.data or {}).get("gates_failed") or []
+        if failed:
+            reason = str((body or {}).get("gate_override_reason") or "").strip()
+            if not (body or {}).get("despite_failed_gates") or len(reason) < 10:
+                raise HTTPException(409, f"Mandatory eligibility not met ({', '.join(failed)}): the verdict is "
+                                         f"{(st.data or {}).get('verdict', 'No bid')}. To go on, give the reason for bidding anyway.")
+            ctx.audit("gaps.gate_override", d.id, failed=failed, reason=reason[:500])
     if stage == "proposal" and features.on(ctx.tenant):
         from ..services.pipeline import validation_report
         rep = validation_report(ctx.db, d)
@@ -648,6 +662,27 @@ OVERRIDE_RANGES = {"target_margin": (0, 80), "contingency_pct": (0, 100), "trave
 
 
 def _check_override(k: str, v):
+    if k == "other_lines":  # pricing: a real figure for a partner, licence or commitment line, or a confirmation of the estimate
+        if not isinstance(v, dict):
+            raise HTTPException(400, "Cost lines must be an object.")
+        out = {}
+        for key, o in list(v.items())[:200]:
+            if not isinstance(o, dict):
+                raise HTTPException(400, "Each cost line needs an amount or a confirmation.")
+            e = {}
+            if o.get("amount") not in (None, ""):
+                try:
+                    a = float(o["amount"])
+                except (TypeError, ValueError):
+                    raise HTTPException(400, "A cost line amount must be a number.")
+                if not 0 <= a <= 1e12:
+                    raise HTTPException(400, "A cost line amount must be between 0 and 1,000,000,000,000.")
+                e["amount"] = a
+            if o.get("confirmed"):
+                e["confirmed"] = True
+            if e:
+                out[str(key)[:40]] = e
+        return out
     if k == "rates":
         if not isinstance(v, dict):
             raise HTTPException(400, "Rates must be an object.")

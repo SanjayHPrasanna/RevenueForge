@@ -579,6 +579,8 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
     req_skills = [t for r in reqs for t in r.get("technologies", []) if t not in K.COMMODITY_TECH]
     top_skills = [t for t, _ in Counter(req_skills).most_common(6)]
     team_engine = "templates"
+    ai_raw = None
+    partner_work: list[dict] = []
     if meta.get("_generalised") and eng != "consulting":
         # Generalised: roles and FTE from the RFP's scope, people by skills, certificates, years and free capacity.
         from . import teamplan
@@ -589,11 +591,21 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
         seat = float(meta.get("_fte_per_seat") or 4.8)
         rows, team_notes = teamplan.plan_roles(reqs, prof, ph, onsite_ratio, seat, kb)
         team_engine = "rules"
-        if meta.get("_use_ai"):
-            ai_rows = teamplan.ai_plan(reqs, prof, ph, seat, rows)
-            if ai_rows:
-                rows, team_engine = ai_rows, "ai"
+        ai_raw = None
+        if meta.get("_ai_roles"):
+            ai_raw = meta["_ai_roles"]
+        elif meta.get("_use_ai"):
+            ai_raw = teamplan.ai_roles(reqs, prof, ph, seat)
+        ai_rows = teamplan.check_ai_plan(ai_raw, reqs, prof, ph, seat, rows) if ai_raw else None
+        if ai_rows:
+            rows, team_engine = ai_rows, "ai"
         teamplan.assign(kb, rows, meta.get("_committed") or {})
+        partner_work = [{"role": r["role"], "fte": r["fte"], "phase": r["phase"], "months": r["months"], "serves": r["serves"],
+                         "responsibility": r["responsibility"]} for r in rows if r.get("partner")]
+        rows = [r for r in rows if not r.get("partner")]
+        if partner_work:
+            assumptions_extra.append(f"Partner-led work ({', '.join(sorted({x for p in partner_work for x in p['serves']})[:8])}) is delivered by partners "
+                                     "and priced as partner lines; an in-house manager oversees each partner-run service.")
         for r in rows:
             team.append({"role": r["role"], "fte": r["fte"], "headcount": r["headcount"], "location": r["location"], "responsibility": r["responsibility"],
                          "phase": r["phase"], "months": r["months"], "person_days": round(r["fte"] * r["months"] * 21, 1), "assigned": r["assigned"],
@@ -675,7 +687,9 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
             "accelerator_saving_pct": round((1 - accel_factor) * 100, 1), "contingency_pct": round(contingency, 1),
             "contingency_basis": {"high_risk_gaps": risk_items, "unfilled_roles": unfilled},
             "unfilled_roles": unfilled, "assumptions": assumptions_extra, "calibration": cal,
-            "staffing_skills": top_skills, "team_engine": team_engine}
+            "staffing_skills": top_skills, "team_engine": team_engine,
+            **({"ai_roles": ai_raw, "ai_roles_key": teamplan.plan_key(reqs)} if meta.get("_generalised") and team_engine == "ai" else {}),
+            **({"partner_work": partner_work} if meta.get("_generalised") and eng != "consulting" else {})}
 
 
 # =========================================================================== pricing
@@ -783,7 +797,15 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
     onsite_cost = sum(l["cost"] for l in lines if l["location"] == "Onsite")
     travel = onsite_cost * travel_pct / 100
     cont = labour_cost * contingency / 100
-    total_cost = labour_cost + travel + cont
+    other: list[dict] = []
+    if meta.get("_generalised"):
+        # Generalised: partner work, licences the bidder supplies, contractual commitments and hiring, as their own lines.
+        from . import commercial
+        other = commercial.build_lines(est, lines, meta.get("_reqs") or [], meta.get("profile") or {}, meta.get("_rfp_text") or "", meta.get("_gaps"))
+        commercial.apply_overrides(other, ov.get("other_lines") or {})
+    other_cost = sum(l["amount"] for l in other)
+    total_cost = labour_cost + travel + cont + other_cost
+    list_price += other_cost  # third-party costs pass through at cost in the rate-card price
 
     def scen(name, margin, note):
         p = total_cost / (1 - margin / 100)
@@ -806,7 +828,7 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
     phase_split = None
     if eng == "build_run":
         # Price follows the RFP's instructions: the build as fixed price by milestone, the run as a fixed monthly fee.
-        build_cost = sum(l["cost"] for l in lines if l["phase"] == "Build")
+        build_cost = sum(l["cost"] for l in lines if l["phase"] in ("Build", "Transition"))
         run_cost = sum(l["cost"] for l in lines if l["phase"] == "Run")
         build_share = build_cost / max(1e-9, build_cost + run_cost)
         run_months = est.get("run_months") or 36
@@ -828,7 +850,10 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
                        "monthly_fee": round(target_price * (1 - build_share) / run_months, 2), "build_months": est.get("build_months")}
     elif eng == "managed_services":
         trans_share = 0.08
-        months = est.get("contract_months") or 36
+        trans_cost = sum(l["cost"] for l in lines if l.get("phase") == "Transition")
+        if meta.get("_generalised") and trans_cost and labour_cost:
+            trans_share = round(trans_cost / labour_cost, 3)  # the transition is paid for what it costs, not a fixed share
+        months = est.get("run_months") or est.get("contract_months") or 36
         milestones = [{"name": "Transition & onboarding complete", "pct": round(trans_share * 100, 1)},
                       {"name": f"Monthly service charge × {months}", "pct": round((1 - trans_share) * 100, 1),
                        "monthly": round(target_price * (1 - trans_share) / months, 2)}]
@@ -852,13 +877,32 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
     adv = re.search(r"advance payment[^.]*?(\d{1,2})\s?%", " ".join(meta.get("payment_terms", [])) or "", re.I)
     partner_note = "Partner product licences are quoted separately by the partner and excluded from this price." if any(
         t.get("recommendation") == "Partner" for t in meta.get("top_missing", [])) else ""
+    if meta.get("_generalised"):
+        partner_note = ""  # partner and licence costs are lines in this price, not a footnote
     return {"currency": base_ccy, "rfp_currency": rfp_ccy, "fx_to_rfp": round(fx_to_rfp, 4), "lines": lines,
             "labour_cost": round(labour_cost, 2), "travel": round(travel, 2), "travel_pct": travel_pct, "contingency": round(cont, 2),
             "contingency_pct": contingency, "total_cost": round(total_cost, 2), "list_price": round(list_price, 2),
             "implied_rate_card_margin": round(implied, 1), "target_margin": target, "min_margin": floor, "scenarios": scenarios,
             "recommended": "Target", "milestones": milestones, "phase_split": phase_split, "partner_note": partner_note,
+            "other_lines": other, "other_cost": round(other_cost, 2), "open_quotes": sum(1 for l in other if l.get("needs_quote") and not l.get("confirmed")),
+            "contract_months": est.get("duration_months"),
             "rates_from": rates_from, "budget": budget,
             "assumptions": [_rates_note(kb.name, lines, rates_from) + (f" Converted to {rfp_ccy} at an indicative {round(fx_to_rfp, 4)} (confirm the rate with finance)."
                                                                         if rfp_ccy != base_ccy else ""),
                             _contingency_note(contingency, est),
-                            f"Travel and living at {travel_pct}% of onsite cost."]}
+                            f"Travel and living at {travel_pct}% of onsite cost."] + _other_notes(other)}
+
+
+def _other_notes(other: list[dict]) -> list[str]:
+    if not other:
+        return []
+    out = []
+    kinds = {"partner": "partner work", "licence": "licences and products the bidder supplies", "commitment": "contractual commitments", "hiring": "hiring for open roles"}
+    for k, label in kinds.items():
+        ls = [l for l in other if l["kind"] == k]
+        if ls:
+            out.append(f"Includes {label}: {len(ls)} line{'s' if len(ls) != 1 else ''}.")
+    open_n = sum(1 for l in other if l.get("needs_quote") and not l.get("confirmed"))
+    if open_n:
+        out.append(f"{open_n} cost line{'s need' if open_n != 1 else ' needs'} a quote before pricing can be approved (partner estimates are ranges from the work they cover).")
+    return out

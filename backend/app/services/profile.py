@@ -263,6 +263,32 @@ def _product_like(w: str) -> bool:
     return False
 
 
+VENDOR_GENERIC = {"corporation", "company", "client", "bank", "authority", "council", "ministry", "group", "ltd", "limited", "plc", "inc",
+                  "based", "enabled", "compliant", "certified", "level", "partner", "status", "programme", "program", "framework",
+                  "methodology", "model", "guidelines", "guideline", "standard", "standards", "principles", "policy", "act", "regulation",
+                  "regulations", "directions", "requirements", "practice", "practices"}
+
+
+def is_vendor_product(name: str, kind: str = "") -> bool:
+    """A named commercial product a partner could supply or run (CrowdStrike Falcon EDR, CyberArk PAM, Amazon EKS, SonarQube):
+    not a standard, an accreditation, a practice acronym (SOC, MFA, VAPT), a qualification (OSCP) or a phrase from the
+    client's own wording. Decided from the shape of the name, never from a product list."""
+    if kind:
+        return kind == "product"
+    if re.search(r"\b(ISO|IEC|SOC|CMMI|PCI|OWASP|WCAG|MITRE|NIST|CIS|ITIL|ASVS|GDPR|HIPAA|802\.1X)\b", name):
+        return False
+    words = [w for w in name.split() if "-" not in w]  # "OTP-based", "CERT-In" are not product names; "FortiGate SD-WAN" keeps "FortiGate"
+    if not words:
+        return False
+    if any(w.lower() in VENDOR_GENERIC for w in words):
+        return False
+    if len(words) == 1:
+        w = words[0]
+        return bool(re.search(r"[a-z][A-Z]", w)) and not w.isupper()  # SonarQube, CyberArk, FortiSwitch (not SOC, VAPT, OSCP)
+    caps = [w for w in words if w[:1].isupper()]
+    return len(caps) >= 2 and not all(w.isupper() for w in words)  # CrowdStrike Falcon EDR, Amazon EKS, Microsoft Sentinel
+
+
 def named_terms(text: str, corpus: str, exclude: set[str] | None = None) -> list[str]:
     """Product, platform, protocol and standard names in a requirement, found by their shape rather than a list:
     CamelCase, versioned or dotted names, acronyms, and capitalised words the RFP never writes in lower case."""

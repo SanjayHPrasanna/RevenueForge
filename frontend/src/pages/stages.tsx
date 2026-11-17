@@ -701,6 +701,51 @@ export function EstimationStage({ deal }: P) {
 }
 
 // =============================================================== 6. pricing
+const KIND_LABEL: Record<string, string> = { partner: "Partner", licence: "Licence / product", commitment: "Commitment", hiring: "Hiring" };
+
+function OtherCosts({ deal, lines, current, m }: { deal: any; lines: any[]; current: Record<string, any>; m: (v: number) => string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const save = useMutation({
+    mutationFn: (entry: Record<string, any>) => api.put(`/deals/${deal.id}/stages/pricing/overrides`, { overrides: { other_lines: { ...current, ...entry } } }),
+    onSuccess: () => { qc.invalidateQueries(); toast("ok", "Cost line saved. Prices recalculated."); },
+    onError: (e: any) => toast("error", e.message),
+  });
+  const open = lines.filter((l) => l.needs_quote && !l.confirmed).length;
+  return (
+    <div className="card overflow-x-auto">
+      <div className="px-5 py-3.5 border-b border-line">
+        <div className="font-bold">Partners, licences and commitments</div>
+        <div className="text-[12.5px] text-ink-muted">Costs beyond the team, from the RFP and the gap plan. {open ? `${open} still need a quote or a confirmed figure before pricing can be approved.` : "Every line has a figure."}</div>
+      </div>
+      <table className="w-full min-w-[720px]">
+        <thead><tr><th className="th">Cost</th><th className="th">Basis</th><th className="th text-right">Amount</th><th className="th">Figure</th></tr></thead>
+        <tbody>
+          {lines.map((l) => (
+            <tr key={l.id}>
+              <td className="td text-[13.5px]"><span className="chip bg-paper border border-line text-ink-soft mr-1.5">{KIND_LABEL[l.kind] || l.kind}</span>{l.label}</td>
+              <td className="td text-[12px] text-ink-muted max-w-[280px]">{l.basis}{l.low != null && l.high != null ? ` · range ${m(l.low)} – ${m(l.high)}` : ""}</td>
+              <td className="td text-right num font-semibold">{l.amount ? m(l.amount) : "—"}</td>
+              <td className="td">
+                {l.needs_quote && !l.confirmed ? (
+                  <div className="flex items-center gap-1.5">
+                    <input aria-label={`Quoted amount for ${l.label}`} className="input h-8 w-28 num" inputMode="decimal" placeholder="Quote"
+                      value={draft[l.id] ?? ""} onChange={(e) => setDraft({ ...draft, [l.id]: e.target.value })} />
+                    <button className="btn-outline h-8 px-2.5 text-[12.5px]" disabled={!draft[l.id] || save.isPending}
+                      onClick={() => save.mutate({ [l.id]: { amount: Number(draft[l.id]) } })}>Save</button>
+                    {l.amount > 0 && <button className="btn-ghost h-8 px-2 text-[12.5px]" disabled={save.isPending} onClick={() => save.mutate({ [l.id]: { confirmed: true } })}>Use estimate</button>}
+                  </div>
+                ) : <span className="chip bg-white border border-line text-ink-soft">{l.needs_quote === false && l.basis.includes("entered") ? "Quoted" : "Confirmed"}</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function PricingStage({ deal }: P) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -826,10 +871,12 @@ export function PricingStage({ deal }: P) {
             <tr><td className="td" colSpan={5}>Labour</td><td className="td text-right num font-semibold">{m(p.labour_cost)}</td></tr>
             <tr><td className="td" colSpan={5}>Travel and living ({p.travel_pct}% of onsite)</td><td className="td text-right num">{m(p.travel)}</td></tr>
             <tr><td className="td" colSpan={5}>Contingency ({p.contingency_pct}%)</td><td className="td text-right num">{m(p.contingency)}</td></tr>
+            {p.other_lines?.length > 0 && <tr><td className="td" colSpan={5}>Partners, licences, commitments and hiring (below)</td><td className="td text-right num">{m(p.other_cost)}</td></tr>}
             <tr className="bg-paper"><td className="td font-bold" colSpan={5}>Total cost</td><td className="td text-right num font-bold">{m(p.total_cost)}</td></tr>
           </tbody>
         </table>
       </div>
+      {p.other_lines?.length > 0 && <OtherCosts deal={deal} lines={p.other_lines} current={p.overrides?.other_lines || {}} m={m} />}
     </div>
   );
 }

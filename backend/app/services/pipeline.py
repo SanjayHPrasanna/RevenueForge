@@ -254,8 +254,7 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
         ai_opts = ai_mitigations(reqs, kb, deal.engagement_type, progress=prog) if llm.is_enabled() else {}
         gen = features.on(tenant)
         prof = (deal.meta or {}).get("profile") or {}
-        products = {t["name"] for t in prof.get("technologies", []) if t.get("kind") == "product" or any(profile_mod._product_like(w) for w in t["name"].split())
-                    and not re.search(r"\b(ISO|IEC|SOC|CMMI|PCI|OWASP|WCAG|MITRE|NIST|CIS)\b", t["name"])} if gen else set()
+        products = {t["name"] for t in prof.get("technologies", []) if profile_mod.is_vendor_product(t["name"], t.get("kind") or "")} if gen else set()
         summary = analyze_gaps(reqs, kb, deal.engagement_type, ai_opts, products=products)
         summary["engine"] = "ai" if ai_opts else "rules"
         if gen and prof:
@@ -316,8 +315,12 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
             teamplan.backfill_assignments(db, tid)
             if llm.is_enabled():
                 prog("AI sizing the team from the scope")
+            prev = st.data or {}
             gen_meta = {"_generalised": True, "_fte_per_seat": features.number(tenant, "fte_per_24x7_seat"),
-                        "_committed": teamplan.commitments(db, tid, deal.id), "_use_ai": llm.is_enabled()}
+                        "_committed": teamplan.commitments(db, tid, deal.id), "_use_ai": llm.is_enabled(),
+                        # an AI team already proposed for these same requirements is reused (re-checked), so a margin or rate
+                        # change recalculates instantly instead of asking the AI again
+                        "_ai_roles": prev.get("ai_roles") if prev.get("ai_roles_key") == teamplan.plan_key(reqs) else None}
         est = estimate(reqs, kb, {**(deal.meta or {}), "engagement_type": deal.engagement_type, "region": deal.region, **gen_meta}, arch,
                        {**overrides, "_calibration": learning.calibration(tenant)})
         est["overrides"] = overrides
@@ -330,7 +333,11 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
         est = _stage(db, deal, "estimation").data or {}
         prev = st.data or {}
         overrides = prev.get("overrides", {})
-        pr = price(est, kb, {**(deal.meta or {}), "currency": deal.currency}, tenant.settings or {}, overrides)
+        gen_meta = {}
+        if features.on(tenant):
+            gen_meta = {"_generalised": True, "_reqs": _req_dicts(db, deal.id), "_gaps": _stage(db, deal, "gaps").data or {},
+                        "_rfp_text": rfp_text(db, deal)}
+        pr = price(est, kb, {**(deal.meta or {}), "currency": deal.currency, **gen_meta}, tenant.settings or {}, overrides)
         pr["overrides"] = overrides
         pr["selected"] = prev.get("selected", "Target")
         pr["insight"] = learning.pricing_insight(db, tid)

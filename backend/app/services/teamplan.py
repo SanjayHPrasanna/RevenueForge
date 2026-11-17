@@ -329,13 +329,24 @@ def plan_roles(reqs: list[dict], profile: dict, phases: list[tuple[str, float]],
             g["warranty"] = True
 
     rows: list[dict] = []
+    # work the gap plan gives to a partner is not staffed in-house: it is kept as a "partner" row (the size of the work, for
+    # pricing) and, for a partner-run service, one in-house manager oversees the partner
+    partner_refs = {r.get("source_ref") or r.get("code", "") for r in reqs if (r.get("gap") or {}).get("recommended") == "Partner"}
+    overseen: set[tuple] = set()
 
     def add(role, fte, loc, resp, phase, months, skills=(), refs=(), certs=(), any_cert=False, min_years=0):
         if fte <= 0:
             return
+        refs_ = [x for x in refs if x][:20]
+        partner = bool(refs_) and all(x in partner_refs for x in refs_) and not certs and not min_years
         rows.append({"role": role, "fte": round(fte, 2), "location": loc, "responsibility": resp[:160], "phase": phase, "months": months,
-                     "skills": list(skills)[:12], "serves": [x for x in refs if x][:20], "certs": list(certs), "any_cert": any_cert,
-                     "min_years": min_years})
+                     "skills": list(skills)[:12], "serves": refs_, "certs": list(certs), "any_cert": any_cert,
+                     "min_years": min_years, "partner": partner})
+        if partner and (phase, tuple(refs_)) not in overseen and fte >= 2:
+            overseen.add((phase, tuple(refs_)))
+            rows.append({"role": "Partner Service Manager", "fte": 0.5, "location": loc, "phase": phase, "months": months,
+                         "responsibility": f"Oversees the partner delivering {', '.join(refs_[:4])}: SLAs, reporting, escalation"[:160],
+                         "skills": [], "serves": refs_, "certs": [], "any_cert": False, "min_years": 0, "partner": False})
 
     def resp_for(g, title):
         what = ", ".join(g["skills"][:4])
@@ -405,7 +416,7 @@ def plan_roles(reqs: list[dict], profile: dict, phases: list[tuple[str, float]],
             for _k, g in [kv for kv in sorted(groups.items(), key=lambda kv: -kv[1]["days"]) if not kv[1]["service"]][:3]:
                 add(g["title"], 0.5, "Offshore", f"Fixes and enhancements for {', '.join(g['skills'][:3]) or g['title'].lower()}"
                     + (f"; covers {', '.join(warranty_refs[:4])}" if warranty_refs else ""), "Run", rm, g["skills"], g["refs"] + warranty_refs)
-        team_fte = sum(r["fte"] for r in rows if r["phase"] == "Run")
+        team_fte = sum(r["fte"] for r in rows if r["phase"] == "Run" and not r.get("partner"))
         add("Engagement Manager", 1.0 if team_fte >= 6 else 0.5, "Onsite" if onsite_ratio >= 0.3 else "Offshore",
             "Service delivery manager: outcomes, SLAs and governance", "Run", rm)
         add("Solution Architect", 0.5 if team_fte >= 4 else 0.25, "Offshore", "Design authority, upgrades and capacity planning", "Run", rm)
@@ -444,7 +455,14 @@ AI_SYSTEM = ("You are a delivery director sizing the team for an IT bid. From th
              '{{"roles":[{{"role":"","phase":"","fte":0,"location":"Offshore","skills":[],"certs":[],"min_years":0,"serves":[],"why":""}}]}}')
 
 
-def ai_plan(reqs: list[dict], profile: dict, phases: list[tuple[str, float]], fte_per_seat: float, rules_rows: list[dict]) -> list[dict] | None:
+def plan_key(reqs: list[dict]) -> str:
+    import hashlib
+    sig = "|".join(f"{r.get('source_ref') or r.get('code')}:{(r.get('text') or '')[:200]}" for r in reqs)
+    return hashlib.sha1(sig.encode()).hexdigest()[:16]
+
+
+def ai_roles(reqs: list[dict], profile: dict, phases: list[tuple[str, float]], fte_per_seat: float) -> dict | None:
+    """The AI's raw team proposal (checked separately by check_ai_plan)."""
     from . import llm
     if not llm.is_enabled():
         return None
@@ -456,7 +474,12 @@ def ai_plan(reqs: list[dict], profile: dict, phases: list[tuple[str, float]], ft
         res = llm.complete_json(AI_SYSTEM.format(seat=fte_per_seat), prompt, max_tokens=4000)
     except Exception:
         return None
-    return check_ai_plan(res, reqs, profile, phases, fte_per_seat, rules_rows)
+    return res if isinstance(res, dict) else None
+
+
+def ai_plan(reqs: list[dict], profile: dict, phases: list[tuple[str, float]], fte_per_seat: float, rules_rows: list[dict]) -> list[dict] | None:
+    raw = ai_roles(reqs, profile, phases, fte_per_seat)
+    return check_ai_plan(raw, reqs, profile, phases, fte_per_seat, rules_rows) if raw else None
 
 
 def check_ai_plan(res, reqs: list[dict], profile: dict, phases: list[tuple[str, float]], fte_per_seat: float, rules_rows: list[dict]) -> list[dict] | None:
@@ -524,6 +547,9 @@ def assign(kb, rows: list[dict], committed: dict[str, float] | None = None) -> N
     order = sorted(range(len(rows)), key=lambda i: (bool(rows[i]["certs"] or rows[i]["min_years"]), rows[i]["role"] not in MGMT, len(rows[i]["skills"])), reverse=True)
     for i in order:
         row = rows[i]
+        if row.get("partner"):
+            row["assigned"], row["unfilled"], row["open_fte"], row["headcount"] = [], 0, 0.0, 0
+            continue
         need = row["fte"]
         cands = []
         for e in kb.employees:

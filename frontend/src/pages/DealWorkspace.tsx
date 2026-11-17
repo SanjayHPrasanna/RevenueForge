@@ -175,6 +175,14 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
       try {
         return await api.post(`/deals/${id}/stages/${stage}/approve`);
       } catch (e) {
+        if (e instanceof ApiError && e.status === 409 && /cost line/.test(e.message)) {
+          throw new Error(e.message);  // partner, licence and commitment lines need a real or confirmed figure: no bypass
+        }
+        if (e instanceof ApiError && e.status === 409 && /Mandatory eligibility not met/.test(e.message)) {
+          const reason = prompt(`${e.message}\n\nWhy bid anyway? (recorded in the audit log)`)?.trim() || "";
+          if (reason.length < 10) throw new Error("Not approved: a reason of at least 10 characters is needed to bid past a failed eligibility condition.");
+          return api.post(`/deals/${id}/stages/${stage}/approve`, { despite_failed_gates: true, gate_override_reason: reason, despite_open_notes: true });
+        }
         if (e instanceof ApiError && e.status === 409 && confirm(`${e.message}\n\nApprove this stage anyway?`)) {
           return api.post(`/deals/${id}/stages/${stage}/approve`, { despite_open_notes: true, despite_over_budget: true, despite_validation: true });
         }

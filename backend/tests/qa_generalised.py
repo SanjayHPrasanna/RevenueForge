@@ -123,9 +123,46 @@ with TestClient(app, raise_server_exceptions=False) as c:
     ok("executive summary drops other-industry sentences", "hospital" not in (prop.get("executive_summary") or "").lower(), prop.get("executive_summary"))
 
     # ------------------------------------------------------------------ approval guard and the answer library
-    for s in ("requirements", "matching", "gaps", "architecture", "estimation"):
+    for s in ("requirements", "matching"):
         c.post(f"/api/deals/{did}/stages/{s}/approve", json={}, headers=h)
-    c.post(f"/api/deals/{did}/stages/pricing/approve", json={"despite_over_budget": True}, headers=h)
+    r = c.post(f"/api/deals/{did}/stages/gaps/approve", json={}, headers=h)
+    ok("a failed mandatory gate blocks approving the bid decision", r.status_code == 409 and "Mandatory eligibility not met" in r.text, r.text[:200])
+    r = c.post(f"/api/deals/{did}/stages/gaps/approve", json={"despite_failed_gates": True, "gate_override_reason": "short"}, headers=h)
+    ok("going past a failed gate needs a real reason", r.status_code == 409, r.status_code)
+    r = c.post(f"/api/deals/{did}/stages/gaps/approve", json={"despite_failed_gates": True, "gate_override_reason": "Bidding with a CERT-In empanelled consortium lead"}, headers=h)
+    ok("with a reason, the bid decision can be approved", r.status_code == 200, r.text[:200])
+    with SessionLocal() as db:
+        ok("the gate override and its reason are audited", db.scalar(select(AuditLog).where(AuditLog.tenant_id == tid, AuditLog.action == "gaps.gate_override")) is not None)
+    for s in ("architecture", "estimation"):
+        c.post(f"/api/deals/{did}/stages/{s}/approve", json={}, headers=h)
+    pr = c.get(f"/api/deals/{did}/stages/pricing", headers=h).json()["data"]
+    open_lines = [l for l in pr.get("other_lines", []) if l["needs_quote"] and not l["confirmed"]]
+    ok("partner and licence lines that need a quote are listed", open_lines and pr["open_quotes"] == len(open_lines), pr.get("open_quotes"))
+    r = c.post(f"/api/deals/{did}/stages/pricing/approve", json={"despite_over_budget": True}, headers=h)
+    ok("pricing can't be approved while a cost line needs a quote", r.status_code == 409 and "cost line" in r.text, r.text[:200])
+    first = open_lines[0]
+    before = next(s["price"] for s in pr["scenarios"] if s["name"] == "Target")
+    r = c.put(f"/api/deals/{did}/stages/pricing/overrides", json={"overrides": {"other_lines": {first["id"]: {"amount": first["amount"] + 1_000_000}}}}, headers=h)
+    pr2 = c.get(f"/api/deals/{did}/stages/pricing", headers=h).json()["data"]
+    l2 = next(l for l in pr2["other_lines"] if l["id"] == first["id"])
+    after = next(s["price"] for s in pr2["scenarios"] if s["name"] == "Target")
+    ok("a quoted figure replaces the estimate and moves the price", r.status_code == 200 and l2["confirmed"] and abs(l2["amount"] - first["amount"] - 1_000_000) < 1 and after > before, (r.status_code, l2, before, after))
+    r = c.put(f"/api/deals/{did}/stages/pricing/overrides", json={"overrides": {"other_lines": {first["id"]: {"amount": -5}}}}, headers=h)
+    ok("a negative cost line is refused", r.status_code == 400, r.status_code)
+    rest = {l["id"]: {"confirmed": True} for l in pr2["other_lines"] if l["needs_quote"] and not l["confirmed"]}
+    c.put(f"/api/deals/{did}/stages/pricing/overrides", json={"overrides": {"other_lines": {first["id"]: {"amount": first["amount"] + 1_000_000}, **rest}}}, headers=h)
+    r = c.post(f"/api/deals/{did}/stages/pricing/approve", json={"despite_over_budget": True}, headers=h)
+    ok("once every line has a figure, pricing approves", r.status_code == 200, r.text[:200])
+    pr3 = c.get(f"/api/deals/{did}/stages/pricing", headers=h).json()["data"]
+    est3 = c.get(f"/api/deals/{did}/stages/estimation", headers=h).json()["data"]
+    ok("priced over the whole contract, transition included", pr3.get("contract_months") == est3.get("duration_months") == 39, (pr3.get("contract_months"), est3.get("duration_months")))
+    ok("the transition is paid for what it costs", pr3["milestones"][0]["name"].startswith("Transition") and pr3["milestones"][0]["pct"] != 8.0, pr3["milestones"][:1])
+    ok("hiring is counted once per job, not once per phase", len({l["label"] for l in pr3["other_lines"] if l["kind"] == "hiring"}) ==
+       len([l for l in pr3["other_lines"] if l["kind"] == "hiring"]) and not any("(Transition)" in l["label"] for l in pr3["other_lines"]))
+    ok("total cost includes the other lines", abs(pr3["total_cost"] - (pr3["labour_cost"] + pr3["travel"] + pr3["contingency"] + pr3["other_cost"])) < 1)
+    t0 = time.time()  # a price change rebuilds the proposal in the background
+    while time.time() - t0 < 120 and c.get(f"/api/deals/{did}", headers=h).json()["status"] == "processing":
+        time.sleep(0.3)
     rid = reqs["CMP-02"]["id"]
     r = c.patch(f"/api/deals/{did}/requirements/{rid}", json={"response": "Kestrel is CERT-In empanelled and SOC 2 Type II certified."}, headers=h)
     ok("a person can edit an answer", r.status_code == 200, r.text[:200])

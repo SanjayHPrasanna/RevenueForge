@@ -277,6 +277,17 @@ def _domain_terms(text: str, techs: list[str]) -> dict[str, str]:
     return out
 
 
+def _held_tech(t: str, company_techs: set[str]) -> bool:
+    """A requirement technology the company has. Dictionary names match exactly, as before; an open-vocabulary name from the
+    RFP Profile ("Node.js", "Microsoft Sentinel") also matches its canonical dictionary name or the same product in the library."""
+    if t in company_techs or K.canonical_tech(t) in company_techs:
+        return True
+    if t in K.TECHNOLOGIES:
+        return False
+    from .teamplan import _same
+    return any(_same(t, c) for c in company_techs)
+
+
 def _covered(term: str, vocab: set[str]) -> bool:
     if term in vocab:
         return True
@@ -343,8 +354,8 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
             cap_s = min(1.0, cap_s + 0.05)  # learning loop: capabilities that helped win before get a small boost
         cs_s = norm(cs_scores[0][0], 0.28) if cs_scores else 0
         req_techs = [t for t in r.get("technologies", []) if t not in K.COMMODITY_TECH]
-        have = [t for t in req_techs if t in company_techs]
-        missing = [t for t in req_techs if t not in company_techs]
+        have = [t for t in req_techs if _held_tech(t, company_techs)]
+        missing = [t for t in req_techs if not _held_tech(t, company_techs)]
         tech_cov = (len(have) / len(req_techs)) if req_techs else None
         people = sorted({e["code"] for e in kb.employees for s in e.get("skills", [])
                          if s.get("level", 0) >= 3 and K.techs_in(s["name"]) & set(have)})
