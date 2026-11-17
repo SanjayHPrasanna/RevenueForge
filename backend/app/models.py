@@ -366,6 +366,11 @@ class AnswerEntry(Base):
     approved_by: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    # What the answer stands on (generalised pipeline): the library evidence it names, the technologies its question named,
+    # and the source deal's industry. Old answers get these filled in the first time they're considered for reuse.
+    evidence_refs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    technologies: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    industry: Mapped[str] = mapped_column(String(120), default="")
 
 
 class TechTerm(Base):

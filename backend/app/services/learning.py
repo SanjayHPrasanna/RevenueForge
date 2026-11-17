@@ -256,7 +256,9 @@ def harvest_answers(db: Session, deal: Deal, approver: str, checker=None) -> int
                 continue
         e = AnswerEntry(tenant_id=deal.tenant_id, question=r.text, answer=answer, category=r.category, subcategory=r.subcategory,
                         source_deal=deal.id, source_label=f"{deal.client_alias or 'Client'} · {deal.name}"[:290],
-                        origin="human" if r.response_source == "human" else "ai", approved_by=approver)
+                        origin="human" if r.response_source == "human" else "ai", approved_by=approver,
+                        evidence_refs=[x.get("name") for x in (r.match or {}).get("evidence", []) if x.get("name")][:10],
+                        technologies=list(r.technologies or [])[:20], industry=(deal.industry or "")[:120])
         db.add(e)
         existing.append(e)
         n += 1

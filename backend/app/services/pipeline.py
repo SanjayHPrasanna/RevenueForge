@@ -252,8 +252,39 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
         kb = load_kb(db, tid)
         reqs = mask(_req_dicts(db, deal.id))
         ai_opts = ai_mitigations(reqs, kb, deal.engagement_type, progress=prog) if llm.is_enabled() else {}
-        summary = analyze_gaps(reqs, kb, deal.engagement_type, ai_opts)
+        gen = features.on(tenant)
+        prof = (deal.meta or {}).get("profile") or {}
+        products = {t["name"] for t in prof.get("technologies", []) if t.get("kind") == "product" or any(profile_mod._product_like(w) for w in t["name"].split())
+                    and not re.search(r"\b(ISO|IEC|SOC|CMMI|PCI|OWASP|WCAG|MITRE|NIST|CIS)\b", t["name"])} if gen else set()
+        summary = analyze_gaps(reqs, kb, deal.engagement_type, ai_opts, products=products)
         summary["engine"] = "ai" if ai_opts else "rules"
+        if gen and prof:
+            from . import gates as gates_mod
+            g = gates_mod.evaluate(prof, kb, deal.industry or "", deal.due_date or "", rfp_text(db, deal))
+            summary["gates"] = g["gates"]
+            summary["gates_failed"] = g["failed"]
+            summary["consortium_allowed"] = g["consortium_allowed"]
+            summary["weeks_to_due"] = g["weeks_to_due"]
+            by_ref = {x["ref"]: x for x in g["gates"]}
+            for r in reqs:
+                gt = by_ref.get(r.get("source_ref") or "") or by_ref.get(r.get("code") or "")
+                if not gt or gt["status"] == "pass":
+                    continue
+                gp = dict(r.get("gap") or {})
+                gp["risk"] = "High" if gt["mandatory"] and gt["status"] in ("fail", "unknown") else gp.get("risk", "Medium")
+                gp["gate"] = {"status": gt["status"], "reason": gt["reason"], "cure": gt["cure"]}
+                if gt["status"] == "fail" and gt["mandatory"]:
+                    gp["options"] = [{"type": "Pass/fail condition", "detail": f"Mandatory eligibility not met: {gt['reason']}. "
+                                      + ("Join a consortium or bid as a subcontractor to a prime that meets it." if g["consortium_allowed"]
+                                         else "This can't be fixed before the bid is due: it decides the bid."), "effort": "", "cost": ""}] + list(gp.get("options") or [])[:2]
+                    gp["recommended"] = "Partner" if g["consortium_allowed"] else "No bid"
+                r["gap"] = gp
+            summary["high_risk"] = sum(1 for r in reqs if (r.get("gap") or {}).get("risk") == "High")
+            summary["risk_counts"] = {k: sum(1 for r in reqs if (r.get("gap") or {}).get("risk") == k) for k in ("High", "Medium", "Low")}
+            if g["verdict"]:
+                summary["verdict_before_gates"] = summary["verdict"]
+                summary["verdict"] = g["verdict"]
+                summary["verdict_reason"] = "Mandatory eligibility not met: " + ", ".join(g["failed"])
         _save_reqs(db, deal.id, reqs, ["gap"])
         st.data = summary
         m = dict(deal.meta or {})
@@ -432,6 +463,16 @@ def rfp_text(db: Session, deal: Deal) -> str:
         return ""
 
 
+def _tag_answer(e, kb: CompanyKB) -> None:
+    """Back-fill an older library answer with what it stands on: the library evidence it names, and its question's technologies."""
+    if e.evidence_refs is None:
+        names = [c["name"] for c in kb.capabilities] + [c["title"] for c in kb.case_studies] + [a["name"] for a in kb.accelerators]
+        low = e.answer.lower()
+        e.evidence_refs = [n for n in names if n and n.lower() in low][:10]
+    if e.technologies is None:
+        e.technologies = profile_mod.technologies_for(e.question, e.question, profile_mod.library_tech_terms(kb), set())[:20]
+
+
 def checker_for(db: Session, deal: Deal, kb: CompanyKB | None = None) -> validation.Checker:
     tenant = db.get(Tenant, deal.tenant_id)
     return validation.Checker(kb or load_kb(db, deal.tenant_id), deal.industry or "", rfp_text(db, deal), tenant.name if tenant else "")
@@ -455,8 +496,16 @@ def _draft_responses_validated(db: Session, deal: Deal, rows, open_rows, client:
             continue
         e, _sim = hits[r.id]
         answer = e.answer.replace(learning.CLIENT_TOKEN, client)
+        _tag_answer(e, kb)
         if e.id in used or validation.topic_overlap(r.text, e.question) < 0.25 or chk.check(answer, reqs[r.id]):
             continue  # a different topic, a claim this requirement's evidence doesn't back, or already used in this bid
+        mine = {K.canonical_tech(t).lower() for t in (r.technologies or [])}
+        theirs = {K.canonical_tech(t).lower() for t in (e.technologies or [])}
+        if mine and theirs and not (mine & theirs):
+            continue  # same wording, different technology: "build SOAR playbooks in Sentinel" is not "build playbooks in Splunk"
+        ev_names = {x.get("name", "").lower() for x in (reqs[r.id].get("match") or {}).get("evidence", [])}
+        if e.evidence_refs and not all(n.lower() in ev_names for n in e.evidence_refs if n):
+            continue  # the old answer stood on evidence this requirement doesn't have
         used.add(e.id)
         refs[r.id] = (e, answer)
     drafted: dict[str, str] = {}

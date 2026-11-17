@@ -4,7 +4,7 @@ For each of five RFPs (software, cybersecurity, cloud migration, networking + 24
 it runs the whole deal against one supplier library and scores what came out, not whether the steps finished:
 
   understanding  due date, budget, evaluation weights, contract phases, named technologies
-  bid decision   failed mandatory eligibility makes the verdict "No bid" / "Bid as subcontractor"
+  bid decision   failed mandatory eligibility makes the verdict "No bid" / "Bid in a consortium"
   team           the roles the scope needs exist; nobody is placed without the skills; nobody is booked past capacity
   proposal       no wording from other domains, no internal notes, no answer reused for different requirements,
                  no "company strength" without library evidence

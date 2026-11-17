@@ -5,8 +5,8 @@ Each eligibility item from the RFP Profile becomes a gate with a status:
     fail     it doesn't, and nothing can fix it before the bid is due
     curable  it doesn't, but a fix (hire, consortium partner) lands before the due date
     unknown  the library can't tell (turnover, local office...): a person must confirm
-A failed mandatory gate decides the bid: "No bid", or "Bid as subcontractor" when the RFP allows consortia or
-subcontracting. Readiness percentages are still shown, but they can no longer outvote a failed gate.
+A failed mandatory gate decides the bid: "No bid", or "Bid in a consortium" when the RFP allows consortia or
+subcontracting (and a reference gap a consortium partner can fill does the same). Readiness percentages are still shown, but they can no longer outvote a failed gate.
 """
 from __future__ import annotations
 
@@ -20,19 +20,34 @@ from . import validation
 GATE_STOP = set(ENGLISH_STOP_WORDS) | set("""bidder bidders tenderer tenderers supplier suppliers vendor vendors contractor must shall
 should hold holds have has possess maintain demonstrate provide proof evidence status certification certified certificate
 organisation organization least last years year months delivered operated implemented experience higher above equivalent
-required minimum current valid attach submit technical bid within""".split())
+required minimum current valid attach submit technical bid within services service solutions""".split())
 NUM_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10}
 CURE_WEEKS = {"staff": 8, "experience": 3}  # hire a qualified person; sign a consortium/partner agreement
 
 
 def _toks(text: str) -> set[str]:
     out = set()
-    for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9+/-]*", text or ""):
+    for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9+]*", text or ""):
         lw = w.lower()
+        if len(lw) > 4 and lw.endswith("s") and not lw.endswith("ss"):
+            lw = lw[:-1]  # portals -> portal
         if lw in GATE_STOP or len(lw) < 2:
             continue
         out.add(lw)
     return out
+
+
+CLIENT_NOUNS = r"(?:clients?|customers?|organi[sz]ations?|institutions?|companies|enterprises|banks?|insurers?|hospitals?|retailers?|operators?|utilities|agencies|departments|sector|industry)"
+
+
+def _required_industry(text: str) -> int | None:
+    """An industry only counts when the condition ties the references to it: "BFSI clients", "clients in retail"."""
+    for i, g in enumerate(validation.INDUSTRY_GROUPS):
+        for k in g:
+            k_ = re.escape(k)
+            if re.search(rf"\b{k_}\w*\s+(?:[a-z-]+\s)?{CLIENT_NOUNS}\b", text, re.I) or re.search(rf"{CLIENT_NOUNS}\s+(?:in|from|within)\s+(?:the\s+)?{k_}", text, re.I):
+                return i
+    return None
 
 
 def _count_needed(text: str) -> int:
@@ -88,7 +103,7 @@ def _check_experience(text: str, kb, deal_industry: str) -> tuple[str, str, list
     need_n = _count_needed(text)
     window = _years_window(text)
     this_year = date.today().year
-    ind = validation._industry_of_text(text)
+    ind = _required_industry(text)
     topic = _toks(text) - {"clients", "client", "customers", "customer", "projects", "project", "references", "reference"}
     if ind is not None:  # the industry words themselves are checked by the industry test, not the topic test
         topic = {t for t in topic if validation._group(t) != ind}
@@ -156,8 +171,11 @@ def evaluate(profile: dict, kb, deal_industry: str, due_date: str, rfp_text: str
                       "cure": cure, "cure_weeks": cure_weeks})
     failed = [g for g in gates if g["mandatory"] and g["status"] == "fail"]
     verdict = None
+    via_partner = [g for g in gates if g["mandatory"] and g["status"] == "curable" and g["kind"] == "experience"]
     if failed:
-        # with consortia or subcontracting allowed, the company can still take part under a prime that holds what's missing
-        verdict = "Bid as subcontractor" if consortium else "No bid"
+        # with consortia or subcontracting allowed, the company can still take part alongside a prime that holds what's missing
+        verdict = "Bid in a consortium" if consortium else "No bid"
+    elif via_partner:
+        verdict = "Bid in a consortium"
     return {"gates": gates, "failed": [g["ref"] for g in failed], "verdict": verdict, "consortium_allowed": consortium,
             "weeks_to_due": round(weeks_left, 1) if weeks_left is not None else None}

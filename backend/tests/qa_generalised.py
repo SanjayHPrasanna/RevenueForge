@@ -221,5 +221,48 @@ ok("title-case ordinary words, shift notation, levels and places are not technol
 ok("term: years in words", P.parse_term("The contract term is three (3) years of managed services.").get("run_months") == 36)
 ok("term: build then support", P.parse_term("Delivery: 9 months development followed by 12 months of warranty support.") .get("build_months") == 9)
 
+# ---------------------------------------------------------------------- Phase 3: eligibility gates and evidence-tagged answers
+from app.services import gates as G
+from datetime import date
+class KB3:
+    certifications, case_studies, employees = F.CERTIFICATIONS, F.CASE_STUDIES, F.PEOPLE
+def gate(text, kind, due="22 December 2026", rfp="", today=date(2026, 11, 16)):
+    return G.evaluate({"eligibility": [{"ref": "X", "text": text, "kind": kind, "mandatory": True}]}, KB3, "BFSI", due, rfp, today=today)
+ok("held ISO certificate passes", gate("Bidders must hold ISO 9001 certification.", "certification")["gates"][0]["status"] == "pass")
+ok("partner tier in the register passes", gate("Bidders must be a Microsoft Solutions Partner for Infrastructure (Azure).", "partner_status")["gates"][0]["status"] == "pass")
+ok("partner tier not held fails", gate("Bidders must hold Fortinet Expert Partner status.", "partner_status")["gates"][0]["status"] == "fail")
+ok("accreditation not held fails", gate("The bidder shall be a CERT-In empanelled information security auditing organisation.", "accreditation")["gates"][0]["status"] == "fail")
+g = gate("Bidders must have operated managed SOC services for at least three BFSI clients in the last five years.", "experience")
+ok("references tied to an industry need that industry and topic", g["gates"][0]["status"] == "fail" and g["verdict"] == "No bid", g)
+g = gate("Bidders must have delivered at least two citizen- or customer-facing web portals in the last five years.", "experience")
+ok("references counted by topic across industries", g["gates"][0]["status"] == "pass" and len(g["gates"][0]["evidence"]) >= 2, g["gates"][0])
+g = gate("Bidders must have delivered at least one cloud data platform in the last one years.", "experience")
+ok("references outside the time window don't count", g["gates"][0]["status"] == "fail", g["gates"][0])
+g = gate("The SOC lead shall hold CISSP and have at least 10 years of experience.", "staff", due="30 March 2027")
+ok("a staff gap with time to hire is curable", g["gates"][0]["status"] == "curable" and g["verdict"] is None, g["gates"][0])
+g = gate("The SOC lead shall hold CISSP and have at least 10 years of experience.", "staff", due="30 November 2026")
+ok("a staff gap with no time left fails", g["gates"][0]["status"] == "fail", g["gates"][0])
+g = gate("Bidders must have operated managed SOC services for at least three BFSI clients.", "experience", rfp="Consortium bids are allowed; the lead bidder is accountable.")
+ok("with consortia allowed, a reference gap means bid as subcontractor or partner", g["verdict"] == "Bid in a consortium" and g["gates"][0]["status"] == "curable", g)
+g = gate("Bidders must have an annual turnover of USD 10 million.", "financial")
+ok("what the library can't show is 'unknown', not pass", g["gates"][0]["status"] == "unknown" and g["verdict"] is None)
+
+with TestClient(app, raise_server_exceptions=False) as c:
+    h = {"Authorization": "Bearer " + c.post("/api/auth/login", json={"email": "admin@gen.example", "password": PW}).json()["token"]}
+    did = new_deal("network")
+    gp = c.get(f"/api/deals/{did}/stages/gaps", headers=h).json()["data"]
+    ok("failed mandatory gates decide the verdict", gp.get("verdict") == "No bid" and set(gp.get("gates_failed", [])) >= {"EL-01", "EL-02"}, (gp.get("verdict"), gp.get("gates_failed")))
+    ok("the readiness verdict before the gates is kept for reference", gp.get("verdict_before_gates") not in (None, ""), gp.get("verdict_before_gates"))
+    rq = {q["source_ref"]: q for q in c.get(f"/api/deals/{did}/requirements", headers=h).json()}
+    ok("a failed gate is High risk on its requirement", rq["EL-01"]["gap"].get("risk") == "High" and rq["EL-01"]["gap"].get("gate", {}).get("status") == "fail", rq["EL-01"]["gap"])
+    ok("products the company lacks are partner-led", any(t["recommendation"] == "Partner" for t in gp.get("top_missing", []) if "Forti" in t["technology"]), gp.get("top_missing"))
+    with SessionLocal() as db:
+        olds = db.query(AnswerEntry).filter(AnswerEntry.tenant_id == tid, AnswerEntry.source_deal == "").all()
+        ok("older answers were tagged when considered for reuse", any(e.technologies is not None for e in olds))
+        e = next(e for e in olds if "HIS" in e.answer)
+        ok("the tag records the evidence an old answer names", "Healthcare Interoperability" in (e.evidence_refs or []), e.evidence_refs)
+        new_e = db.query(AnswerEntry).filter(AnswerEntry.tenant_id == tid, AnswerEntry.source_deal != "").first()
+        ok("answers saved on approval carry their evidence and technologies", new_e is not None and new_e.evidence_refs is not None and new_e.technologies is not None)
+
 print(f"\n{PASSES} passed, {len(FAILS)} failed")
 sys.exit(1 if FAILS else 0)

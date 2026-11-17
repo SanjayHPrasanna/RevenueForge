@@ -618,7 +618,10 @@ def _is_standard(t: str) -> bool:
     return t.startswith("ISO ") or t in _STD_NAMES
 
 
-def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_options: dict | None = None) -> dict:
+def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_options: dict | None = None,
+                 products: set[str] | None = None) -> dict:
+    """products: (generalised pipeline) named vendor products in this RFP; one the company lacks is partner-led."""
+    products = {p.lower() for p in (products or set())}
     inv = kb.tech_inventory()
     company_techs = set(inv)
     families_have = defaultdict(list)
@@ -641,7 +644,7 @@ def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_
             if _is_standard(t):
                 options.append({"type": "Certify", "detail": f"Start {t} certification or audit (typically 6–9 months); in the meantime, propose a partner that holds it or confirm with the client whether it is mandatory for award.",
                                 "effort": "6–9 months", "cost": "Medium"})
-            elif t in K.PARTNER_PRODUCTS or engagement_type == "product" and fam == "Fraud & identity intelligence":
+            elif t in K.PARTNER_PRODUCTS or t.lower() in products or engagement_type == "product" and fam == "Fraud & identity intelligence":
                 options.append({"type": "Partner", "detail": f"Partner with a specialist {t} product vendor and lead integration, deployment and support as the system integrator.",
                                 "effort": "2–4 weeks to agree terms", "cost": "Revenue share / resale margin"})
             elif fam and families_have.get(fam):
@@ -695,7 +698,7 @@ def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_
     else:
         verdict = "No bid"
     top_missing = sorted(({"technology": t, "requirements": len(v), "codes": v[:8],
-                           "recommendation": ("Partner" if t in K.PARTNER_PRODUCTS else "Certify" if _is_standard(t)
+                           "recommendation": ("Partner" if t in K.PARTNER_PRODUCTS or t.lower() in products else "Certify" if _is_standard(t)
                                               else "Upskill" if families_have.get(K.TECH_FAMILY.get(t, "")) else "Hire")}
                           for t, v in missing_counter.items()), key=lambda x: -x["requirements"])
     counts = defaultdict(int)
