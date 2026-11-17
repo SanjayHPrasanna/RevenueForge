@@ -22,7 +22,7 @@ from sqlalchemy import delete, or_, select
 from starlette.background import BackgroundTask
 
 from ..config import OUTPUT_DIR, UPLOAD_DIR
-from ..models import (Accelerator, AnswerEntry, AuditLog, CaseStudy, Capability, Certification, Deal, DealStage, Document,
+from ..models import (Accelerator, AnswerEntry, Assignment, AuditLog, CaseStudy, Capability, Certification, Deal, DealStage, Document,
                       EmbeddingCache, Employee, GraphEdge, GraphNode, LearningExample, ModelState, NetworkInvite, NetworkRequest,
                       RateCard, Requirement, RequirementComment, StageComment, TechTerm, Tenant, TenderFit, User)
 from ..security import Ctx, require_roles, verify_password
@@ -30,7 +30,7 @@ from ..security import Ctx, require_roles, verify_password
 router = APIRouter(prefix="/api/company", tags=["company-data"])
 
 # every table with a tenant_id column, children before parents
-OWNED = [StageComment, RequirementComment, Requirement, DealStage, Deal, Capability, Employee, Certification, CaseStudy, Accelerator, RateCard,
+OWNED = [StageComment, RequirementComment, Requirement, DealStage, Assignment, Deal, Capability, Employee, Certification, CaseStudy, Accelerator, RateCard,
          GraphEdge, GraphNode, LearningExample, AnswerEntry, EmbeddingCache, ModelState, TenderFit, Document, AuditLog, NetworkRequest, TechTerm]
 SECRET_COLS = {"password_hash", "google_sub", "ms_oid", "embedding", "vector", "blob", "state"}
 

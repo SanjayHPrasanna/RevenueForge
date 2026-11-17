@@ -310,11 +310,20 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
         reqs = _req_dicts(db, deal.id)
         arch = _stage(db, deal, "architecture").data or {}
         overrides = (st.data or {}).get("overrides", {})
-        est = estimate(reqs, kb, {**(deal.meta or {}), "engagement_type": deal.engagement_type, "region": deal.region}, arch,
+        from . import teamplan
+        gen_meta = {}
+        if features.on(tenant):
+            teamplan.backfill_assignments(db, tid)
+            if llm.is_enabled():
+                prog("AI sizing the team from the scope")
+            gen_meta = {"_generalised": True, "_fte_per_seat": features.number(tenant, "fte_per_24x7_seat"),
+                        "_committed": teamplan.commitments(db, tid, deal.id), "_use_ai": llm.is_enabled()}
+        est = estimate(reqs, kb, {**(deal.meta or {}), "engagement_type": deal.engagement_type, "region": deal.region, **gen_meta}, arch,
                        {**overrides, "_calibration": learning.calibration(tenant)})
         est["overrides"] = overrides
         _save_reqs(db, deal.id, reqs, ["workstream", "complexity", "effort_days"])
         st.data = est
+        teamplan.sync_assignments(db, deal, est.get("team", []))
 
     elif name == "pricing":
         kb = load_kb(db, tid)

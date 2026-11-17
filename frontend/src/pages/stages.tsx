@@ -668,23 +668,26 @@ export function EstimationStage({ deal }: P) {
         </div>
       </div>
       <div className="card overflow-x-auto">
-        <div className="px-5 py-3.5 border-b border-line"><div className="font-bold">Who's on the team</div><div className="text-[12.5px] text-ink-muted">Matched from your skills matrix on role, skills ({e.staffing_skills.slice(0, 4).join(", ")}) and availability. Orange: on another project now.</div></div>
+        <div className="px-5 py-3.5 border-b border-line"><div className="font-bold">Who's on the team</div><div className="text-[12.5px] text-ink-muted">{e.team_engine && e.team_engine !== "templates"
+          ? "Roles sized from the RFP's scope. People matched on skills, required certificates and years, and free capacity after other deals. Orange: part-time on this deal."
+          : `Matched from your skills matrix on role, skills (${e.staffing_skills.slice(0, 4).join(", ")}) and availability. Orange: on another project now.`}</div></div>
         <table className="w-full min-w-[640px]">
           <thead><tr>{phased && <th className="th">Phase</th>}<th className="th">Role</th><th className="th text-right">FTE</th><th className="th">Location</th><th className="th">Proposed people</th></tr></thead>
           <tbody>
             {e.team.map((t: any, i: number) => (
               <tr key={i}>
                 {phased && <td className="td text-[13px]">{t.phase}<div className="text-[11.5px] text-ink-faint">{t.months} months</div></td>}
-                <td className="td"><div className="font-semibold text-[13.5px]">{t.role}</div><div className="text-[12px] text-ink-muted">{t.responsibility}</div></td>
+                <td className="td"><div className="font-semibold text-[13.5px]">{t.role}</div><div className="text-[12px] text-ink-muted">{t.responsibility}</div>
+                  {(t.certs?.length > 0 || t.min_years > 0) && <div className="text-[11.5px] text-ink-faint mt-0.5">Needs {[t.certs?.length ? t.certs.join(t.any_cert ? " or " : " and ") : "", t.min_years ? `${t.min_years}+ years` : ""].filter(Boolean).join(", ")}</div>}</td>
                 <td className="td text-right num">{t.fte}</td>
                 <td className="td text-[13px]">{t.location}</td>
                 <td className="td">
                   <div className="flex flex-wrap gap-1">
                     {t.assigned.map((pp: any) => (
                       <span key={pp.code} className={clsx("chip border", pp.status === "Available" ? "bg-white border-line text-ink-soft" : "bg-ember-50 border-ember-100 text-ember-600")}
-                        title={`${pp.role}, ${pp.level}, ${pp.location}, ${pp.availability}% available`}>{pp.code}</span>
+                        title={`${pp.role}, ${pp.level}, ${pp.location}, ${pp.availability}% available${pp.fte != null ? `, ${pp.fte} FTE on this role` : ""}`}>{pp.code}{pp.fte != null && pp.fte < 1 ? ` · ${pp.fte}` : ""}</span>
                     ))}
-                    {t.unfilled > 0 && <span className="chip bg-[#FBE7E5] text-fit-gap-ink">+{t.unfilled} to hire</span>}
+                    {t.unfilled > 0 && <span className="chip bg-[#FBE7E5] text-fit-gap-ink">{t.open_fte != null && t.open_fte % 1 ? `${t.open_fte} FTE open` : `+${t.unfilled} to hire`}</span>}
                   </div>
                 </td>
               </tr>

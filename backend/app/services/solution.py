@@ -576,43 +576,74 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
                              "Client provides environments, test data and SME availability per plan."]
 
     # role-wise team plan with named (anonymised) people from the skills register
-    used: set[str] = set()
     req_skills = [t for r in reqs for t in r.get("technologies", []) if t not in K.COMMODITY_TECH]
     top_skills = [t for t, _ in Counter(req_skills).most_common(6)]
-    by_phase: dict[str, set[str]] = defaultdict(set)
-    for role, fte, loc, resp, phase, m in plan:
-        n_people = max(1, math.ceil(fte - 0.01))
-        # nobody holds two roles in the same phase; in a build + run deal the build team can stay on for the run
-        pool = by_phase[phase] if eng == "build_run" else used
-        people, unfilled = _assign_people(kb, role, n_people, top_skills, pool)
-        by_phase[phase].update(p["code"] for p in people)
-        used.update(p["code"] for p in people)
-        team.append({"role": role, "fte": round(fte, 2), "headcount": n_people, "location": loc, "responsibility": resp, "phase": phase,
-                     "months": m, "person_days": round(fte * m * 21, 1), "assigned": people, "unfilled": unfilled})
-    # Part-time rows of the same job in one phase (a Project Manager split 0.25 onsite + 0.75 offshore, or engagement and
-    # project management) can be one person, as long as their total load stays within one full-time person. This stops
-    # roles showing "to hire" while a named person still has the time.
-    mgmt = {"Engagement Manager", "Project Manager"}
-    for ph in {t["phase"] for t in team}:
-        rows = [t for t in team if t["phase"] == ph]
-        load: dict[str, float] = defaultdict(float)
-        for t in rows:
-            for p in t["assigned"]:
-                load[p["code"]] += t["fte"] / max(1, len(t["assigned"]))
-        for t in rows:
-            if t["assigned"] or not t["unfilled"] or t["headcount"] != 1:
-                continue
-            for o in rows:
-                same_job = o["role"] == t["role"] or {o["role"], t["role"]} <= mgmt
-                if o is t or not same_job or len(o["assigned"]) != 1:
+    team_engine = "templates"
+    if meta.get("_generalised") and eng != "consulting":
+        # Generalised: roles and FTE from the RFP's scope, people by skills, certificates, years and free capacity.
+        from . import teamplan
+        prof = meta.get("profile") or {}
+        trans = [("Transition", stated_transition)] if stated_transition else []
+        ph = ([("Build", build_months or 6)] + trans + [("Run", term)] if eng == "build_run" else
+              trans + [("Run", term)] if eng == "managed_services" else [("Build", months)])
+        seat = float(meta.get("_fte_per_seat") or 4.8)
+        rows, team_notes = teamplan.plan_roles(reqs, prof, ph, onsite_ratio, seat, kb)
+        team_engine = "rules"
+        if meta.get("_use_ai"):
+            ai_rows = teamplan.ai_plan(reqs, prof, ph, seat, rows)
+            if ai_rows:
+                rows, team_engine = ai_rows, "ai"
+        teamplan.assign(kb, rows, meta.get("_committed") or {})
+        for r in rows:
+            team.append({"role": r["role"], "fte": r["fte"], "headcount": r["headcount"], "location": r["location"], "responsibility": r["responsibility"],
+                         "phase": r["phase"], "months": r["months"], "person_days": round(r["fte"] * r["months"] * 21, 1), "assigned": r["assigned"],
+                         "unfilled": r["unfilled"], "open_fte": r.get("open_fte", 0), "skills": r["skills"], "certs": r["certs"],
+                         "any_cert": r.get("any_cert", False), "min_years": r["min_years"], "serves": r["serves"]})
+        if not re.search(r"enhancement|change request|minor change", text_all):
+            phases = [p for p in phases if not p["name"].startswith("Change & enhancement")]
+        assumptions_extra = [a for a in assumptions_extra if "change squad" not in a]
+        if any(t["phase"] == "Run" and "24x7 seat" in t["responsibility"] for t in team):
+            assumptions_extra.append(f"Each 24x7 seat is staffed at {seat:g} FTE to cover shifts, leave and training.")
+        assumptions_extra += team_notes
+        committed = meta.get("_committed") or {}
+        if committed:
+            assumptions_extra.append("Availability allows for people already committed to won deals (in full) and deals still being bid (at half).")
+    else:
+        used: set[str] = set()
+        by_phase: dict[str, set[str]] = defaultdict(set)
+        for role, fte, loc, resp, phase, m in plan:
+            n_people = max(1, math.ceil(fte - 0.01))
+            # nobody holds two roles in the same phase; in a build + run deal the build team can stay on for the run
+            pool = by_phase[phase] if eng == "build_run" else used
+            people, unfilled = _assign_people(kb, role, n_people, top_skills, pool)
+            by_phase[phase].update(p["code"] for p in people)
+            used.update(p["code"] for p in people)
+            team.append({"role": role, "fte": round(fte, 2), "headcount": n_people, "location": loc, "responsibility": resp, "phase": phase,
+                         "months": m, "person_days": round(fte * m * 21, 1), "assigned": people, "unfilled": unfilled})
+        # Part-time rows of the same job in one phase (a Project Manager split 0.25 onsite + 0.75 offshore, or engagement and
+        # project management) can be one person, as long as their total load stays within one full-time person. This stops
+        # roles showing "to hire" while a named person still has the time.
+        mgmt = {"Engagement Manager", "Project Manager"}
+        for ph in {t["phase"] for t in team}:
+            rows = [t for t in team if t["phase"] == ph]
+            load: dict[str, float] = defaultdict(float)
+            for t in rows:
+                for p in t["assigned"]:
+                    load[p["code"]] += t["fte"] / max(1, len(t["assigned"]))
+            for t in rows:
+                if t["assigned"] or not t["unfilled"] or t["headcount"] != 1:
                     continue
-                person = o["assigned"][0]
-                if load[person["code"]] + t["fte"] <= 1.0 + 1e-6:
-                    note = "" if o["role"] == t["role"] else f"; also {o['role'].lower()}"
-                    t["assigned"] = [dict(person, status=person["status"] + note)]
-                    t["unfilled"] = 0
-                    load[person["code"]] += t["fte"]
-                    break
+                for o in rows:
+                    same_job = o["role"] == t["role"] or {o["role"], t["role"]} <= mgmt
+                    if o is t or not same_job or len(o["assigned"]) != 1:
+                        continue
+                    person = o["assigned"][0]
+                    if load[person["code"]] + t["fte"] <= 1.0 + 1e-6:
+                        note = "" if o["role"] == t["role"] else f"; also {o['role'].lower()}"
+                        t["assigned"] = [dict(person, status=person["status"] + note)]
+                        t["unfilled"] = 0
+                        load[person["code"]] += t["fte"]
+                        break
     cal = ov.get("_calibration") or {"factor": 1.0, "deals": 0}
     if cal.get("deals") and abs(cal["factor"] - 1.0) > 0.01 and eng not in ("managed_services",):
         for t in team:
@@ -644,7 +675,7 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
             "accelerator_saving_pct": round((1 - accel_factor) * 100, 1), "contingency_pct": round(contingency, 1),
             "contingency_basis": {"high_risk_gaps": risk_items, "unfilled_roles": unfilled},
             "unfilled_roles": unfilled, "assumptions": assumptions_extra, "calibration": cal,
-            "staffing_skills": top_skills}
+            "staffing_skills": top_skills, "team_engine": team_engine}
 
 
 # =========================================================================== pricing

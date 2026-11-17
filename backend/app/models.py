@@ -390,6 +390,21 @@ class TechTerm(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class Assignment(Base):
+    """Who a deal's team plan books, at what FTE, in which phase. Rewritten each time the deal's team is planned; read to
+    know a person's commitments when another deal is staffed (won deals in full, deals still being bid at half)."""
+    __tablename__ = "assignments"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    tenant_id: Mapped[str] = mapped_column(String(32), index=True)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    employee_code: Mapped[str] = mapped_column(String(60), index=True)
+    role: Mapped[str] = mapped_column(String(120), default="")
+    phase: Mapped[str] = mapped_column(String(40), default="")
+    fte: Mapped[float] = mapped_column(Float, default=0)
+    months: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class EmbeddingCache(Base):
     __tablename__ = "embedding_cache"
     __table_args__ = (UniqueConstraint("tenant_id", "key"),)

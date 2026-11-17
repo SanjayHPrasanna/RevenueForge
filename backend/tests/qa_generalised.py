@@ -264,5 +264,74 @@ with TestClient(app, raise_server_exceptions=False) as c:
         new_e = db.query(AnswerEntry).filter(AnswerEntry.tenant_id == tid, AnswerEntry.source_deal != "").first()
         ok("answers saved on approval carry their evidence and technologies", new_e is not None and new_e.evidence_refs is not None and new_e.technologies is not None)
 
+# ---------------------------------------------------------------------- Phase 4: team planner and people matching
+from app.services import teamplan as TP
+class KB4:
+    employees = F.PEOPLE
+prof4 = {"service": {"coverage": "24x7"}, "eligibility": [
+    {"ref": "STF-01", "kind": "staff", "mandatory": True, "text": "The SOC lead shall hold CISSP and have at least 10 years of security operations experience."},
+    {"ref": "STF-02", "kind": "staff", "mandatory": False, "text": "L2 analysts shall hold OSCP or GCIH certification."}]}
+reqs4 = [
+    {"code": "REQ-1", "source_ref": "S-1", "text": "The bidder shall operate a 24x7 Security Operations Centre with L1 and L2 analysts.", "workstream": "Service operations",
+     "subcategory": "Monitoring & Operations", "category": "Functional", "technologies": [], "effort_days": 8},
+    {"code": "REQ-2", "source_ref": "S-2", "text": "Events shall be correlated in Microsoft Sentinel.", "workstream": "Security & compliance", "subcategory": "Security",
+     "category": "Functional", "technologies": ["Microsoft Sentinel"], "effort_days": 8},
+    {"code": "REQ-3", "source_ref": "S-3", "text": "The bidder shall deploy Fortinet FortiGate firewalls at 20 sites.", "workstream": "Platform & continuity",
+     "subcategory": "Security", "category": "Functional", "technologies": ["Fortinet FortiGate"], "effort_days": 18},
+    {"code": "REQ-4", "source_ref": "S-4", "text": "Field engineers shall attend site faults within 4 hours.", "workstream": "Service operations",
+     "subcategory": "Service Levels", "category": "Non-functional", "technologies": [], "effort_days": 3},
+    {"code": "REQ-5", "source_ref": "S-5", "text": "The bidder shall hold ISO 9001 certification.", "workstream": "Security & compliance",
+     "subcategory": "Standards & Certifications", "category": "Compliance", "technologies": ["ISO 9001"], "effort_days": 3}]
+rows4, notes4 = TP.plan_roles(reqs4, prof4, [("Transition", 2), ("Run", 24)], 0.2, 4.8, KB4)
+by = {(r["phase"], r["role"]): r for r in rows4}
+ok("named service line becomes analyst tiers", ("Run", "Security Operations Centre Analyst (L1)") in by and ("Run", "Security Operations Centre Analyst (L2)") in by, list(by))
+ok("24x7 seats sized by the shift rota setting", by[("Run", "Security Operations Centre Analyst (L1)")]["fte"] == 4.8)
+ok("a library job title names a specialism", ("Run", "Network Engineer") in by and "Fortinet FortiGate" in by[("Run", "Network Engineer")]["skills"], list(by))
+ok("a role the RFP names doing the work is used", any(r["role"] == "Field Engineer" for r in rows4), list(by))
+ok("company conditions get no role", not any("S-5" in r["serves"] for r in rows4))
+lead = next((r for r in rows4 if r["role"] == "SOC Lead"), None)
+ok("a staff condition becomes a role with hard constraints", lead is not None and lead["certs"] == ["CISSP"] and lead["min_years"] == 10, lead)
+l2 = by[("Run", "Security Operations Centre Analyst (L2)")]
+ok("a tier condition constrains that tier", set(l2["certs"]) == {"OSCP", "GCIH"} and l2["any_cert"], l2)
+ok("the service team joins during transition", any(r["phase"] == "Transition" and "take-over" in r["responsibility"] for r in rows4))
+TP.assign(KB4, rows4, {"KD012": 0.7})
+ok("committed capacity is deducted (KD012 80% available, 70% committed)", not any(p["code"] == "KD012" for r in rows4 for p in r["assigned"]))
+ok("a role nobody qualifies for stays open", lead["assigned"] == [] and lead["unfilled"] == 1)
+ok("nobody is placed without a relevant skill or title", all(p["fit"] > 0 for r in rows4 for p in r["assigned"]))
+load4 = {}
+for r in rows4:
+    for p in r["assigned"]:
+        load4[(r["phase"], p["code"])] = load4.get((r["phase"], p["code"]), 0) + p["fte"]
+avail4 = {p["code"]: p["availability"] / 100 for p in F.PEOPLE}
+ok("nobody is booked past capacity within a phase", all(v <= avail4[k[1]] + 1e-6 for k, v in load4.items()), load4)
+ok("a person on a role naming technologies holds one of them", all(TP.person_skill_hits(next(e for e in F.PEOPLE if e["code"] == p["code"]), r["skills"]) or
+                                                               TP.clean_title(p["role"]) == TP.clean_title(r["role"]) for r in rows4 if r["skills"] for p in r["assigned"]))
+ok("skill match is not fooled by a shared vendor word", not TP.person_skill_hits(next(e for e in F.PEOPLE if e["code"] == "KD010"), ["Azure Migrate"]))
+ai4 = TP.check_ai_plan({"roles": [{"role": "SOC Analyst", "phase": "Run", "fte": 2, "serves": ["S-1"]}]}, reqs4, prof4, [("Transition", 2), ("Run", 24)], 4.8, rows4)
+need = sum(r["fte"] for r in rows4 if r["phase"] == "Run" and "24x7 seat" in r["responsibility"])
+ok("AI team: a 24x7 service under-sized by the AI is raised to shift sizing", ai4 and need >= 4.8 and
+   sum(r["fte"] for r in ai4 if "S-1" in r["serves"] and r["phase"] == "Run") >= need - 0.01, ai4)
+ok("AI team: work the AI left out keeps its rules role", ai4 and any("S-3" in r["serves"] for r in ai4))
+ok("AI team: staff conditions are kept", ai4 and any(r["certs"] == ["CISSP"] for r in ai4))
+ok("AI team: unknown phases and silly sizes are rejected", TP.check_ai_plan({"roles": [{"role": "X", "phase": "Moon", "fte": 3}, {"role": "Y", "phase": "Run", "fte": 400}]},
+                                                                            reqs4, prof4, [("Run", 24)], 4.8, rows4) is None)
+
+with TestClient(app, raise_server_exceptions=False) as c:
+    h = {"Authorization": "Bearer " + c.post("/api/auth/login", json={"email": "admin@gen.example", "password": PW}).json()["token"]}
+    from app.models import Assignment
+    did4 = new_deal("network")
+    est4 = c.get(f"/api/deals/{did4}/stages/estimation", headers=h).json()["data"]
+    ok("the generalised team plan is used", est4.get("team_engine") in ("rules", "ai") and any("Operations Centre" in t["role"] for t in est4["team"]), est4.get("team_engine"))
+    ok("every assigned person carries the FTE they give", all(p.get("fte") for t in est4["team"] for p in t["assigned"]))
+    with SessionLocal() as db:
+        n4 = db.query(Assignment).filter(Assignment.deal_id == did4).count()
+        booked = sum(len(t["assigned"]) for t in est4["team"])
+        ok("the plan is written to the assignment table", n4 == booked and n4 > 0, (n4, booked))
+        com = TP.commitments(db, tid, "")
+        ok("deals still being bid count at half", all(v > 0 for v in com.values()) and com, com)
+    c.delete(f"/api/deals/{did4}", headers=h)
+    with SessionLocal() as db:
+        ok("deleting a deal frees its people", db.query(Assignment).filter(Assignment.deal_id == did4).count() == 0)
+
 print(f"\n{PASSES} passed, {len(FAILS)} failed")
 sys.exit(1 if FAILS else 0)
