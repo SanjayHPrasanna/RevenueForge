@@ -668,23 +668,26 @@ export function EstimationStage({ deal }: P) {
         </div>
       </div>
       <div className="card overflow-x-auto">
-        <div className="px-5 py-3.5 border-b border-line"><div className="font-bold">Who's on the team</div><div className="text-[12.5px] text-ink-muted">Matched from your skills matrix on role, skills ({e.staffing_skills.slice(0, 4).join(", ")}) and availability. Orange: on another project now.</div></div>
+        <div className="px-5 py-3.5 border-b border-line"><div className="font-bold">Who's on the team</div><div className="text-[12.5px] text-ink-muted">{e.team_engine && e.team_engine !== "templates"
+          ? "Roles sized from the RFP's scope. People matched on skills, required certificates and years, and free capacity after other deals. Orange: part-time on this deal."
+          : `Matched from your skills matrix on role, skills (${e.staffing_skills.slice(0, 4).join(", ")}) and availability. Orange: on another project now.`}</div></div>
         <table className="w-full min-w-[640px]">
           <thead><tr>{phased && <th className="th">Phase</th>}<th className="th">Role</th><th className="th text-right">FTE</th><th className="th">Location</th><th className="th">Proposed people</th></tr></thead>
           <tbody>
             {e.team.map((t: any, i: number) => (
               <tr key={i}>
                 {phased && <td className="td text-[13px]">{t.phase}<div className="text-[11.5px] text-ink-faint">{t.months} months</div></td>}
-                <td className="td"><div className="font-semibold text-[13.5px]">{t.role}</div><div className="text-[12px] text-ink-muted">{t.responsibility}</div></td>
+                <td className="td"><div className="font-semibold text-[13.5px]">{t.role}</div><div className="text-[12px] text-ink-muted">{t.responsibility}</div>
+                  {(t.certs?.length > 0 || t.min_years > 0) && <div className="text-[11.5px] text-ink-faint mt-0.5">Needs {[t.certs?.length ? t.certs.join(t.any_cert ? " or " : " and ") : "", t.min_years ? `${t.min_years}+ years` : ""].filter(Boolean).join(", ")}</div>}</td>
                 <td className="td text-right num">{t.fte}</td>
                 <td className="td text-[13px]">{t.location}</td>
                 <td className="td">
                   <div className="flex flex-wrap gap-1">
                     {t.assigned.map((pp: any) => (
                       <span key={pp.code} className={clsx("chip border", pp.status === "Available" ? "bg-white border-line text-ink-soft" : "bg-ember-50 border-ember-100 text-ember-600")}
-                        title={`${pp.role}, ${pp.level}, ${pp.location}, ${pp.availability}% available`}>{pp.code}</span>
+                        title={`${pp.role}, ${pp.level}, ${pp.location}, ${pp.availability}% available${pp.fte != null ? `, ${pp.fte} FTE on this role` : ""}`}>{pp.code}{pp.fte != null && pp.fte < 1 ? ` · ${pp.fte}` : ""}</span>
                     ))}
-                    {t.unfilled > 0 && <span className="chip bg-[#FBE7E5] text-fit-gap-ink">+{t.unfilled} to hire</span>}
+                    {t.unfilled > 0 && <span className="chip bg-[#FBE7E5] text-fit-gap-ink">{t.open_fte != null && t.open_fte % 1 ? `${t.open_fte} FTE open` : `+${t.unfilled} to hire`}</span>}
                   </div>
                 </td>
               </tr>
@@ -698,6 +701,51 @@ export function EstimationStage({ deal }: P) {
 }
 
 // =============================================================== 6. pricing
+const KIND_LABEL: Record<string, string> = { partner: "Partner", licence: "Licence / product", commitment: "Commitment", hiring: "Hiring" };
+
+function OtherCosts({ deal, lines, current, m }: { deal: any; lines: any[]; current: Record<string, any>; m: (v: number) => string }) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const save = useMutation({
+    mutationFn: (entry: Record<string, any>) => api.put(`/deals/${deal.id}/stages/pricing/overrides`, { overrides: { other_lines: { ...current, ...entry } } }),
+    onSuccess: () => { qc.invalidateQueries(); toast("ok", "Cost line saved. Prices recalculated."); },
+    onError: (e: any) => toast("error", e.message),
+  });
+  const open = lines.filter((l) => l.needs_quote && !l.confirmed).length;
+  return (
+    <div className="card overflow-x-auto">
+      <div className="px-5 py-3.5 border-b border-line">
+        <div className="font-bold">Partners, licences and commitments</div>
+        <div className="text-[12.5px] text-ink-muted">Costs beyond the team, from the RFP and the gap plan. {open ? `${open} still need a quote or a confirmed figure before pricing can be approved.` : "Every line has a figure."}</div>
+      </div>
+      <table className="w-full min-w-[720px]">
+        <thead><tr><th className="th">Cost</th><th className="th">Basis</th><th className="th text-right">Amount</th><th className="th">Figure</th></tr></thead>
+        <tbody>
+          {lines.map((l) => (
+            <tr key={l.id}>
+              <td className="td text-[13.5px]"><span className="chip bg-paper border border-line text-ink-soft mr-1.5">{KIND_LABEL[l.kind] || l.kind}</span>{l.label}</td>
+              <td className="td text-[12px] text-ink-muted max-w-[280px]">{l.basis}{l.low != null && l.high != null ? ` · range ${m(l.low)} – ${m(l.high)}` : ""}</td>
+              <td className="td text-right num font-semibold">{l.amount ? m(l.amount) : "—"}</td>
+              <td className="td">
+                {l.needs_quote && !l.confirmed ? (
+                  <div className="flex items-center gap-1.5">
+                    <input aria-label={`Quoted amount for ${l.label}`} className="input h-8 w-28 num" inputMode="decimal" placeholder="Quote"
+                      value={draft[l.id] ?? ""} onChange={(e) => setDraft({ ...draft, [l.id]: e.target.value })} />
+                    <button className="btn-outline h-8 px-2.5 text-[12.5px]" disabled={!draft[l.id] || save.isPending}
+                      onClick={() => save.mutate({ [l.id]: { amount: Number(draft[l.id]) } })}>Save</button>
+                    {l.amount > 0 && <button className="btn-ghost h-8 px-2 text-[12.5px]" disabled={save.isPending} onClick={() => save.mutate({ [l.id]: { confirmed: true } })}>Use estimate</button>}
+                  </div>
+                ) : <span className="chip bg-white border border-line text-ink-soft">{l.needs_quote === false && l.basis.includes("entered") ? "Quoted" : "Confirmed"}</span>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function PricingStage({ deal }: P) {
   const qc = useQueryClient();
   const toast = useToast();
@@ -823,10 +871,12 @@ export function PricingStage({ deal }: P) {
             <tr><td className="td" colSpan={5}>Labour</td><td className="td text-right num font-semibold">{m(p.labour_cost)}</td></tr>
             <tr><td className="td" colSpan={5}>Travel and living ({p.travel_pct}% of onsite)</td><td className="td text-right num">{m(p.travel)}</td></tr>
             <tr><td className="td" colSpan={5}>Contingency ({p.contingency_pct}%)</td><td className="td text-right num">{m(p.contingency)}</td></tr>
+            {p.other_lines?.length > 0 && <tr><td className="td" colSpan={5}>Partners, licences, commitments and hiring (below)</td><td className="td text-right num">{m(p.other_cost)}</td></tr>}
             <tr className="bg-paper"><td className="td font-bold" colSpan={5}>Total cost</td><td className="td text-right num font-bold">{m(p.total_cost)}</td></tr>
           </tbody>
         </table>
       </div>
+      {p.other_lines?.length > 0 && <OtherCosts deal={deal} lines={p.other_lines} current={p.overrides?.other_lines || {}} m={m} />}
     </div>
   );
 }
@@ -862,6 +912,32 @@ function ResponseRow({ dealId, r, onSaved }: { dealId: string; r: any; onSaved: 
   );
 }
 
+function ProposalChecks({ checks }: { checks: any }) {
+  const errs: any[] = checks.errors || [];
+  const warns: any[] = checks.warnings || [];
+  return (
+    <div className="card p-5 text-[13px]" aria-live="polite">
+      <div className="font-bold text-[14px] flex items-center gap-2">
+        {errs.length ? <X className="h-4 w-4 text-ember-600" /> : <CheckCircle2 className="h-4 w-4 text-brand-700" />} Proposal checks
+      </div>
+      <div className="text-ink-muted mt-1">
+        {errs.length ? `${plural(errs.length, "answer")} must be fixed before approval` : `${checks.checked} answers checked: claims backed by your library, no internal notes`}
+        {warns.length ? `; ${plural(warns.length, "note")} to review.` : "."}
+      </div>
+      {(errs.length > 0 || warns.length > 0) && (
+        <ul className="mt-3 space-y-2 max-h-56 overflow-auto scroll-thin">
+          {[...errs, ...warns].slice(0, 30).map((x, i) => (
+            <li key={i} className="flex gap-2">
+              <span className={clsx("chip shrink-0", x.severity === "error" ? "bg-ember-50 text-ember-600" : "bg-line-soft text-ink-soft")}>{x.ref || x.code}</span>
+              <span className="text-ink-soft">{x.detail}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function ProposalStage({ deal }: P) {
   const toast = useToast();
   const qc = useQueryClient();
@@ -869,6 +945,7 @@ export function ProposalStage({ deal }: P) {
   const { data: reqs } = useReqs(deal.id);
   const [edited, setEdited] = useState(false);
   const [filter, setFilter] = useState("all");
+  const { data: checks } = useQuery({ queryKey: ["checks", deal.id, reqs?.map((r) => r.response).join("|").length], queryFn: () => api.get(`/deals/${deal.id}/proposal/checks`), enabled: !!reqs });
   const regen = useMutation({ mutationFn: () => api.post(`/deals/${deal.id}/rerun`, { from_stage: "proposal" }), onSuccess: () => qc.invalidateQueries() });
   const rebuild = useMutation({
     mutationFn: () => api.post(`/deals/${deal.id}/proposal/rebuild`),
@@ -904,11 +981,12 @@ export function ProposalStage({ deal }: P) {
             <button className="btn-outline w-full mt-2" onClick={() => download(`/deals/${deal.id}/download/requirements`, "compliance matrix.xlsx").catch((e) => toast("error", e.message))}><Download className="h-4 w-4" /> Compliance matrix .xlsx</button>
             <button className="btn-ghost w-full mt-2" disabled={regen.isPending} onClick={() => regen.mutate()} title="Re-drafts every answer except the ones your team wrote"><RefreshCw className="h-4 w-4" /> Re-draft with AI</button>
           </div>
+          {checks?.enabled && <ProposalChecks checks={checks} />}
           <div className="card p-5 text-[13px]">
             <div className="font-bold text-[14px] mb-2">Where the answers came from</div>
             <ShareBar parts={[["library", "#0C3D55"], ["human", "#F5833A"], ["ai", "#1A82AE"], ["rules", "#9FC6D9"]].map(([k, c]) => ({ label: SRC[k][0], value: counts[k] || 0, color: c }))} />
             {(counts.rules || 0) > 0 && d.engine === "ai" && <div className="text-[12px] text-ember-600 mt-3">{counts.rules} answer{counts.rules === 1 ? "" : "s"} use the template because the AI couldn't write them (busy or out of quota). Use "Re-draft with AI" to try again; your team's edits are kept.</div>}
-            <div className="text-[12px] text-ink-muted mt-3">Approving this stage adds these answers to your library, so the next similar RFP starts from them.</div>
+            <div className="text-[12px] text-ink-muted mt-3">Approving this stage adds these answers to your library, so the next similar RFP starts from them{checks?.enabled ? " (only answers that pass the checks)" : ""}.</div>
           </div>
         </aside>
       </div>

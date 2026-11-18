@@ -277,6 +277,17 @@ def _domain_terms(text: str, techs: list[str]) -> dict[str, str]:
     return out
 
 
+def _held_tech(t: str, company_techs: set[str]) -> bool:
+    """A requirement technology the company has. Dictionary names match exactly, as before; an open-vocabulary name from the
+    RFP Profile ("Node.js", "Microsoft Sentinel") also matches its canonical dictionary name or the same product in the library."""
+    if t in company_techs or K.canonical_tech(t) in company_techs:
+        return True
+    if t in K.TECHNOLOGIES:
+        return False
+    from .teamplan import _same
+    return any(_same(t, c) for c in company_techs)
+
+
 def _covered(term: str, vocab: set[str]) -> bool:
     if term in vocab:
         return True
@@ -343,8 +354,8 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
             cap_s = min(1.0, cap_s + 0.05)  # learning loop: capabilities that helped win before get a small boost
         cs_s = norm(cs_scores[0][0], 0.28) if cs_scores else 0
         req_techs = [t for t in r.get("technologies", []) if t not in K.COMMODITY_TECH]
-        have = [t for t in req_techs if t in company_techs]
-        missing = [t for t in req_techs if t not in company_techs]
+        have = [t for t in req_techs if _held_tech(t, company_techs)]
+        missing = [t for t in req_techs if not _held_tech(t, company_techs)]
         tech_cov = (len(have) / len(req_techs)) if req_techs else None
         people = sorted({e["code"] for e in kb.employees for s in e.get("skills", [])
                          if s.get("level", 0) >= 3 and K.techs_in(s["name"]) & set(have)})
@@ -618,7 +629,10 @@ def _is_standard(t: str) -> bool:
     return t.startswith("ISO ") or t in _STD_NAMES
 
 
-def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_options: dict | None = None) -> dict:
+def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_options: dict | None = None,
+                 products: set[str] | None = None) -> dict:
+    """products: (generalised pipeline) named vendor products in this RFP; one the company lacks is partner-led."""
+    products = {p.lower() for p in (products or set())}
     inv = kb.tech_inventory()
     company_techs = set(inv)
     families_have = defaultdict(list)
@@ -641,7 +655,7 @@ def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_
             if _is_standard(t):
                 options.append({"type": "Certify", "detail": f"Start {t} certification or audit (typically 6–9 months); in the meantime, propose a partner that holds it or confirm with the client whether it is mandatory for award.",
                                 "effort": "6–9 months", "cost": "Medium"})
-            elif t in K.PARTNER_PRODUCTS or engagement_type == "product" and fam == "Fraud & identity intelligence":
+            elif t in K.PARTNER_PRODUCTS or t.lower() in products or engagement_type == "product" and fam == "Fraud & identity intelligence":
                 options.append({"type": "Partner", "detail": f"Partner with a specialist {t} product vendor and lead integration, deployment and support as the system integrator.",
                                 "effort": "2–4 weeks to agree terms", "cost": "Revenue share / resale margin"})
             elif fam and families_have.get(fam):
@@ -695,7 +709,7 @@ def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_
     else:
         verdict = "No bid"
     top_missing = sorted(({"technology": t, "requirements": len(v), "codes": v[:8],
-                           "recommendation": ("Partner" if t in K.PARTNER_PRODUCTS else "Certify" if _is_standard(t)
+                           "recommendation": ("Partner" if t in K.PARTNER_PRODUCTS or t.lower() in products else "Certify" if _is_standard(t)
                                               else "Upskill" if families_have.get(K.TECH_FAMILY.get(t, "")) else "Hire")}
                           for t, v in missing_counter.items()), key=lambda x: -x["requirements"])
     counts = defaultdict(int)

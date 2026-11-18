@@ -7,6 +7,7 @@ knowledge base; nothing is invented.
 from __future__ import annotations
 
 import copy
+import json
 import io
 import re
 from datetime import date
@@ -18,6 +19,7 @@ from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
 
 from . import llm
+from .masking import mask_obj
 
 ENG_LABEL = {"managed_services": "outcome-based managed service", "build_run": "platform build and migration followed by an outcome-based managed service",
              "product": "product-led solution with full system integration",
@@ -78,7 +80,9 @@ def money(v: float, ccy: str) -> str:
 
 
 # --------------------------------------------------------------------------- narrative
-def response_text(r: dict, company: str) -> str:
+def response_text(r: dict, company: str, generalised: bool = False) -> str:
+    if generalised:
+        return _response_text_generalised(r, company)
     m = r.get("match", {})
     ev = m.get("evidence", [])
     caps = [e["name"] for e in ev if e["type"] == "Capability"]
@@ -136,8 +140,51 @@ def response_text(r: dict, company: str) -> str:
     return " ".join(parts) or f"{company} will meet this requirement as part of the delivery approach."
 
 
-def ai_responses(reqs: list[dict], company: dict, client: str, guidance: str = "", progress=None) -> dict[str, str]:
-    """AI drafts the client-facing response for each requirement, using only its matched evidence."""
+def _response_text_generalised(r: dict, company: str) -> str:
+    """Rules answer for the generalised pipeline: a promise to *do* something is only written for work requirements; a
+    credential, eligibility or staffing condition is answered with what the library shows, or stated honestly."""
+    from .validation import honest_fallback
+    m = r.get("match", {})
+    ev = m.get("evidence", [])
+    st = r.get("match_status")
+    if st == "confirm" or (st == "gap" and not (r.get("gap") or {}).get("options")):
+        return response_text(r, company)
+    caps = [e["name"] for e in ev if e["type"] == "Capability"]
+    cs = [e["name"] for e in ev if e["type"] == "Case study"]
+    certs = [e["name"] for e in ev if e["type"] == "Certification"]
+    work = r.get("category") in ("Functional", "Non-functional")
+    parts = []
+    if certs:
+        parts.append(f"{company} holds {', '.join(certs)}.")
+    commit = _commit_sentence(r.get("text", "")) if work and not certs else ""
+    if commit:
+        parts.append(commit)
+    if st == "strong" or (st == "partial" and work):
+        if caps:
+            parts.append(f"{'This is delivered' if parts else 'Delivered'} through our {caps[0]} capability.")
+        if m.get("people_count"):
+            n = m["people_count"]
+            parts.append(f"{n} engineer{'s' if n != 1 else ''} with {', '.join(m.get('technologies_have', [])[:3])} skills "
+                         f"{'are' if n != 1 else 'is'} available to the programme.")
+        if cs:
+            parts.append(f"Reference: {cs[0]}.")
+    if st in ("partial", "gap"):
+        parts.append(honest_fallback(r, company))
+    return " ".join(parts) or honest_fallback(r, company)
+
+
+def restate(r: dict) -> str:
+    """A requirement-specific opening, so two requirements never get the same paragraph (never a promise: that could
+    reintroduce the claim the checks just removed)."""
+    return f"For {client_ref(r) or 'this requirement'}:"
+
+
+def ai_responses(reqs: list[dict], company: dict, client: str, guidance: str = "", progress=None,
+                 references: dict[str, str] | None = None, feedback: dict[str, str] | None = None) -> dict[str, str]:
+    """AI drafts the client-facing response for each requirement, using only its matched evidence.
+    references: {requirement id: an approved answer from an earlier bid} to adapt, never copy.
+    feedback: {requirement id: why the previous draft was rejected} for a second attempt."""
+    references, feedback = references or {}, feedback or {}
     # A gap with no chosen mitigation gets the NOT COVERED marker from response_text, never an AI-polished promise.
     todo = [r for r in reqs if r["category"] != "Commercial" and r.get("match_status") != "confirm"
             and not (r.get("match_status") == "gap" and not (r.get("gap") or {}).get("options"))]
@@ -155,7 +202,11 @@ def ai_responses(reqs: list[dict], company: dict, client: str, guidance: str = "
             plan = opt.get("detail", "") if opt.get("type") not in (None, "Strengthen evidence") else ""
             lines.append(f"[{k}] REQUIREMENT: {r['text'][:400]}\n  fit: {r.get('match_status')} | evidence: {ev} | "
                          f"people: {m.get('people_count', 0)} with {', '.join(m.get('technologies_have', [])[:3]) or 'relevant skills'}"
-                         + (f"\n  plan to close gap: {plan[:240]}" if plan else ""))
+                         + (f"\n  plan to close gap: {plan[:240]}" if plan else "")
+                         + (f"\n  approved answer from an earlier bid (reuse only the facts that fit THIS requirement and its evidence; "
+                            f"rewrite it, never copy it): {references[r['id']][:700]}" if r.get("id") in references else "")
+                         + (f"\n  a previous draft was rejected because: {feedback[r['id']][:300]}. Write a new answer that avoids this."
+                            if r.get("id") in feedback else ""))
         prompt = (f"Company: {company['name']}. {company.get('about', '')[:500]}\nClient: {client}\n\n" + "\n".join(lines) +
                   '\n\nWrite the response for each requirement as it will appear in the proposal compliance matrix: 2-3 sentences, confident, '
                   "specific, first person plural (we). Mention the cited capability, reference project or certification by name. For a gap or "
@@ -204,10 +255,13 @@ def executive_summary(ctx: dict) -> str:
     open_gaps = sum(1 for r in ctx["requirements"] if r.get("match_status") == "gap") - planned_gaps
     cs = ctx.get("case_studies", [])[:2]
     cs_txt = "; ".join(f"{c['title']} ({'; '.join(c.get('outcomes', [])[:1]) or c.get('industry', '')})" for c in cs)
+    # a confidential client is named by its alias here, in both the AI and the written summary, so the summary the app
+    # stores and shows keeps the alias; the real name goes in only when the Word document is built (unmask_document)
+    client = ctx["unmask"][0] if ctx.get("unmask") else d["client_display"]
     if llm.is_enabled():
         try:
             facts = {
-                "client": d["client_display"], "rfp_title": d["name"], "engagement": ENG_LABEL.get(d["engagement_type"], ""),
+                "client": client, "rfp_title": d["name"], "engagement": ENG_LABEL.get(d["engagement_type"], ""),
                 "company": company["name"], "company_about": company.get("about", ""), "requirements": len(ctx["requirements"]),
                 "technical_requirements": len(tech), "fully_met": counts.get("strong", 0), "met_with_approach": counts.get("partial", 0),
                 "gaps_closed_by_mitigation_plan": planned_gaps, "gaps_without_a_plan_do_not_claim_these": open_gaps, "conditions_and_submission_items_acknowledged": counts.get("confirm", 0),
@@ -218,6 +272,12 @@ def executive_summary(ctx: dict) -> str:
                 "price": money(rfp_price, pr["rfp_currency"]), "references": cs_txt, "architecture": ctx["architecture"]["summary"],
                 "evaluation_criteria": [e["criterion"] for e in ctx["meta"].get("evaluation_criteria", [])],
             }
+            if ctx.get("unmask"):
+                # confidential deal: the AI sees the alias only, and every other fact is masked with the deal's masker
+                alias, real = ctx["unmask"]
+                facts = mask_obj((ctx.get("ai_mask") or (lambda x: x))(facts), real, [], alias)
+                if real.lower() in json.dumps(facts, ensure_ascii=False).lower():
+                    raise ValueError("client name still in the facts; using the written summary instead")
             return llm.complete("You write crisp, factual executive summaries for enterprise proposals. Use only the facts given. 3 short paragraphs, "
                                 "no headings, no bullet points. Don't mention counts that are zero, don't describe the company as serving "
                                 "industries that aren't in the facts, and never say every requirement is met or covered unless the facts show "
@@ -225,7 +285,7 @@ def executive_summary(ctx: dict) -> str:
                                 f"Facts (JSON): {facts}", max_tokens=900).strip()
         except Exception:
             pass
-    p1 = (f"{d['client_display']} is seeking a partner for {d['name']}. {company['name']} proposes {_a(ENG_LABEL.get(d['engagement_type'], 'engagement'))} "
+    p1 = (f"{client} is seeking a partner for {d['name']}. {company['name']} proposes {_a(ENG_LABEL.get(d['engagement_type'], 'engagement'))} "
           f"in response to the {len(ctx['requirements'])} requirements identified in the RFP, including {len(tech)} functional and non-functional requirements.")
     bits = [f"{counts.get('strong', 0)} requirements are met by proven, in-house capabilities"]
     if counts.get("partial"):

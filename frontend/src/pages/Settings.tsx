@@ -22,7 +22,8 @@ export default function SettingsPage() {
   const [nu, setNu] = useState({ name: "", email: "", role: "presales", password: "" });
   useEffect(() => { if (c && !s) setS({ ...c.settings, about: c.about }); }, [c]);
   const save = useMutation({
-    mutationFn: () => api.put("/company", { about: s.about, settings: { target_margin: s.target_margin, min_margin: s.min_margin, travel_pct: s.travel_pct, hide_employee_names: s.hide_employee_names } }),
+    mutationFn: () => api.put("/company", { about: s.about, settings: { target_margin: s.target_margin, min_margin: s.min_margin, travel_pct: s.travel_pct, hide_employee_names: s.hide_employee_names,
+      generalised_response: !!s.generalised_response, fte_per_24x7_seat: s.fte_per_24x7_seat ?? 4.8 } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ["company"] }); toast("ok", "Settings saved. New pricing runs use them."); },
     onError: (e: any) => toast("error", e.message),
   });
@@ -57,6 +58,16 @@ export default function SettingsPage() {
           <input type="checkbox" className="h-4 w-4 accent-[#118AC3]" checked={!!s.hide_employee_names} onChange={(e) => setS({ ...s, hide_employee_names: e.target.checked })} disabled={!isAdmin} />
           Show employee codes instead of names everywhere
         </label>
+        <div className="mt-5 rounded-xl border border-line p-4">
+          <label className="flex items-start gap-2 text-[13.5px]">
+            <input type="checkbox" className="h-4 w-4 mt-0.5 accent-[#118AC3]" checked={!!s.generalised_response} onChange={(e) => setS({ ...s, generalised_response: e.target.checked })} disabled={!isAdmin} />
+            <span><span className="font-semibold">Evidence-checked proposals</span>
+              <span className="block text-ink-muted text-[12.5px] mt-0.5">Every answer is checked before the proposal is written: claims must be backed by your library, library answers are reused only when the topic and evidence fit (and are rewritten for the new requirement), and internal notes or wording from other industries are removed. Applies to deals run after you switch it on.</span></span>
+          </label>
+          <label className="text-[13px] block mt-3 ml-6"><span className="label">People per 24x7 seat (shift cover)</span>
+            <input className="input w-24 num" type="number" step="0.1" min={3} max={6} aria-label="People per 24x7 seat" value={s.fte_per_24x7_seat ?? 4.8} onChange={(e) => setS({ ...s, fte_per_24x7_seat: Number(e.target.value) })} disabled={!isAdmin} />
+          </label>
+        </div>
         <div className="mt-4"><label className="label" htmlFor="company-about">About the company (used in proposals)</label><textarea id="company-about" className="input h-24 py-2" value={s.about} onChange={(e) => setS({ ...s, about: e.target.value })} disabled={!isAdmin} /></div>
         {isAdmin && <button className="btn-primary mt-4" onClick={() => save.mutate()} disabled={save.isPending}>{save.isPending && <Spinner />} Save settings</button>}
       </section>}

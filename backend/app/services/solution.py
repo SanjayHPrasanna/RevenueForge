@@ -193,7 +193,7 @@ def build_architecture(reqs: list[dict], kb: CompanyKB, meta: dict) -> dict:
     return {"style": style, "engagement_type": eng, "summary": summary, "layers": layers_out, "choices": choices}
 
 
-def ai_architecture(draft: dict, reqs: list[dict], kb: CompanyKB, meta: dict, guidance: str = "") -> dict | None:
+def ai_architecture(draft: dict, reqs: list[dict], kb: CompanyKB, meta: dict, guidance: str = "", generalised: bool = False) -> dict | None:
     """AI refines the rules-based draft: better grouping, missing components, sharper rationale; every item traced to requirements."""
     from . import llm
 
@@ -208,7 +208,11 @@ def ai_architecture(draft: dict, reqs: list[dict], kb: CompanyKB, meta: dict, gu
               f"Technologies this company has people for: {company}\n\nDraft architecture (JSON):\n"
               f"{__import__('json').dumps({k: draft[k] for k in ('layers', 'choices')})[:9000]}\n\nRequirements:\n{req_lines}\n\n"
               "Improve the draft into a credible solution architecture. Keep technologies the RFP mandates; prefer the company's own technologies "
-              "where the RFP leaves the choice open; mark packaged products the company lacks as 'Partner product'. Every component and choice must "
+              "where the RFP leaves the choice open; mark packaged products the company lacks as 'Partner product'. "
+              + ("Only include technologies the requirements actually need: no favourite tools the RFP doesn't call for. Use the basis "
+                 "'Company strength' only for a technology in the company list above; a product the RFP names is 'Specified in the RFP'. "
+                 if generalised else "") +
+              "Every component and choice must "
               "list the requirement codes that drive it (codes from the list only). Return JSON: "
               '{"summary": "<3 sentences>", "layers": [{"layer": "<name>", "components": [{"name": "...", "source": "RFP-mandated|Proposed|Client-owned|Partner product", '
               '"requirements": ["REQ-001"], "detail": "<short>"}]}], "choices": [{"area": "...", "choice": "...", "basis": "Specified in the RFP|Company strength|Partner|To confirm", '
@@ -264,6 +268,49 @@ def check_against_library(arch: dict, reqs: list[dict], kb: CompanyKB) -> dict:
                 comp["not_in_library"] = missing
                 unbacked.extend(missing)
     arch["not_in_library"] = sorted(set(unbacked))
+    return arch
+
+
+def _evidence_terms(kb: CompanyKB) -> set[str]:
+    """Every technology or skill name the company can show: people's skills, capabilities, case studies, accelerators."""
+    out = set()
+    for e in kb.employees:
+        out |= {_n(s.get("name", "")) for s in e.get("skills", [])}
+    for c in kb.capabilities:
+        out |= {_n(t) for t in c.get("technologies", [])}
+    for c in kb.case_studies:
+        out |= {_n(t) for t in c.get("technologies", [])}
+    for a in kb.accelerators:
+        out |= {_n(t) for t in a.get("technologies", [])}
+    return {t for t in out if len(t) > 1}
+
+
+def _n(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def _held(term: str, have: set[str]) -> bool:
+    t = _n(term)
+    t2 = re.sub(r"^(microsoft|apache|confluent|amazon|aws|google|the)\s+", "", t)
+    return bool(t) and any(t == h or t2 == h or (len(h) > 3 and re.search(r"(?<![a-z0-9])" + re.escape(h) + r"(?![a-z0-9])", t)) or
+                           (len(t2) > 3 and re.search(r"(?<![a-z0-9])" + re.escape(t2) + r"(?![a-z0-9])", h)) for h in have)
+
+
+def verify_strength_claims(arch: dict, kb: CompanyKB, rfp_text: str) -> dict:
+    """'Company strength' must be backed by the library for every product in the choice (open vocabulary, not the fixed
+    technology list); otherwise the basis says where the choice really comes from."""
+    have = _evidence_terms(kb)
+    rfp_n = _n(rfp_text)
+    for c in arch.get("choices", []):
+        if c.get("basis") != "Company strength":
+            continue
+        parts = [p for p in re.split(r"\s*(?:,|/|\band\b|\+|&|\bwith\b)\s*", c.get("choice", "")) if p.strip()]
+        unbacked = [p.strip() for p in parts if not _held(p, have)]
+        if unbacked:
+            in_rfp = all(_n(p) and _n(p) in rfp_n for p in unbacked)
+            c["basis"] = "Specified in the RFP" if in_rfp else "To validate"
+            c["not_in_library"] = sorted(set(c.get("not_in_library", []) + unbacked))
+            arch["not_in_library"] = sorted(set(arch.get("not_in_library", []) + unbacked))
     return arch
 
 
@@ -460,18 +507,27 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
 
     plan: list[tuple] = []  # (role, fte, location, responsibility, phase, months)
     build_months = None
+    prof_term = (meta.get("profile") or {}).get("term") or {}
+    stated_transition = float(prof_term.get("transition_months") or 0)
     if eng == "managed_services":
         roles, is_247, p1_fast, _ = _run_roles(text_all, ws_reqs, onsite_ratio, after_build=False)
         transition_weeks = 6 if re.search(r"4\s?[–-]\s?6 weeks|6 weeks", text_all) else 4
+        if stated_transition:
+            transition_weeks = round(stated_transition * 4.33, 1)
         phases = [
             {"name": "Transition & onboarding", "weeks": transition_weeks, "detail": "Knowledge transfer, access, baselining, governance set-up"},
             {"name": "Steady-state operations", "weeks": max(4, term * 4.33 - transition_weeks), "detail": "SLA-based run services" + (" 24x7" if is_247 else "")},
             {"name": "Change & enhancement delivery", "weeks": max(4, term * 4.33 - transition_weeks), "detail": "Sprint-based interface delivery", "parallel": True},
             {"name": "Lifecycle & continuous improvement", "weeks": max(4, term * 4.33 - transition_weeks), "detail": "Quarterly upgrade, patch and improvement cycles", "parallel": True},
         ]
-        months = term
+        months = term + (int(round(stated_transition)) if stated_transition else 0)
         plan = [(*r, "Run", term) for r in roles]
-        assumptions_extra = [f"Contract term of {term} months{' (assumed: not stated in the RFP)' if not meta.get('contract_term_months') else ' as stated in the RFP'}.",
+        if stated_transition:
+            phases[0]["detail"] += f" ({stated_transition:g} months, as the RFP states)"
+            for i, p in enumerate(phases[1:], start=1):
+                phases[i] = {**p, "weeks": round(term * 4.33, 1)}
+        assumptions_extra = [(f"{stated_transition:g}-month transition, then " if stated_transition else "") +
+                             f"a service term of {term} months{' (assumed: not stated in the RFP)' if not meta.get('contract_term_months') else ' as stated in the RFP'}.",
                              f"{'24x7' if is_247 else 'Business-hours'} coverage{' with P1 response within 15–30 minutes' if p1_fast else ''}.",
                              "Volume of change requests is absorbed by the change squad; surges beyond 20% trigger a capacity review."]
     elif eng == "build_run":
@@ -483,7 +539,7 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
             {"name": "Service transition", "weeks": 4, "detail": "Runbooks, monitoring and support handed from the build team to the run team", "parallel": True},
             {"name": "Managed service (run)", "weeks": term * 4.33, "detail": "SLA-based run services" + (" 24x7" if is_247 else "") + ", enhancements and continuous improvement"},
         ]
-        months = build_months + term
+        months = build_months + term + (int(round(stated_transition)) if stated_transition else 0)
         assumptions_extra = [
             f"Build and migration over {build_months} months{' as required by the RFP' if meta.get('build_months') and not ov.get('duration_months') else ''}, "
             f"from {round(build)} person-days of requirement-level effort plus project management, architecture and testing.",
@@ -520,43 +576,88 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
                              "Client provides environments, test data and SME availability per plan."]
 
     # role-wise team plan with named (anonymised) people from the skills register
-    used: set[str] = set()
     req_skills = [t for r in reqs for t in r.get("technologies", []) if t not in K.COMMODITY_TECH]
     top_skills = [t for t, _ in Counter(req_skills).most_common(6)]
-    by_phase: dict[str, set[str]] = defaultdict(set)
-    for role, fte, loc, resp, phase, m in plan:
-        n_people = max(1, math.ceil(fte - 0.01))
-        # nobody holds two roles in the same phase; in a build + run deal the build team can stay on for the run
-        pool = by_phase[phase] if eng == "build_run" else used
-        people, unfilled = _assign_people(kb, role, n_people, top_skills, pool)
-        by_phase[phase].update(p["code"] for p in people)
-        used.update(p["code"] for p in people)
-        team.append({"role": role, "fte": round(fte, 2), "headcount": n_people, "location": loc, "responsibility": resp, "phase": phase,
-                     "months": m, "person_days": round(fte * m * 21, 1), "assigned": people, "unfilled": unfilled})
-    # Part-time rows of the same job in one phase (a Project Manager split 0.25 onsite + 0.75 offshore, or engagement and
-    # project management) can be one person, as long as their total load stays within one full-time person. This stops
-    # roles showing "to hire" while a named person still has the time.
-    mgmt = {"Engagement Manager", "Project Manager"}
-    for ph in {t["phase"] for t in team}:
-        rows = [t for t in team if t["phase"] == ph]
-        load: dict[str, float] = defaultdict(float)
-        for t in rows:
-            for p in t["assigned"]:
-                load[p["code"]] += t["fte"] / max(1, len(t["assigned"]))
-        for t in rows:
-            if t["assigned"] or not t["unfilled"] or t["headcount"] != 1:
-                continue
-            for o in rows:
-                same_job = o["role"] == t["role"] or {o["role"], t["role"]} <= mgmt
-                if o is t or not same_job or len(o["assigned"]) != 1:
+    team_engine = "templates"
+    ai_raw = None
+    partner_work: list[dict] = []
+    if meta.get("_generalised") and eng != "consulting":
+        # Generalised: roles and FTE from the RFP's scope, people by skills, certificates, years and free capacity.
+        from . import teamplan
+        prof = meta.get("profile") or {}
+        trans = [("Transition", stated_transition)] if stated_transition else []
+        ph = ([("Build", build_months or 6)] + trans + [("Run", term)] if eng == "build_run" else
+              trans + [("Run", term)] if eng == "managed_services" else [("Build", months)])
+        seat = float(meta.get("_fte_per_seat") or 4.8)
+        rows, team_notes = teamplan.plan_roles(reqs, prof, ph, onsite_ratio, seat, kb)
+        team_engine = "rules"
+        ai_raw = None
+        if meta.get("_ai_roles"):
+            ai_raw = meta["_ai_roles"]
+        elif meta.get("_use_ai"):
+            # masked at the moment of the call, after workstreams are set, so the planner sees the full scope minus the client
+            masker = meta.get("_mask")
+            ai_raw = teamplan.ai_roles(masker(reqs), prof, ph, seat, mask=masker) if masker else None
+        ai_rows = teamplan.check_ai_plan(ai_raw, reqs, prof, ph, seat, rows) if ai_raw else None
+        if ai_rows:
+            rows, team_engine = ai_rows, "ai"
+        teamplan.assign(kb, rows, meta.get("_committed") or {})
+        partner_work = [{"role": r["role"], "fte": r["fte"], "phase": r["phase"], "months": r["months"], "serves": r["serves"],
+                         "responsibility": r["responsibility"]} for r in rows if r.get("partner")]
+        rows = [r for r in rows if not r.get("partner")]
+        if partner_work:
+            assumptions_extra.append(f"Partner-led work ({', '.join(sorted({x for p in partner_work for x in p['serves']})[:8])}) is delivered by partners "
+                                     "and priced as partner lines; an in-house manager oversees each partner-run service.")
+        for r in rows:
+            team.append({"role": r["role"], "fte": r["fte"], "headcount": r["headcount"], "location": r["location"], "responsibility": r["responsibility"],
+                         "phase": r["phase"], "months": r["months"], "person_days": round(r["fte"] * r["months"] * 21, 1), "assigned": r["assigned"],
+                         "unfilled": r["unfilled"], "open_fte": r.get("open_fte", 0), "skills": r["skills"], "certs": r["certs"],
+                         "any_cert": r.get("any_cert", False), "min_years": r["min_years"], "serves": r["serves"]})
+        if not re.search(r"enhancement|change request|minor change", text_all):
+            phases = [p for p in phases if not p["name"].startswith("Change & enhancement")]
+        assumptions_extra = [a for a in assumptions_extra if "change squad" not in a]
+        if any(t["phase"] == "Run" and "24x7 seat" in t["responsibility"] for t in team):
+            assumptions_extra.append(f"Each 24x7 seat is staffed at {seat:g} FTE to cover shifts, leave and training.")
+        assumptions_extra += team_notes
+        committed = meta.get("_committed") or {}
+        if committed:
+            assumptions_extra.append("Availability allows for people already committed to won deals (in full) and deals still being bid (at half).")
+    else:
+        used: set[str] = set()
+        by_phase: dict[str, set[str]] = defaultdict(set)
+        for role, fte, loc, resp, phase, m in plan:
+            n_people = max(1, math.ceil(fte - 0.01))
+            # nobody holds two roles in the same phase; in a build + run deal the build team can stay on for the run
+            pool = by_phase[phase] if eng == "build_run" else used
+            people, unfilled = _assign_people(kb, role, n_people, top_skills, pool)
+            by_phase[phase].update(p["code"] for p in people)
+            used.update(p["code"] for p in people)
+            team.append({"role": role, "fte": round(fte, 2), "headcount": n_people, "location": loc, "responsibility": resp, "phase": phase,
+                         "months": m, "person_days": round(fte * m * 21, 1), "assigned": people, "unfilled": unfilled})
+        # Part-time rows of the same job in one phase (a Project Manager split 0.25 onsite + 0.75 offshore, or engagement and
+        # project management) can be one person, as long as their total load stays within one full-time person. This stops
+        # roles showing "to hire" while a named person still has the time.
+        mgmt = {"Engagement Manager", "Project Manager"}
+        for ph in {t["phase"] for t in team}:
+            rows = [t for t in team if t["phase"] == ph]
+            load: dict[str, float] = defaultdict(float)
+            for t in rows:
+                for p in t["assigned"]:
+                    load[p["code"]] += t["fte"] / max(1, len(t["assigned"]))
+            for t in rows:
+                if t["assigned"] or not t["unfilled"] or t["headcount"] != 1:
                     continue
-                person = o["assigned"][0]
-                if load[person["code"]] + t["fte"] <= 1.0 + 1e-6:
-                    note = "" if o["role"] == t["role"] else f"; also {o['role'].lower()}"
-                    t["assigned"] = [dict(person, status=person["status"] + note)]
-                    t["unfilled"] = 0
-                    load[person["code"]] += t["fte"]
-                    break
+                for o in rows:
+                    same_job = o["role"] == t["role"] or {o["role"], t["role"]} <= mgmt
+                    if o is t or not same_job or len(o["assigned"]) != 1:
+                        continue
+                    person = o["assigned"][0]
+                    if load[person["code"]] + t["fte"] <= 1.0 + 1e-6:
+                        note = "" if o["role"] == t["role"] else f"; also {o['role'].lower()}"
+                        t["assigned"] = [dict(person, status=person["status"] + note)]
+                        t["unfilled"] = 0
+                        load[person["code"]] += t["fte"]
+                        break
     cal = ov.get("_calibration") or {"factor": 1.0, "deals": 0}
     if cal.get("deals") and abs(cal["factor"] - 1.0) > 0.01 and eng not in ("managed_services",):
         for t in team:
@@ -588,7 +689,9 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
             "accelerator_saving_pct": round((1 - accel_factor) * 100, 1), "contingency_pct": round(contingency, 1),
             "contingency_basis": {"high_risk_gaps": risk_items, "unfilled_roles": unfilled},
             "unfilled_roles": unfilled, "assumptions": assumptions_extra, "calibration": cal,
-            "staffing_skills": top_skills}
+            "staffing_skills": top_skills, "team_engine": team_engine,
+            **({"ai_roles": ai_raw, "ai_roles_key": teamplan.plan_key(reqs)} if meta.get("_generalised") and team_engine == "ai" else {}),
+            **({"partner_work": partner_work} if meta.get("_generalised") and eng != "consulting" else {})}
 
 
 # =========================================================================== pricing
@@ -696,7 +799,15 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
     onsite_cost = sum(l["cost"] for l in lines if l["location"] == "Onsite")
     travel = onsite_cost * travel_pct / 100
     cont = labour_cost * contingency / 100
-    total_cost = labour_cost + travel + cont
+    other: list[dict] = []
+    if meta.get("_generalised"):
+        # Generalised: partner work, licences the bidder supplies, contractual commitments and hiring, as their own lines.
+        from . import commercial
+        other = commercial.build_lines(est, lines, meta.get("_reqs") or [], meta.get("profile") or {}, meta.get("_rfp_text") or "", meta.get("_gaps"))
+        commercial.apply_overrides(other, ov.get("other_lines") or {})
+    other_cost = sum(l["amount"] for l in other)
+    total_cost = labour_cost + travel + cont + other_cost
+    list_price += other_cost  # third-party costs pass through at cost in the rate-card price
 
     def scen(name, margin, note):
         p = total_cost / (1 - margin / 100)
@@ -719,7 +830,7 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
     phase_split = None
     if eng == "build_run":
         # Price follows the RFP's instructions: the build as fixed price by milestone, the run as a fixed monthly fee.
-        build_cost = sum(l["cost"] for l in lines if l["phase"] == "Build")
+        build_cost = sum(l["cost"] for l in lines if l["phase"] in ("Build", "Transition"))
         run_cost = sum(l["cost"] for l in lines if l["phase"] == "Run")
         build_share = build_cost / max(1e-9, build_cost + run_cost)
         run_months = est.get("run_months") or 36
@@ -741,7 +852,10 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
                        "monthly_fee": round(target_price * (1 - build_share) / run_months, 2), "build_months": est.get("build_months")}
     elif eng == "managed_services":
         trans_share = 0.08
-        months = est.get("contract_months") or 36
+        trans_cost = sum(l["cost"] for l in lines if l.get("phase") == "Transition")
+        if meta.get("_generalised") and trans_cost and labour_cost:
+            trans_share = round(trans_cost / labour_cost, 3)  # the transition is paid for what it costs, not a fixed share
+        months = est.get("run_months") or est.get("contract_months") or 36
         milestones = [{"name": "Transition & onboarding complete", "pct": round(trans_share * 100, 1)},
                       {"name": f"Monthly service charge × {months}", "pct": round((1 - trans_share) * 100, 1),
                        "monthly": round(target_price * (1 - trans_share) / months, 2)}]
@@ -765,13 +879,32 @@ def price(est: dict, kb: CompanyKB, meta: dict, tenant_settings: dict, overrides
     adv = re.search(r"advance payment[^.]*?(\d{1,2})\s?%", " ".join(meta.get("payment_terms", [])) or "", re.I)
     partner_note = "Partner product licences are quoted separately by the partner and excluded from this price." if any(
         t.get("recommendation") == "Partner" for t in meta.get("top_missing", [])) else ""
+    if meta.get("_generalised"):
+        partner_note = ""  # partner and licence costs are lines in this price, not a footnote
     return {"currency": base_ccy, "rfp_currency": rfp_ccy, "fx_to_rfp": round(fx_to_rfp, 4), "lines": lines,
             "labour_cost": round(labour_cost, 2), "travel": round(travel, 2), "travel_pct": travel_pct, "contingency": round(cont, 2),
             "contingency_pct": contingency, "total_cost": round(total_cost, 2), "list_price": round(list_price, 2),
             "implied_rate_card_margin": round(implied, 1), "target_margin": target, "min_margin": floor, "scenarios": scenarios,
             "recommended": "Target", "milestones": milestones, "phase_split": phase_split, "partner_note": partner_note,
+            "other_lines": other, "other_cost": round(other_cost, 2), "open_quotes": sum(1 for l in other if l.get("needs_quote") and not l.get("confirmed")),
+            "contract_months": est.get("duration_months"),
             "rates_from": rates_from, "budget": budget,
             "assumptions": [_rates_note(kb.name, lines, rates_from) + (f" Converted to {rfp_ccy} at an indicative {round(fx_to_rfp, 4)} (confirm the rate with finance)."
                                                                         if rfp_ccy != base_ccy else ""),
                             _contingency_note(contingency, est),
-                            f"Travel and living at {travel_pct}% of onsite cost."]}
+                            f"Travel and living at {travel_pct}% of onsite cost."] + _other_notes(other)}
+
+
+def _other_notes(other: list[dict]) -> list[str]:
+    if not other:
+        return []
+    out = []
+    kinds = {"partner": "partner work", "licence": "licences and products the bidder supplies", "commitment": "contractual commitments", "hiring": "hiring for open roles"}
+    for k, label in kinds.items():
+        ls = [l for l in other if l["kind"] == k]
+        if ls:
+            out.append(f"Includes {label}: {len(ls)} line{'s' if len(ls) != 1 else ''}.")
+    open_n = sum(1 for l in other if l.get("needs_quote") and not l.get("confirmed"))
+    if open_n:
+        out.append(f"{open_n} cost line{'s need' if open_n != 1 else ' needs'} a quote before pricing can be approved (partner estimates are ranges from the work they cover).")
+    return out

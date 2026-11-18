@@ -366,6 +366,43 @@ class AnswerEntry(Base):
     approved_by: Mapped[str] = mapped_column(String(200), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+    # What the answer stands on (generalised pipeline): the library evidence it names, the technologies its question named,
+    # and the source deal's industry. Old answers get these filled in the first time they're considered for reuse.
+    evidence_refs: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    technologies: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    industry: Mapped[str] = mapped_column(String(120), default="")
+
+
+class TechTerm(Base):
+    """The company's technology vocabulary, grown from its library and every RFP it reads: canonical name, the spellings
+    seen, and where it came from. Used so an RFP's "Microsoft Sentinel" meets a person's "Microsoft Sentinel" skill
+    without a hard-coded dictionary entry."""
+    __tablename__ = "tech_terms"
+    __table_args__ = (UniqueConstraint("tenant_id", "key", name="uq_tech_term"),)
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    tenant_id: Mapped[str] = mapped_column(String(32), index=True)
+    key: Mapped[str] = mapped_column(String(120))  # normalised name
+    name: Mapped[str] = mapped_column(String(120))
+    aliases: Mapped[list] = mapped_column(JSON, default=list)
+    kind: Mapped[str] = mapped_column(String(30), default="")  # product, platform, protocol, standard, certification
+    source: Mapped[str] = mapped_column(String(20), default="rfp")  # rfp, library
+    seen: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Assignment(Base):
+    """Who a deal's team plan books, at what FTE, in which phase. Rewritten each time the deal's team is planned; read to
+    know a person's commitments when another deal is staffed (won deals in full, deals still being bid at half)."""
+    __tablename__ = "assignments"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    tenant_id: Mapped[str] = mapped_column(String(32), index=True)
+    deal_id: Mapped[str] = mapped_column(ForeignKey("deals.id", ondelete="CASCADE"), index=True)
+    employee_code: Mapped[str] = mapped_column(String(60), index=True)
+    role: Mapped[str] = mapped_column(String(120), default="")
+    phase: Mapped[str] = mapped_column(String(40), default="")
+    fte: Mapped[float] = mapped_column(Float, default=0)
+    months: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class EmbeddingCache(Base):

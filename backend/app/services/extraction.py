@@ -222,7 +222,15 @@ LLM_SYSTEM = (
 SUBCATS = list(K.SUBCATEGORIES.keys())
 
 
-def llm_extract(doc: ParsedDocument, mask_fn=lambda x: x, guidance: str = "", progress=None, failed: list | None = None) -> list[dict]:
+def _original_ref(ai_ref, block_ref: str, mask_fn) -> str:
+    """The AI saw the block's requirement ID masked ("TGIL-01" as "Client A-01"); keep the document's own ID."""
+    if block_ref and block_ref != "header" and (not ai_ref or ai_ref == mask_fn(block_ref)):
+        return block_ref
+    return ai_ref or block_ref or ""
+
+
+def llm_extract(doc: ParsedDocument, mask_fn=lambda x: x, guidance: str = "", progress=None, failed: list | None = None,
+                want_tech: bool = False) -> list[dict]:
     """AI extraction in batches of blocks. Each requirement keeps the id of the block it came from (traceability).
 
     failed: if given, receives the ids of blocks in parts the AI couldn't read, so the rules engine can fill them in."""
@@ -235,13 +243,15 @@ def llm_extract(doc: ParsedDocument, mask_fn=lambda x: x, guidance: str = "", pr
     for n, chunk in enumerate(batches, start=1):
         if progress:
             progress(f"AI reading the RFP: part {n} of {len(batches)}")
-        payload = "\n".join(f"[{b.idx}] (p{b.page}; {mask_fn(b.section)[:80]}) {(b.ref + ': ') if b.ref and b.ref != 'header' else ''}{mask_fn(b.text)}"
+        payload = "\n".join(f"[{b.idx}] (p{b.page}; {mask_fn(b.section)[:80]}) {(mask_fn(b.ref) + ': ') if b.ref and b.ref != 'header' else ''}{mask_fn(b.text)}"
                             for b in chunk)
         prompt = (
             "Blocks from an RFP, each prefixed with [block id] (page; section):\n\n" + payload +
             "\n\nReturn a JSON array. One object per requirement: "
             '{"block": <block id>, "text": "<requirement, faithful to source wording>", "category": "Functional|Non-functional|Compliance|Commercial", '
-            f'"subcategory": one of {SUBCATS}, "priority": "Mandatory|Desirable", "ref": "<id printed in the RFP or empty>", "confidence": 0.0-1.0}}. '
+            f'"subcategory": one of {SUBCATS}, "priority": "Mandatory|Desirable", "ref": "<id printed in the RFP or empty>", "confidence": 0.0-1.0'
+            + (', "technologies": ["<every product, platform, protocol, framework or standard this requirement names, exactly as written>"]' if want_tech else "")
+            + '}. '
             "Categories: Functional = what the solution/service must do; Non-functional = quality attributes and service levels "
             "(performance, availability, security controls, SLAs); Compliance = laws, regulations, standards, certifications, policies, "
             "submission rules; Commercial = price, payment, bonds, insurance, contract terms, evaluation and award. "
@@ -284,8 +294,9 @@ def llm_extract(doc: ParsedDocument, mask_fn=lambda x: x, guidance: str = "", pr
             out.append({"text": str(it["text"]).strip(), "category": cat, "subcategory": sub,
                         "priority": it.get("priority") if it.get("priority") in ("Mandatory", "Desirable") else K.priority(it["text"]),
                         "page": b.page, "section": b.section[:290], "block_idx": b.idx,
-                        "source_ref": (it.get("ref") or b.ref or "")[:30] if (it.get("ref") or b.ref) != "header" else "",
-                        "class_confidence": round(max(0.3, min(0.99, conf)), 2), "classified_by": "ai"})
+                        "source_ref": (_original_ref(it.get("ref"), b.ref, mask_fn) or "")[:30] if (it.get("ref") or b.ref) != "header" else "",
+                        "class_confidence": round(max(0.3, min(0.99, conf)), 2), "classified_by": "ai",
+                        **({"ai_technologies": [str(t)[:80] for t in (it.get("technologies") or []) if isinstance(t, (str, int))][:15]} if want_tech else {})})
     return out
 
 
@@ -507,7 +518,7 @@ def _tidy(reqs: list[dict]) -> list[dict]:
 
 
 def extract_requirements(doc: ParsedDocument, use_llm: bool = True, mask_fn=lambda x: x, guidance: str = "",
-                         progress=None) -> tuple[list[dict], dict, str]:
+                         progress=None, want_tech: bool = False) -> tuple[list[dict], dict, str]:
     """Returns (requirements, metadata, engine)."""
     rules_reqs, rmeta = rules_extract(doc)
     for r in rules_reqs:
@@ -515,7 +526,7 @@ def extract_requirements(doc: ParsedDocument, use_llm: bool = True, mask_fn=lamb
     reqs, engine = rules_reqs, "rules"
     if use_llm and llm.is_enabled():
         failed: list[int] = []
-        lreqs = llm_extract(doc, mask_fn, guidance, progress, failed)
+        lreqs = llm_extract(doc, mask_fn, guidance, progress, failed, want_tech=want_tech)
         failed_set = set(failed)
         expected = sum(1 for r in rules_reqs if r["block_idx"] not in failed_set)
         if lreqs and len(lreqs) >= max(5, int(expected * 0.5)):
