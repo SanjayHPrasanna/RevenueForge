@@ -222,6 +222,13 @@ LLM_SYSTEM = (
 SUBCATS = list(K.SUBCATEGORIES.keys())
 
 
+def _original_ref(ai_ref, block_ref: str, mask_fn) -> str:
+    """The AI saw the block's requirement ID masked ("TGIL-01" as "Client A-01"); keep the document's own ID."""
+    if block_ref and block_ref != "header" and (not ai_ref or ai_ref == mask_fn(block_ref)):
+        return block_ref
+    return ai_ref or block_ref or ""
+
+
 def llm_extract(doc: ParsedDocument, mask_fn=lambda x: x, guidance: str = "", progress=None, failed: list | None = None,
                 want_tech: bool = False) -> list[dict]:
     """AI extraction in batches of blocks. Each requirement keeps the id of the block it came from (traceability).
@@ -236,7 +243,7 @@ def llm_extract(doc: ParsedDocument, mask_fn=lambda x: x, guidance: str = "", pr
     for n, chunk in enumerate(batches, start=1):
         if progress:
             progress(f"AI reading the RFP: part {n} of {len(batches)}")
-        payload = "\n".join(f"[{b.idx}] (p{b.page}; {mask_fn(b.section)[:80]}) {(b.ref + ': ') if b.ref and b.ref != 'header' else ''}{mask_fn(b.text)}"
+        payload = "\n".join(f"[{b.idx}] (p{b.page}; {mask_fn(b.section)[:80]}) {(mask_fn(b.ref) + ': ') if b.ref and b.ref != 'header' else ''}{mask_fn(b.text)}"
                             for b in chunk)
         prompt = (
             "Blocks from an RFP, each prefixed with [block id] (page; section):\n\n" + payload +
@@ -287,7 +294,7 @@ def llm_extract(doc: ParsedDocument, mask_fn=lambda x: x, guidance: str = "", pr
             out.append({"text": str(it["text"]).strip(), "category": cat, "subcategory": sub,
                         "priority": it.get("priority") if it.get("priority") in ("Mandatory", "Desirable") else K.priority(it["text"]),
                         "page": b.page, "section": b.section[:290], "block_idx": b.idx,
-                        "source_ref": (it.get("ref") or b.ref or "")[:30] if (it.get("ref") or b.ref) != "header" else "",
+                        "source_ref": (_original_ref(it.get("ref"), b.ref, mask_fn) or "")[:30] if (it.get("ref") or b.ref) != "header" else "",
                         "class_confidence": round(max(0.3, min(0.99, conf)), 2), "classified_by": "ai",
                         **({"ai_technologies": [str(t)[:80] for t in (it.get("technologies") or []) if isinstance(t, (str, int))][:15]} if want_tech else {})})
     return out

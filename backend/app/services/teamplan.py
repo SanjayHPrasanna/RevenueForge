@@ -461,15 +461,19 @@ def plan_key(reqs: list[dict]) -> str:
     return hashlib.sha1(sig.encode()).hexdigest()[:16]
 
 
-def ai_roles(reqs: list[dict], profile: dict, phases: list[tuple[str, float]], fte_per_seat: float) -> dict | None:
-    """The AI's raw team proposal (checked separately by check_ai_plan)."""
+def ai_roles(reqs: list[dict], profile: dict, phases: list[tuple[str, float]], fte_per_seat: float, mask=None) -> dict | None:
+    """The AI's raw team proposal (checked separately by check_ai_plan). `reqs` must already be masked for a confidential
+    deal; `mask` (the deal's masker) is applied to the finished prompt as a second line of defence, so no client name or
+    alias can reach the AI provider through this planner even if a caller passes unmasked text."""
     from . import llm
     if not llm.is_enabled():
         return None
+    if mask is None:
+        return None  # never send requirement text without the deal's masker
     lines = [f"{r.get('source_ref') or r.get('code')}: {r.get('text', '')[:220]}" for r in reqs if r.get("workstream") not in ("Bid & contract", "", None)][:60]
     facts = {"phases": [{"name": p, "months": m} for p, m in phases], "service": profile.get("service"), "scope_units": profile.get("scope_units", [])[:15],
              "staff_conditions": [g.get("text") for g in profile.get("eligibility", []) if g.get("kind") == "staff"]}
-    prompt = "RFP facts:\n" + json.dumps(facts)[:3000] + "\n\nRequirements:\n" + "\n".join(lines)
+    prompt = mask("RFP facts:\n" + json.dumps(facts, ensure_ascii=False)[:3000] + "\n\nRequirements:\n" + "\n".join(lines))
     try:
         res = llm.complete_json(AI_SYSTEM.format(seat=fte_per_seat), prompt, max_tokens=4000)
     except Exception:
@@ -477,8 +481,9 @@ def ai_roles(reqs: list[dict], profile: dict, phases: list[tuple[str, float]], f
     return res if isinstance(res, dict) else None
 
 
-def ai_plan(reqs: list[dict], profile: dict, phases: list[tuple[str, float]], fte_per_seat: float, rules_rows: list[dict]) -> list[dict] | None:
-    raw = ai_roles(reqs, profile, phases, fte_per_seat)
+def ai_plan(reqs: list[dict], profile: dict, phases: list[tuple[str, float]], fte_per_seat: float, rules_rows: list[dict],
+            mask=None) -> list[dict] | None:
+    raw = ai_roles(reqs, profile, phases, fte_per_seat, mask=mask)
     return check_ai_plan(raw, reqs, profile, phases, fte_per_seat, rules_rows) if raw else None
 
 

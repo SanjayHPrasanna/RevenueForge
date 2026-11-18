@@ -163,6 +163,9 @@ def document_context(db: Session, deal: Deal) -> dict:
         real = deal.client_name or "the Client"
         ctx["deal"]["client_display"] = real
         ctx["unmask"] = (alias, real)
+        # anything from this context that goes to the AI is masked with this first; the real name is put back only
+        # when the Word document is built (unmask_document)
+        ctx["ai_mask"] = deal_masker(deal)
     return ctx
 
 
@@ -193,7 +196,7 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
         doc = db.get(Document, deal.rfp_document_id)
         parsed = get_parsed(db, doc)
         guidance = learning.few_shot_block(learning.few_shot(db, tid, ["category", "subcategory", "priority", "removed", "added"],
-                                                             [parsed.text[:4000]], k=10))
+                                                             [mask(parsed.text[:4000])], k=10))
         reqs, meta, engine = extraction.extract_requirements(parsed, use_llm=True, mask_fn=mask, guidance=guidance, progress=prog,
                                                              want_tech=features.on(tenant))
         # The company's own trained classifier: confident predictions override generic judgement.
@@ -318,6 +321,9 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
             prev = st.data or {}
             gen_meta = {"_generalised": True, "_fte_per_seat": features.number(tenant, "fte_per_24x7_seat"),
                         "_committed": teamplan.commitments(db, tid, deal.id), "_use_ai": llm.is_enabled(),
+                        # the deal's masker: the AI team planner masks the requirements with it at the moment of the
+                        # call, and once more on the finished prompt
+                        "_mask": mask,
                         # an AI team already proposed for these same requirements is reused (re-checked), so a margin or rate
                         # change recalculates instantly instead of asking the AI again
                         "_ai_roles": prev.get("ai_roles") if prev.get("ai_roles_key") == teamplan.plan_key(reqs) else None}
@@ -399,7 +405,7 @@ def draft_responses(db: Session, deal: Deal, prog=lambda m: None) -> None:
         _draft_responses_validated(db, deal, rows, open_rows, client, prog)
         return
     prog("Reusing approved answers from your library")
-    hits = learning.library_matches(db, tid, [{"id": r.id, "text": r.text} for r in open_rows])
+    hits = learning.library_matches(db, tid, [{"id": r.id, "text": mask(r.text)} for r in open_rows], deal=deal)
     for r in open_rows:
         if r.id in hits:
             e, sim = hits[r.id]
@@ -410,7 +416,7 @@ def draft_responses(db: Session, deal: Deal, prog=lambda m: None) -> None:
     tenant = db.get(Tenant, tid)
     drafted = {}
     if llm.is_enabled() and remaining:
-        guidance = learning.few_shot_block(learning.few_shot(db, tid, ["response"], [r.text for r in remaining[:60]], k=6),
+        guidance = learning.few_shot_block(learning.few_shot(db, tid, ["response"], [mask(r.text) for r in remaining[:60]], k=6),
                                            "How this company's reviewers rewrote earlier answers. Match their tone and level of detail")
         drafted = docgen.ai_responses([reqs[r.id] for r in remaining], {"name": tenant.name, "about": tenant.about}, client, guidance, prog)
     for r in remaining:
@@ -504,7 +510,7 @@ def _draft_responses_validated(db: Session, deal: Deal, rows, open_rows, client:
     chk = checker_for(db, deal, kb)
     reqs = {d["id"]: d for d in deal_masker(deal)(_req_dicts(db, deal.id))}
     prog("Checking approved answers from your library")
-    hits = learning.library_matches(db, tid, [{"id": r.id, "text": r.text} for r in open_rows])
+    hits = learning.library_matches(db, tid, [{"id": r.id, "text": deal_masker(deal)(r.text)} for r in open_rows], deal=deal)
     refs: dict[str, tuple] = {}
     used: set[str] = set()
     for r in open_rows:
@@ -527,7 +533,7 @@ def _draft_responses_validated(db: Session, deal: Deal, rows, open_rows, client:
     drafted: dict[str, str] = {}
     ai = llm.is_enabled()
     if ai:
-        guidance = learning.few_shot_block(learning.few_shot(db, tid, ["response"], [r.text for r in open_rows[:60]], k=6),
+        guidance = learning.few_shot_block(learning.few_shot(db, tid, ["response"], [deal_masker(deal)(r.text) for r in open_rows[:60]], k=6),
                                            "How this company's reviewers rewrote earlier answers. Match their tone and level of detail")
         drafted = docgen.ai_responses([reqs[r.id] for r in open_rows], {"name": tenant.name, "about": tenant.about}, client, guidance, prog,
                                       references={rid: a for rid, (_e, a) in refs.items()})

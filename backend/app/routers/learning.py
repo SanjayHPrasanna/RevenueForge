@@ -38,6 +38,8 @@ def add_answer(body: dict, ctx: Ctx = Depends(require_roles("presales"))):
     q, a = str(body.get("question") or "").strip()[:4000], str(body.get("answer") or "").strip()[:20000]
     if len(q) < 5 or len(a) < 5:
         raise HTTPException(400, "Write both the requirement and the approved answer.")
+    nf = learning.library_neutraliser(ctx.db, ctx.tenant_id)  # no confidential client's name in the shared library
+    q, a = nf(q), nf(a)
     e = AnswerEntry(tenant_id=ctx.tenant_id, question=q, answer=a, category=str(body.get("category") or "")[:60], origin="human",
                     approved_by=ctx.user.name, source_label="Added manually")
     ctx.db.add(e)
@@ -51,10 +53,11 @@ def edit_answer(eid: str, body: dict, ctx: Ctx = Depends(require_roles("presales
     for f in ("answer", "question"):
         if f in body and len(str(body[f] or "").strip()) < 5:
             raise HTTPException(400, f"The {f} needs at least a few words.")
+    nf = learning.library_neutraliser(ctx.db, ctx.tenant_id)  # no confidential client's name in the shared library
     if "answer" in body:
-        e.answer, e.origin, e.approved_by = str(body["answer"]).strip()[:20000], "human", ctx.user.name
+        e.answer, e.origin, e.approved_by = nf(str(body["answer"]).strip()[:20000]), "human", ctx.user.name
     if "question" in body:
-        e.question, e.embedding = str(body["question"]).strip()[:4000], None
+        e.question, e.embedding = nf(str(body["question"]).strip()[:4000]), None
     ctx.db.commit()
     return {"ok": True}
 

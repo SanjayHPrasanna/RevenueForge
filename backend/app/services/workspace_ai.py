@@ -76,7 +76,7 @@ def build_context(ctx: Ctx, question: str) -> str:
             f" (strong {mix['strong']}, partial {mix['partial']}, gap {mix['gap']}, to confirm {mix['confirm']})"
             f" | coverage: {g.get('coverage_pct', '-')}% | readiness today {g.get('readiness', '-')}%, with plan {g.get('mitigated_readiness', '-')}%"
             f" | verdict: {g.get('verdict') or '-'} | price: {value} | margin: {sel['margin_pct'] if sel else '-'}%"
-            f" | approved stages: {_join(approved) or 'none'}" + (f" | outcome: {_clip(d.outcome_notes, 120)}" if d.outcome_notes else ""))
+            f" | approved stages: {_join(approved) or 'none'}" + (f" | outcome: {_clip(mask(d.outcome_notes), 120)}" if d.outcome_notes else ""))
 
     # gap / requirement detail for the deals the question is about (or all, when there are only a few)
     name_hit = [d for d in deals if qw & _words(deal_masker(d)(d.name) + " " + (d.client_alias or ""))]

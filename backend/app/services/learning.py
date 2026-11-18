@@ -92,8 +92,11 @@ def similarity_matrix(db: Session, tid: str, queries: list[str], docs: list[str]
 def record(db: Session, tid: str, kind: str, text: str, ai_value: str, human_value: str, *, deal_id: str = "", user: str = "", context: dict | None = None):
     if (ai_value or "") == (human_value or "") and kind not in ("added", "removed"):
         return
-    db.add(LearningExample(tenant_id=tid, kind=kind, deal_id=deal_id, input_text=text[:2000], ai_value=(ai_value or "")[:4000],
-                           human_value=(human_value or "")[:4000], context=context or {}, user=user))
+    # corrections are guidance for every later deal, for any client: stored without this deal's or any confidential
+    # client's name (the wording and the reviewer's change are kept; only names become CLIENT_TOKEN)
+    nf = library_neutraliser(db, tid, db.get(Deal, deal_id) if deal_id else None)
+    db.add(LearningExample(tenant_id=tid, kind=kind, deal_id=deal_id, input_text=nf(text or "")[:2000], ai_value=nf(ai_value or "")[:4000],
+                           human_value=nf(human_value or "")[:4000], context=_neutral_obj(nf, context or {}), user=user))
 
 
 def few_shot(db: Session, tid: str, kinds: list[str], texts: list[str], k: int = 8) -> list[dict]:
@@ -105,10 +108,14 @@ def few_shot(db: Session, tid: str, kinds: list[str], texts: list[str], k: int =
     if len(rows) <= k:
         pick = rows
     else:
-        sims, _ = similarity_matrix(db, tid, [" ".join(texts)[:6000]], [r.input_text for r in rows])
+        nf = library_neutraliser(db, tid)  # nothing embedded for this search carries a client's name
+        sims, _ = similarity_matrix(db, tid, [nf(" ".join(texts)[:6000])], [nf(r.input_text) for r in rows])
         order = sorted(range(len(rows)), key=lambda i: -sims[0][i])
         pick = [rows[i] for i in order[:k]]
-    return [{"kind": r.kind, "text": r.input_text, "ai": r.ai_value, "human": r.human_value, "context": r.context} for r in pick]
+    # masked again on the way into a prompt, workspace-wide, so examples stored before masking can't carry a name either
+    nf = library_neutraliser(db, tid)
+    return [{"kind": r.kind, "text": nf(r.input_text), "ai": nf(r.ai_value), "human": nf(r.human_value), "context": _neutral_obj(nf, r.context or {})}
+            for r in pick]
 
 
 def few_shot_block(examples: list[dict], title: str = "This company's reviewers corrected earlier AI output like this. Follow the same conventions") -> str:
@@ -218,10 +225,62 @@ def classifier_meta(db: Session, tid: str) -> dict:
 CLIENT_TOKEN = "{{CLIENT}}"
 
 
+GENERIC_ALIASES = {"", "client", "the client"}
+
+
+def _names(deal: Deal) -> list[str]:
+    return [t.strip() for t in [deal.client_name, *(deal.client_aliases or [])] if t and len(t.strip()) > 1]
+
+
+def _alias(deal: Deal) -> str:
+    a = (deal.client_alias or "").strip()
+    return "" if a.lower() in GENERIC_ALIASES else a
+
+
+def library_neutraliser(db: Session, tid: str, deal: Deal | None = None):
+    """The shared answer library and everything matched against it never carry a client's name.
+
+    Returns text -> text that puts CLIENT_TOKEN in place of the names, acronyms and app aliases of every confidential
+    deal in this workspace, and of `deal` (confidential or not: a library answer is reused for other clients). Used on
+    what is stored (questions and answers) and on everything embedded for a library or correction-memory search, so the
+    AI provider never sees a confidential client's name through the library, even from a different deal."""
+    deals = list(db.scalars(select(Deal).where(Deal.tenant_id == tid, Deal.confidential.is_(True))).all())
+    if deal is not None and deal not in deals:
+        deals.append(deal)
+    names = sorted({n for d in deals for n in _names(d)}, key=len, reverse=True)
+    # app aliases ("Client A") only as whole words, so "client application" is left alone
+    aliases = [re.compile(rf"(?<![A-Za-z0-9]){re.escape(a)}(?![A-Za-z0-9])") for a in sorted({_alias(d) for d in deals} - {""}, key=len, reverse=True)]
+    from .masking import mask
+
+    def fn(text):
+        if not text or not isinstance(text, str):
+            return text
+        if names:
+            text = mask(text, names[0], names[1:], CLIENT_TOKEN)
+        for rx in aliases:
+            text = rx.sub(CLIENT_TOKEN, text)
+        return text
+    return fn
+
+
+
+def _neutral_obj(nf, obj):
+    if isinstance(obj, str):
+        return nf(obj)
+    if isinstance(obj, list):
+        return [_neutral_obj(nf, x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _neutral_obj(nf, v) for k, v in obj.items()}
+    return obj
+
 def _neutral(text: str, deal: Deal) -> str:
-    for term in [deal.client_alias, deal.client_name, *(deal.client_aliases or [])]:
-        if term and len(term) > 1:
-            text = re.sub(re.escape(term), CLIENT_TOKEN, text, flags=re.I)
+    """One deal's names and alias out of a text bound for the library (kept for callers that have no session)."""
+    names = _names(deal)
+    if names:
+        from .masking import mask
+        text = mask(text, names[0], names[1:], CLIENT_TOKEN)
+    if _alias(deal):
+        text = re.sub(rf"(?<![A-Za-z0-9]){re.escape(_alias(deal))}(?![A-Za-z0-9])", CLIENT_TOKEN, text)
     return text
 
 
@@ -234,7 +293,8 @@ def harvest_answers(db: Session, deal: Deal, approver: str, checker=None) -> int
         return 0
     existing = list(db.scalars(select(AnswerEntry).where(AnswerEntry.tenant_id == deal.tenant_id)).all())
     n0 = len(existing)
-    sims, _ = similarity_matrix(db, deal.tenant_id, [r.text for r in candidates], [e.question for e in existing]) if existing else ([], "none")
+    nf = library_neutraliser(db, deal.tenant_id, deal)
+    sims, _ = similarity_matrix(db, deal.tenant_id, [nf(r.text) for r in candidates], [nf(e.question) for e in existing]) if existing else ([], "none")
     seen = set()
     n = 0
     for i, r in enumerate(candidates):
@@ -246,7 +306,7 @@ def harvest_answers(db: Session, deal: Deal, approver: str, checker=None) -> int
         if key in seen:
             continue
         seen.add(key)
-        answer = _neutral(r.response, deal)
+        answer = nf(r.response)
         if n0:
             best = max(range(n0), key=lambda j: sims[i][j])
             if sims[i][best] >= 0.95:
@@ -254,7 +314,7 @@ def harvest_answers(db: Session, deal: Deal, approver: str, checker=None) -> int
                 if r.response_source == "human" or e.origin != "human":
                     e.answer, e.origin, e.approved_by = answer, ("human" if r.response_source == "human" else e.origin), approver
                 continue
-        e = AnswerEntry(tenant_id=deal.tenant_id, question=r.text, answer=answer, category=r.category, subcategory=r.subcategory,
+        e = AnswerEntry(tenant_id=deal.tenant_id, question=nf(r.text), answer=answer, category=r.category, subcategory=r.subcategory,
                         source_deal=deal.id, source_label=f"{deal.client_alias or 'Client'} · {deal.name}"[:290],
                         origin="human" if r.response_source == "human" else "ai", approved_by=approver,
                         evidence_refs=[x.get("name") for x in (r.match or {}).get("evidence", []) if x.get("name")][:10],
@@ -263,18 +323,22 @@ def harvest_answers(db: Session, deal: Deal, approver: str, checker=None) -> int
         existing.append(e)
         n += 1
     db.flush()
-    vecs = embed_cached(db, deal.tenant_id, [e.question for e in existing if e.embedding is None])
+    vecs = embed_cached(db, deal.tenant_id, [nf(e.question) for e in existing if e.embedding is None])
     if vecs:
         for e, v in zip([e for e in existing if e.embedding is None], vecs):
             e.embedding = v
     return n
 
 
-def library_matches(db: Session, tid: str, reqs: list[dict], threshold_emb: float = 0.86, threshold_tfidf: float = 0.62) -> dict[str, tuple[AnswerEntry, float]]:
+def library_matches(db: Session, tid: str, reqs: list[dict], threshold_emb: float = 0.86, threshold_tfidf: float = 0.62,
+                    deal: Deal | None = None) -> dict[str, tuple[AnswerEntry, float]]:
+    """Callers pass the deal's masked requirement text; both sides are neutralised again here before anything is
+    embedded, so neither the requirement nor a stored question can carry a confidential client's name to the AI."""
     entries = db.scalars(select(AnswerEntry).where(AnswerEntry.tenant_id == tid)).all()
     if not entries or not reqs:
         return {}
-    sims, method = similarity_matrix(db, tid, [r["text"] for r in reqs], [e.question for e in entries])
+    nf = library_neutraliser(db, tid, deal)
+    sims, method = similarity_matrix(db, tid, [nf(r["text"]) for r in reqs], [nf(e.question) for e in entries])
     th = threshold_emb if method == "embeddings" else threshold_tfidf
     out = {}
     for i, r in enumerate(reqs):
@@ -285,6 +349,66 @@ def library_matches(db: Session, tid: str, reqs: list[dict], threshold_emb: floa
             out[r["id"]] = (entries[j], round(s, 3))
     return out
 
+
+
+def clean_library(db: Session, tid: str | None = None, apply: bool = False) -> dict:
+    """One-off clean-up of library entries saved before questions were neutralised.
+
+    For each entry, the names and aliases of every confidential deal in its workspace and of the deal it came from are
+    replaced with CLIENT_TOKEN in the question and the answer. IDs, the source deal, origin, approver, outcome, uses,
+    evidence, technologies and dates are untouched; a changed question drops its cached vector so it is embedded again
+    from the clean text. Returns the affected entries as they were (the backup) and as they will be."""
+    q = select(AnswerEntry)
+    if tid:
+        q = q.where(AnswerEntry.tenant_id == tid)
+    entries = db.scalars(q.order_by(AnswerEntry.tenant_id)).all()
+    backup, changes, cache = [], [], {}
+    for e in entries:
+        src = db.get(Deal, e.source_deal) if e.source_deal else None
+        key = (e.tenant_id, src.id if src else "")
+        if key not in cache:
+            cache[key] = library_neutraliser(db, e.tenant_id, src)
+        nf = cache[key]
+        nq, na = nf(e.question), nf(e.answer)
+        if (nq, na) == (e.question, e.answer):
+            continue
+        backup.append({"id": e.id, "tenant_id": e.tenant_id, "question": e.question, "answer": e.answer, "embedding_was_set": e.embedding is not None})
+        changes.append({"id": e.id, "question": nq, "answer": na})
+        if apply:
+            if nq != e.question:
+                e.embedding = None
+            e.question, e.answer = nq, na
+    if apply:
+        db.commit()
+    return {"checked": len(entries), "changed": len(changes), "backup": backup, "changes": changes}
+
+
+def clean_corrections(db: Session, tid: str | None = None, apply: bool = False) -> dict:
+    """One-off clean-up of correction examples stored before they were masked: names of every confidential deal in the
+    workspace and of the deal the correction came from become CLIENT_TOKEN in the requirement text, the AI value, the
+    reviewer's value and the context. IDs, kind, deal, user and dates are untouched. Returns the backup and the changes."""
+    q = select(LearningExample)
+    if tid:
+        q = q.where(LearningExample.tenant_id == tid)
+    rows = db.scalars(q.order_by(LearningExample.tenant_id)).all()
+    backup, changes, cache = [], [], {}
+    for x in rows:
+        key = (x.tenant_id, x.deal_id or "")
+        if key not in cache:
+            cache[key] = library_neutraliser(db, x.tenant_id, db.get(Deal, x.deal_id) if x.deal_id else None)
+        nf = cache[key]
+        new = {"input_text": nf(x.input_text or ""), "ai_value": nf(x.ai_value or ""), "human_value": nf(x.human_value or ""),
+               "context": _neutral_obj(nf, x.context or {})}
+        old = {"input_text": x.input_text or "", "ai_value": x.ai_value or "", "human_value": x.human_value or "", "context": x.context or {}}
+        if new == old:
+            continue
+        backup.append({"id": x.id, "tenant_id": x.tenant_id, **old})
+        changes.append({"id": x.id, **new})
+        if apply:
+            x.input_text, x.ai_value, x.human_value, x.context = new["input_text"], new["ai_value"], new["human_value"], new["context"]
+    if apply:
+        db.commit()
+    return {"checked": len(rows), "changed": len(changes), "backup": backup, "changes": changes}
 
 # --------------------------------------------------------------------------- 4. outcomes & calibration
 def record_outcome(db: Session, deal: Deal) -> dict:

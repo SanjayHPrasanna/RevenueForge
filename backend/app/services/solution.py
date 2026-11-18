@@ -595,7 +595,9 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
         if meta.get("_ai_roles"):
             ai_raw = meta["_ai_roles"]
         elif meta.get("_use_ai"):
-            ai_raw = teamplan.ai_roles(reqs, prof, ph, seat)
+            # masked at the moment of the call, after workstreams are set, so the planner sees the full scope minus the client
+            masker = meta.get("_mask")
+            ai_raw = teamplan.ai_roles(masker(reqs), prof, ph, seat, mask=masker) if masker else None
         ai_rows = teamplan.check_ai_plan(ai_raw, reqs, prof, ph, seat, rows) if ai_raw else None
         if ai_rows:
             rows, team_engine = ai_rows, "ai"
