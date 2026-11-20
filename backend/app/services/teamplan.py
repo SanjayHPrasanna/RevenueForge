@@ -260,19 +260,21 @@ def _service_lines(reqs: list[dict], profile: dict) -> list[dict]:
     return list(out.values())
 
 
+# words every job title shares: "Project Manager" and "Engagement Manager" are different jobs
+GENERIC_TITLE_WORDS = {"engineer", "analyst", "manager", "lead", "specialist", "consultant", "developer", "officer", "head", "senior", "junior"}
+
+
 def _staff_conditions(profile: dict) -> list[dict]:
+    from .gates import staff_clauses
     out = []
     for g in profile.get("eligibility", []):
         if g.get("kind") != "staff":
             continue
         t = g.get("text", "")
-        m = re.match(r"^\s*(?:the|all|each|any)?\s*((?:[A-Za-z0-9/&-]+\s){0,3}?" + ROLE_NOUNS + r")\b", t, re.I)
-        role = clean_title(m.group(1)) if m else ""
-        certs = [c.strip() for c in re.findall(r"\b([A-Z][A-Z0-9+]{2,}(?:\s?[A-Z0-9+]{2,})?)\b", t) if c not in ("SOC", "IT", "ISO", "AND", "OR")]
-        yrs = re.search(r"(\d{1,2})\+?\s+years", t)
-        any_of = bool(re.search(r"\b[A-Z]{3,}\s+or\s+[A-Z]{3,}", t))
-        out.append({"ref": g.get("ref", ""), "role": role, "certs": certs, "any_cert": any_of, "min_years": int(yrs.group(1)) if yrs else 0,
-                    "tiers": {int(x) for x in TIER_RE.findall(t)}, "mandatory": g.get("mandatory", True), "text": t})
+        for cl in staff_clauses(t):
+            role = clean_title(cl["role"]) if cl["role"] else ""
+            out.append({"ref": g.get("ref", ""), "role": role, "certs": cl["certs"], "any_cert": cl["any_cert"], "min_years": cl["min_years"],
+                        "tiers": {int(x) for x in TIER_RE.findall(cl["text"])}, "mandatory": g.get("mandatory", True), "text": cl["text"]})
     return out
 
 
@@ -423,9 +425,9 @@ def plan_roles(reqs: list[dict], profile: dict, phases: list[tuple[str, float]],
 
     # staff conditions: constraints on the role they name, or a role of their own
     for s in staff:
-        target_phase = "Run" if run else "Build" if build else (phases[0][0] if phases else "Delivery")
+        target_phase = "Build" if build else "Run" if run else (phases[0][0] if phases else "Delivery")
         months = next((m for p, m in phases if p == target_phase), 0)
-        cand = [r for r in rows if s["role"] and (_title_tokens(s["role"]) & _title_tokens(r["role"])) - {"engineer", "analyst"} or
+        cand = [r for r in rows if s["role"] and (_title_tokens(s["role"]) & _title_tokens(r["role"])) - GENERIC_TITLE_WORDS or
                 (s["tiers"] and any(f"(L{t})" in r["role"] for t in s["tiers"]))]
         if s["tiers"]:
             cand = [r for r in rows if any(f"(L{t})" in r["role"] for t in s["tiers"])] or cand
@@ -436,9 +438,9 @@ def plan_roles(reqs: list[dict], profile: dict, phases: list[tuple[str, float]],
                 r["min_years"] = max(r["min_years"], s["min_years"])
                 r["responsibility"] = (r["responsibility"] + f"; must meet {s['ref']}")[:160]
         else:
-            add(s["role"] or "Lead", 1.0, "Offshore", f"Required by {s['ref']}: {s['text'][:90]}", target_phase, months,
+            add(s["role"] or "Lead", 1.0, "Offshore", f"Named in {s['ref']}: {s['text'][:110]}", target_phase, months,
                 certs=s["certs"], any_cert=s["any_cert"], min_years=s["min_years"], refs=[s["ref"]])
-            notes.append(f"{s['ref']} asks for a named {s['role'] or 'lead'}: a dedicated role was added.")
+            notes.append(f"{s['ref']} names a {s['role'] or 'lead'} role: it is part of the team.")
     # split part of client-facing leadership onsite when the region expects it
     if onsite_ratio >= 0.3:
         for r in rows:
@@ -506,8 +508,8 @@ def check_ai_plan(res, reqs: list[dict], profile: dict, phases: list[tuple[str, 
             continue
         out.append({"role": role, "fte": round(_round_q(fte), 2), "location": "Onsite" if str(x.get("location", "")).lower().startswith("on") else "Offshore",
                     "responsibility": str(x.get("why", ""))[:160] or f"{role} work", "phase": ph, "months": months[ph],
-                    "skills": [str(s)[:60] for s in (x.get("skills") or [])][:12], "certs": [str(s)[:40] for s in (x.get("certs") or [])][:6],
-                    "any_cert": False, "min_years": int(x.get("min_years") or 0), "serves": [str(s) for s in (x.get("serves") or [])][:20]})
+                    "skills": [str(s)[:60] for s in (x.get("skills") or [])][:12], "certs": [str(s)[:80] for s in (x.get("certs") or [])][:6],
+                    "any_cert": True, "min_years": int(x.get("min_years") or 0), "serves": [str(s) for s in (x.get("serves") or [])][:20]})
     if not out:
         return None
     served = {s for r in out for s in r["serves"]}
@@ -520,13 +522,15 @@ def check_ai_plan(res, reqs: list[dict], profile: dict, phases: list[tuple[str, 
         if "24x7 seat" in rr["responsibility"]:
             need247[(rr["phase"], tuple(sorted(rr["serves"])))] += rr["fte"]
         if rr["certs"] or rr["min_years"]:
-            same = [r for r in out if r["phase"] == rr["phase"] and set(r["serves"]) & set(rr["serves"])]
+            # the condition belongs to the AI's row for the same job (any phase), else to a row serving the same requirement
+            titled = [r for r in out if (_title_tokens(r["role"]) & _title_tokens(rr["role"])) - GENERIC_TITLE_WORDS]
+            same = titled or [r for r in out if r["phase"] == rr["phase"] and set(r["serves"]) & set(rr["serves"])]
             if not same:
                 out.append(dict(rr))
                 continue
             for r in same:
                 r["certs"] = sorted(set(r["certs"]) | set(rr["certs"]))
-                r["any_cert"] = r.get("any_cert") or rr.get("any_cert", False)
+                r["any_cert"] = rr.get("any_cert", True) if rr["certs"] else r.get("any_cert", True)
                 r["min_years"] = max(r["min_years"], rr["min_years"])
     for (phase, serves), fte in need247.items():
         same = [r for r in out if r["phase"] == phase and set(r["serves"]) & set(serves)]

@@ -38,6 +38,7 @@ STAGE_LABEL = {"requirements": "Reading the RFP and extracting requirements", "m
 def load_kb(db: Session, tid: str) -> CompanyKB:
     t = db.get(Tenant, tid)
     kb = CompanyKB(t.name)
+    kb.about = t.about or ""
     kb.capabilities = [{"id": c.id, "name": c.name, "service_line": c.service_line, "description": c.description, "technologies": c.technologies or [],
                         "industries": c.industries or []} for c in db.scalars(select(Capability).where(Capability.tenant_id == tid))]
     kb.case_studies = [{"id": c.id, "title": c.title, "client": c.client, "industry": c.industry, "region": c.region, "year": c.year,
@@ -254,15 +255,35 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
     elif name == "gaps":
         kb = load_kb(db, tid)
         reqs = mask(_req_dicts(db, deal.id))
-        ai_opts = ai_mitigations(reqs, kb, deal.engagement_type, progress=prog) if llm.is_enabled() else {}
         gen = features.on(tenant)
         prof = (deal.meta or {}).get("profile") or {}
         products = {t["name"] for t in prof.get("technologies", []) if profile_mod.is_vendor_product(t["name"], t.get("kind") or "")} if gen else set()
-        summary = analyze_gaps(reqs, kb, deal.engagement_type, ai_opts, products=products)
-        summary["engine"] = "ai" if ai_opts else "rules"
+        g = None
         if gen and prof:
             from . import gates as gates_mod
             g = gates_mod.evaluate(prof, kb, deal.industry or "", deal.due_date or "", rfp_text(db, deal))
+            # an eligibility condition the library proves is met, whatever the capability scorer made of its wording:
+            # the requirement row, the gap plan and the proposal must agree with the gate
+            passed = {x["ref"]: x for x in g["gates"] if x["status"] == "pass" and x["ref"]}
+            for r in reqs:
+                gt = passed.get(r.get("source_ref") or "") or passed.get(r.get("code") or "")
+                if not gt or r.get("match_status") == "strong":
+                    continue
+                m = dict(r.get("match") or {})
+                m["rationale"] = f"Eligibility check passed: {gt['reason']}."
+                m["technologies_missing"] = []
+                m["judged_by"] = "register"
+                if gt.get("evidence"):
+                    m["evidence"] = [{"type": "Case study", "name": n, "score": 1.0} for n in gt["evidence"]] + \
+                        [e for e in m.get("evidence", []) if e.get("name") not in gt["evidence"]]
+                r["match"], r["match_status"], r["match_score"] = m, "strong", 0.9
+                r["gap"] = {"risk": "Low", "options": [], "recommended": ""}
+            _save_reqs(db, deal.id, reqs, ["match", "match_status", "match_score"])
+        # mitigations are asked for only once the gates have settled which conditions are already met
+        ai_opts = ai_mitigations(reqs, kb, deal.engagement_type, progress=prog) if llm.is_enabled() else {}
+        summary = analyze_gaps(reqs, kb, deal.engagement_type, ai_opts, products=products)
+        summary["engine"] = "ai" if ai_opts else "rules"
+        if g is not None:
             summary["gates"] = g["gates"]
             summary["gates_failed"] = g["failed"]
             summary["consortium_allowed"] = g["consortium_allowed"]

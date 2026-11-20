@@ -22,6 +22,7 @@ RANGE = 0.3                  # +/- around a partner estimate
 RECRUIT_DAYS = 21            # recruitment + ramp-up per open hire, in day-cost of the role
 GUARANTEE_FEE_PA = 0.015     # bank guarantee commission, per year
 SLA_RESERVE = 0.03           # share of run labour held against service credits
+GUARANTEE_RE = re.compile(r"(?:performance|bank)\s+(?:bank\s+)?guarantee[^.]{0,80}?(\d{1,2}(?:\.\d)?)\s?%", re.I)
 
 
 def _id(*parts) -> str:
@@ -71,6 +72,11 @@ def build_lines(est: dict, labour_lines: list[dict], reqs: list[dict], profile: 
 
     # licences, hardware and subscriptions the bidder supplies
     for b in (profile.get("commercial") or {}).get("bidder_supplied", []):
+        # a guarantee, bond or insurance isn't a product to buy: it's priced below as a contractual commitment
+        bt = b.get("text", "")
+        if (re.search(r"guarantee", bt, re.I) and GUARANTEE_RE.search(rfp_text or "")) or (
+                re.search(r"insurance", bt, re.I) and re.search(r"(professional indemnity|cyber|public liability)\s+insurance", rfp_text or "", re.I)):
+            continue
         lines.append({"id": _id("licence", b.get("ref"), b.get("text", "")[:60]), "kind": "licence", "label": f"{b.get('ref')}: {b.get('text', '')[:110]}",
                       "ref": b.get("ref", ""), "amount": 0.0, "low": None, "high": None,
                       "basis": "Supplied by the bidder under the RFP; enter the vendor's quote", "needs_quote": True, "confirmed": False})
@@ -82,7 +88,7 @@ def build_lines(est: dict, labour_lines: list[dict], reqs: list[dict], profile: 
         lines.append({"id": _id("sla"), "kind": "commitment", "label": "Service-credit reserve", "ref": "", "amount": round(run_labour * SLA_RESERVE, 2),
                       "low": None, "high": None, "basis": f"{int(SLA_RESERVE * 100)}% of run labour held against SLA credits the RFP names",
                       "needs_quote": False, "confirmed": True})
-    m = re.search(r"(?:performance|bank)\s+(?:bank\s+)?guarantee[^.]{0,80}?(\d{1,2}(?:\.\d)?)\s?%", t, re.I)
+    m = GUARANTEE_RE.search(t)
     if m:
         pct = float(m.group(1)) / 100
         labour = sum(l["cost"] for l in labour_lines)
