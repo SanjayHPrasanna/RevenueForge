@@ -5,8 +5,29 @@ from __future__ import annotations
 import re
 
 
+LEGAL_SUFFIX_RE = re.compile(r"[\s,]+(?:pvt\.?|private|public)?\s*(?:ltd\.?|limited|inc\.?|incorporated|llc|llp|plc|corp\.?|corporation|"
+                             r"co\.?|company|gmbh|ag|s\.?a\.?|pte\.?|pty\.?)\s*$", re.I)
+
+
+def short_names(name: str) -> list[str]:
+    """The name as people actually write it: without "The" in front or the legal form at the end ("Konkan Harbour Freight
+    Ltd" -> "Konkan Harbour Freight"). Only kept when what's left is still distinctive (two words, or one long word), so
+    "Global Ltd" doesn't turn every "global" into the alias."""
+    out, cur = [], name.strip()
+    for _ in range(2):  # "XYZ Pvt Ltd", "XYZ Co. Ltd"
+        nxt = LEGAL_SUFFIX_RE.sub("", cur).strip(" ,.")
+        if nxt == cur:
+            break
+        cur = nxt
+    cur = re.sub(r"^the\s+", "", cur, flags=re.I).strip()
+    if cur and cur.lower() != name.strip().lower() and (len(cur.split()) >= 2 or len(cur) >= 8):
+        out.append(cur)
+    return out
+
+
 def build_terms(client_name: str, aliases: list[str] | None) -> list[str]:
     terms = [t.strip() for t in [client_name, *(aliases or [])] if t and t.strip()]
+    terms += [s for t in terms if len(t) > 4 for s in short_names(t)]
     # Longest first so a full name is replaced before its acronym.
     return sorted(set(terms), key=len, reverse=True)
 

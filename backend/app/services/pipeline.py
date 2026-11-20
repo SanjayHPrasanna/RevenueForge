@@ -465,11 +465,11 @@ def build_profile(db: Session, deal: Deal, parsed: ParsedDocument, reqs: list[di
         if not key:
             continue
         if key in have:
-            have[key].seen += 1
+            have[key].seen = (have[key].seen or 0) + 1  # a row added earlier in this run has no count until flushed
             if t["name"] not in (have[key].aliases or []) and t["name"] != have[key].name:
                 have[key].aliases = list(have[key].aliases or []) + [t["name"]]
         else:
-            row = TechTerm(tenant_id=tid, key=key, name=t["name"][:120], aliases=[], kind=t.get("kind", "")[:30], source="rfp")
+            row = TechTerm(tenant_id=tid, key=key, name=t["name"][:120], aliases=[], kind=t.get("kind", "")[:30], source="rfp", seen=1)
             db.add(row)
             have[key] = row
     return prof
