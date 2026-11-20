@@ -122,27 +122,127 @@ def _check_experience(text: str, kb, deal_industry: str) -> tuple[str, str, list
     return "fail", f"{len(hits)} matching case stud{'y' if len(hits) == 1 else 'ies'}; the RFP asks for {need_n}", hits
 
 
+REF_PREFIX_RE = re.compile(r"^\s*[A-Z]{1,8}[-/ ]?\d{1,4}[A-Za-z]?\s*[:.)\-\u2013]\s*")
+STAFF_ROLE_RE = re.compile(r"\b((?:[A-Za-z0-9/&+-]+\s+){0,2}?(?:engineers?|analysts?|technicians?|developers?|administrators?|architects?|"
+                           r"consultants?|testers?|leads?|managers?|specialists?|officers?|operators?|directors?|heads?|owners?|masters?))\b", re.I)
+NOT_CERT = {"SOC", "IT", "OR", "AND", "THE", "L1", "L2", "L3", "ISO", "IEC", "RFP", "SLA", "INR", "USD", "API", "APIS", "UAT", "SIT"}
+ARTICLES = {"the", "a", "an", "all", "each", "any", "every", "our", "your", "its", "their", "named", "proposed", "bidder's"}
+
+
+def staff_clauses(text: str) -> list[dict]:
+    """A staffing condition read clause by clause: "STF-01: The project manager shall hold PMP or PRINCE2 and have 8 years;
+    the solution architect shall have 10 years of Microsoft Azure experience" is two conditions, one per role. The leading
+    reference is not a certificate, and "PMP or PRINCE2" means either one."""
+    body = REF_PREFIX_RE.sub("", text or "")
+    out = []
+    for clause in re.split(r";|\.\s+(?=[A-Z])", body):
+        clause = clause.strip()
+        if not clause:
+            continue
+        m = STAFF_ROLE_RE.search(clause)
+        role = ""
+        if m:
+            role = " ".join(w for w in m.group(1).split() if w.lower() not in ARTICLES)
+            role = role[:1].upper() + role[1:] if role else ""
+            role = " ".join(w if w.isupper() else w.capitalize() for w in role.split())
+        certs = [c for c in re.findall(r"(?<![-/])\b([A-Z][A-Z0-9+]{2,8})\b(?![-/]?\d)", clause) if c not in NOT_CERT]
+        yrs = re.search(r"(\d{1,2})\s*\+?\s*years", clause)
+        tech = re.search(r"years?\s+of\s+(?:hands-on\s+)?([A-Z][\w./+& -]{1,40}?)\s+(?:experience|expertise)", clause)
+        if not (certs or yrs or tech):
+            continue
+        out.append({"role": role, "certs": certs, "any_cert": len(certs) < 2 or bool(re.search(r"\bor\b|either|any of|one of", clause, re.I)),
+                    "min_years": int(yrs.group(1)) if yrs else 0, "tech": tech.group(1).strip() if tech else "", "text": clause})
+    return out
+
+
 def _check_staff(text: str, kb) -> tuple[str, str]:
-    certs = re.findall(r"\b([A-Z][A-Z0-9+]{2,8})\b", text)
-    certs = [c for c in certs if c not in ("SOC", "IT", "OR", "AND", "L1", "L2", "L3")]
-    yrs = re.search(r"(\d{1,2})\s*\+?\s*years", text)
-    need_y = int(yrs.group(1)) if yrs else 0
-    for e in getattr(kb, "employees", []):
-        held = " ".join(str(c) for c in e.get("certifications", [])).upper()
-        if certs and not any(c in held for c in certs):
-            continue
-        if need_y and float(e.get("years") or 0) < need_y:
-            continue
-        if certs or need_y:
-            return "pass", f"{e.get('code')} ({e.get('role')}) meets it"
-    return "fail", "Nobody in the skills register holds " + (" or ".join(certs) if certs else "this") + (f" with {need_y}+ years" if need_y else "")
+    clauses = staff_clauses(text)
+    if not clauses:
+        return "unknown", "The library can't show this: confirm it before bidding"
+    found, missing = [], []
+    for cl in clauses:
+        who = None
+        role_words = set(re.findall(r"[a-z]+", cl["role"].lower())) - {"the", "and", "of"}
+        people = sorted(getattr(kb, "employees", []),  # someone with the job title the condition names comes first
+                        key=lambda e: -len(role_words & set(re.findall(r"[a-z]+", str(e.get("role", "")).lower()))))
+        for e in people:
+            held = " ".join(str(c) for c in e.get("certifications", [])).upper()
+            have = [c for c in cl["certs"] if c in held]
+            if cl["certs"] and (not have if cl["any_cert"] else len(have) < len(cl["certs"])):
+                continue
+            if cl["min_years"] and float(e.get("years") or 0) < cl["min_years"]:
+                continue
+            if cl["tech"]:
+                skills = " ".join((s.get("name", "") if isinstance(s, dict) else str(s)) for s in e.get("skills", [])).lower()
+                core = re.sub(r"^microsoft\s+", "", cl["tech"].lower())
+                if core not in skills:
+                    continue
+            who = e
+            break
+        label = cl["role"] or "a named person"
+        if who:
+            found.append(f"{label}: {who.get('code')} ({who.get('role')})")
+        else:
+            need = (" or ".join(cl["certs"]) if cl["any_cert"] else " and ".join(cl["certs"])) if cl["certs"] else ""
+            bits = [x for x in (need, f"{cl['min_years']}+ years" if cl["min_years"] else "", cl["tech"]) if x]
+            missing.append(f"{label} ({', '.join(bits)})")
+    if missing:
+        return "fail", "Nobody in the skills register meets: " + "; ".join(missing)
+    return "pass", "; ".join(found)
+
+
+NEG_CONSORTIUM_RE = re.compile(r"(consorti\w*|joint ventures?|joint bids?)[^.;]{0,40}?\b(not|never)\s+(be\s+)?(allowed|permitted|accepted|considered)|"
+                               r"\b(no|not)\b[^.;]{0,15}(consorti\w*|joint ventures?|joint bids?)", re.I)
+POS_CONSORTIUM_RE = re.compile(r"consorti|joint venture|joint bid|lead bidder", re.I)
+BID_FORM_RE = re.compile(r"consorti|joint venture|joint bid|sub-?contract", re.I)
+
+
+def consortium_allowed(rfp_text: str) -> bool:
+    """Consortium or joint bids allowed. "Consortium bids are not allowed" says the opposite of what the word alone suggests,
+    and a clause allowing one task to be subcontracted (a penetration test) doesn't open the bid to a consortium."""
+    t = rfp_text or ""
+    if NEG_CONSORTIUM_RE.search(t):
+        return False
+    return bool(POS_CONSORTIUM_RE.search(t) or re.search(r"sub-?contract(?:ing|ors?)? (?:is|are) (?:allowed|permitted)", t, re.I))
+
+
+UNITS = {"crore": 1e7, "crores": 1e7, "cr": 1e7, "lakh": 1e5, "lakhs": 1e5, "lac": 1e5, "million": 1e6, "mn": 1e6, "m": 1e6,
+         "billion": 1e9, "bn": 1e9, "thousand": 1e3, "k": 1e3}
+MONEY_RE = re.compile(r"(INR|USD|EUR|GBP|AED|SAR|Rs\.?|₹|\$|€|£)\s?([\d,]+(?:\.\d+)?)\s*(crores?|cr|lakhs?|lac|million|mn|billion|bn|thousand|k|m)?\b", re.I)
+CCY = {"rs": "INR", "rs.": "INR", "₹": "INR", "$": "USD", "€": "EUR", "£": "GBP"}
+
+
+def _money(m) -> tuple[str, float]:
+    c = m.group(1)
+    ccy = CCY.get(c.lower(), c.upper())
+    return ccy, float(m.group(2).replace(",", "")) * UNITS.get((m.group(3) or "").lower(), 1)
+
+
+def _check_financial(text: str, kb) -> tuple[str, str]:
+    """Turnover / revenue conditions, checked against the figure the company profile states."""
+    need = MONEY_RE.search(text)
+    about = getattr(kb, "about", "") or ""
+    have = None
+    for sent in re.split(r"(?<=[.;])\s+|\n", about):
+        if re.search(r"turnover|revenue", sent, re.I):
+            have = MONEY_RE.search(sent)
+            if have:
+                break
+    if not need or not have or not re.search(r"turnover|revenue", text, re.I):
+        return "unknown", "The library can't show this: confirm it before bidding"
+    (nc, nv), (hc, hv) = _money(need), _money(have)
+    if nc != hc:
+        return "unknown", f"The company profile states {have.group(0)}, in another currency: confirm it before bidding"
+    if hv >= nv:
+        return "pass", f"The company profile states {have.group(0).strip()} (needs {need.group(0).strip()})"
+    return "fail", f"The company profile states {have.group(0).strip()}, below the {need.group(0).strip()} required"
 
 
 def evaluate(profile: dict, kb, deal_industry: str, due_date: str, rfp_text: str, today: date | None = None) -> dict:
     today = today or date.today()
     due = _due(due_date)
     weeks_left = ((due - today).days / 7) if due else None
-    consortium = bool(re.search(r"consorti|joint venture|joint bid|sub-?contract(?:ing|or)s? (?:is|are) (?:allowed|permitted)|lead bidder", rfp_text or "", re.I))
+    consortium = consortium_allowed(rfp_text or "")
     gates = []
     for e in profile.get("eligibility", []):
         kind, text = e.get("kind", "other"), e.get("text", "")
@@ -153,6 +253,11 @@ def evaluate(profile: dict, kb, deal_industry: str, due_date: str, rfp_text: str
             status, reason, evidence = _check_experience(text, kb, deal_industry)
         elif kind == "staff":
             status, reason = _check_staff(text, kb)
+        elif kind == "financial":
+            status, reason = _check_financial(text, kb)
+        elif BID_FORM_RE.search(text) and not re.search(r"\b(certif|accredit|turnover|revenue|experience|years|office|presence)", text, re.I):
+            status, reason = "pass", "A rule on how to bid, not a capability: bid as a single company" + (
+                "; subcontract only what the RFP allows" if re.search(r"sub-?contract", text, re.I) else "")
         else:
             status, reason = "unknown", "The library can't show this: confirm it before bidding"
         cure, cure_weeks = "", None

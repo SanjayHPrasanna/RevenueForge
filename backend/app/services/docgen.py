@@ -21,10 +21,30 @@ from docx.shared import Pt, RGBColor
 from . import llm
 from .masking import mask_obj
 
-ENG_LABEL = {"managed_services": "outcome-based managed service", "build_run": "platform build and migration followed by an outcome-based managed service",
+ENG_LABEL = {"managed_services": "outcome-based managed service", "build_run": "platform build followed by a managed service",
              "product": "product-led solution with full system integration",
              "consulting": "enterprise architecture advisory engagement", "implementation": "design-and-build implementation"}
 COMPLIANCE = {"strong": "Fully compliant", "partial": "Compliant (with approach)", "gap": "Partially compliant – mitigation", "confirm": "Acknowledged"}
+
+
+def _migrates(reqs: list[dict]) -> bool:
+    """The RFP asks for something to be migrated: only then do the proposal and plan talk about migration."""
+    return any(re.search(r"\bmigrat", r.get("text", ""), re.I) for r in reqs or [])
+
+
+INTERNAL_NOTE_RE = re.compile(r"person-days|rate card|benchmark|contingency|\bquotes?\b|\bhir(e|ing)\b|unfilled|calibrated|"
+                              r"already committed|priced as|partner lines|FTE to cover|\brole\b|travel and living|converted to|Includes ", re.I)
+
+
+def client_assumptions(est: dict) -> list[str]:
+    """Assumptions fit for the client: scope, term and dependencies. How the price was built (rate sources, contingency,
+    hires, quotes, effort figures) is internal and stays in the app and the handoff."""
+    out = []
+    for a in est.get("assumptions", []):
+        a = re.sub(r",\s*from \d+ person-days[^.]*\.", ".", a)  # keep "Build over 5 months", drop how the effort was counted
+        if not INTERNAL_NOTE_RE.search(a):
+            out.append(a)
+    return out
 
 
 def _is_standard_name(t: str) -> bool:
@@ -263,8 +283,8 @@ def executive_summary(ctx: dict) -> str:
             facts = {
                 "client": client, "rfp_title": d["name"], "engagement": ENG_LABEL.get(d["engagement_type"], ""),
                 "company": company["name"], "company_about": company.get("about", ""), "requirements": len(ctx["requirements"]),
-                "technical_requirements": len(tech), "fully_met": counts.get("strong", 0), "met_with_approach": counts.get("partial", 0),
-                "gaps_closed_by_mitigation_plan": planned_gaps, "gaps_without_a_plan_do_not_claim_these": open_gaps, "conditions_and_submission_items_acknowledged": counts.get("confirm", 0),
+                "technical_requirements": len(tech), "requirements_answered_with_capability_or_plan": counts.get("strong", 0) + counts.get("partial", 0) + planned_gaps,
+                "gaps_without_a_plan_do_not_claim_these": open_gaps,
                 "team_size": est["headcount"], "duration_months": est["contract_months"],
                 "build_months": est.get("build_months") if d["engagement_type"] == "build_run" else None,
                 "managed_service_months": est.get("run_months"),
@@ -279,7 +299,8 @@ def executive_summary(ctx: dict) -> str:
                 if real.lower() in json.dumps(facts, ensure_ascii=False).lower():
                     raise ValueError("client name still in the facts; using the written summary instead")
             return llm.complete("You write crisp, factual executive summaries for enterprise proposals. Use only the facts given. 3 short paragraphs, "
-                                "no headings, no bullet points. Don't mention counts that are zero, don't describe the company as serving "
+                                "no headings, no bullet points. This goes to the client: never give a breakdown of fully met, partly met or gap "
+                                "requirements (that scoring is internal), don't mention counts that are zero, don't describe the company as serving "
                                 "industries that aren't in the facts, and never say every requirement is met or covered unless the facts show "
                                 "no gaps without a plan.",
                                 f"Facts (JSON): {facts}", max_tokens=900).strip()
@@ -295,7 +316,7 @@ def executive_summary(ctx: dict) -> str:
            if open_gaps else "") \
         + (f"Relevant references include {cs_txt}. " if cs_txt else "") + ctx["architecture"]["summary"]
     if d["engagement_type"] == "build_run" and est.get("build_months"):
-        when = f"build and migrate the platform in {est['build_months']} months and then run it for {est.get('run_months')} months"
+        when = f"build {'and migrate ' if _migrates(ctx['requirements']) else ''}the platform in {est['build_months']} months and then run it for {est.get('run_months')} months"
     else:
         when = f"deliver over {est['contract_months']} months"
     pay = ("with the build priced by milestone and the managed service as a fixed monthly fee" if pr.get("phase_split")
@@ -568,7 +589,7 @@ class Content:
         g, est = self.g, self.est
         w.table(["At a glance", ""], [
             ["Engagement model", ENG_LABEL.get(self.d["engagement_type"], self.d["engagement_type"]).capitalize()],
-            ["Requirements addressed", _req_breakdown(len(self.reqs), g.get("counts", {}))],
+            ["Requirements addressed", f"All {len(self.reqs)}, each answered in the compliance matrix"],
             ["Team", f"{est['headcount']} people ({est['fte']} FTE at peak), {round(est.get('onsite_share', est['onsite_ratio']) * 100)}% onsite"],
             ["Duration", (f"{est['build_months']}-month build, then a {est['run_months']}-month managed service"
                           if self.d["engagement_type"] == "build_run" and est.get("build_months") else f"{est['contract_months']} months")],
@@ -628,7 +649,11 @@ class Content:
         certs = self.ctx.get("certifications", [])
         if certs:
             items.append("Certified: " + ", ".join(c["name"] for c in certs[:5]) + ".")
-        items.append(f"A named {self.est['headcount']}-person team matched from our own people on role, skills and availability.")
+        named = sum(len(t.get("assigned", [])) for t in self.est["team"])
+        if named >= self.est["headcount"]:
+            items.append(f"A named {self.est['headcount']}-person team matched from our own people on role, skills and availability.")
+        elif named:
+            items.append(f"A {self.est['headcount']}-person team, {named} of them already matched from our own people on role, skills and availability.")
         w.bullets(items)
 
     def phases(self, w):
@@ -695,7 +720,7 @@ class Content:
             run = self.price - build
             w.p(f"Our offer for the full scope is {money(self.price, self.ccy)}" + (f" ({money(self.sc['price'], pr['currency'])})" if self.ccy != pr["currency"] else "")
                 + ", priced as you asked:")
-            w.bullets([f"Platform build and migration: {money(build, self.ccy)} fixed price, paid against the milestones below"
+            w.bullets([f"Platform build{' and migration' if _migrates(self.reqs) else ''}: {money(build, self.ccy)} fixed price, paid against the milestones below"
                        + (f" over {ps['build_months']} months." if ps.get("build_months") else "."),
                        f"Managed service: a fixed monthly fee of {money(run / ps['run_months'], self.ccy)} for {ps['run_months']} months "
                        f"({money(run, self.ccy)} in total)."])
@@ -716,6 +741,13 @@ class Content:
                 rows.append([m.group(1), m.group(2)] if m else [s, ""])
             w.table(["Service level required", "Target"], rows, widths=[10.2, 6.5])
             w.p(f"{self.cname} commits to these service levels, reported monthly.")
+            return
+        # no SLA table in the RFP: the measurable targets its requirements set are the service levels we commit to
+        sla_like = [r for r in self.reqs if r.get("category") == "Non-functional" and re.search(r"\d", r["text"]) and
+                    re.search(r"availab|uptime|respon|resol|load|latency|seconds|minutes|hours|RPO|RTO|concurrent", r["text"], re.I)]
+        if sla_like:
+            w.table(["Ref", "Service level required"], [[client_ref(r), _clip(r["text"], 260)] for r in sla_like], widths=[2.2, 14.5])
+            w.p(f"{self.cname} commits to these targets and reports on them monthly.")
         else:
             w.p("Service levels will be agreed during mobilisation and reported monthly.")
 
@@ -751,7 +783,7 @@ class Content:
         w.table(["Ref", "Requirement", "Source", "Compliance", "Our response"], rows, widths=[1.6, 6.0, 1.1, 2.2, 5.8], font=7.5)
 
     def assumptions(self, w):
-        w.bullets(self.est.get("assumptions", []) + self.pr.get("assumptions", []))
+        w.bullets(client_assumptions(self.est) or ["Client provides environments, test data and SME availability per plan."])
         oos = self.ctx["meta"].get("out_of_scope", [])
         if oos:
             w.p("Out of scope (as defined in the RFP):")
@@ -761,7 +793,7 @@ class Content:
         risks = [r for r in self.reqs if r.get("gap", {}).get("risk") in ("High", "Medium") and r["gap"].get("options")
                  and r["gap"]["options"][0]["type"] != "Strengthen evidence"][:15]  # thin evidence is our homework, not a client risk
         rows = [[_ref(r), _clip(r["text"], 200), r["gap"]["risk"], _clip(client_mitigation(r, self.cname), 260)] for r in risks]
-        rows += [["Delivery", risk, level, mit] for risk, level, mit in delivery_risks(self.d["engagement_type"], self.ctx["meta"], self.est)]
+        rows += [["Delivery", risk, level, mit] for risk, level, mit in delivery_risks(self.d["engagement_type"], self.ctx["meta"], self.est, self.reqs)]
         w.table(["Ref", "Risk", "Level", "Mitigation"], rows, widths=[1.8, 7.0, 1.6, 6.3])
 
     def commercial_conditions(self, w):
@@ -827,12 +859,13 @@ def condition_position(r: dict, pr: dict) -> str:
     return "Accepted, subject to contract"
 
 
-def delivery_risks(eng: str, meta: dict, est: dict) -> list[tuple[str, str, str]]:
+def delivery_risks(eng: str, meta: dict, est: dict, reqs: list[dict] | None = None) -> list[tuple[str, str, str]]:
     """Standard risks for the kind of engagement, so the register is never just the requirement gaps."""
     out = []
-    if eng in ("build_run", "implementation"):
+    if eng in ("build_run", "implementation") and _migrates(reqs or []):
         out.append(("Migration cut-over disrupts live services.", "Medium",
                     "Wave-based migration with parallel running, rehearsed rollback and agreed cut-over windows."))
+    if eng in ("build_run", "implementation"):
         if est.get("build_months"):
             out.append((f"The {est['build_months']}-month timeline slips because of client dependencies (environments, test data, SMEs).", "Medium",
                         "Dependencies and dates agreed at mobilisation, tracked weekly and escalated through the steering committee."))
@@ -840,8 +873,8 @@ def delivery_risks(eng: str, meta: dict, est: dict) -> list[tuple[str, str, str]
         out.append(("Service levels missed in the first months of the run phase.", "Medium",
                     "Hypercare before service start, runbooks validated in rehearsal, and early-life support from the build team."))
     if est.get("unfilled_roles"):
-        out.append((f"{est['unfilled_roles']} role(s) still to be filled before mobilisation.", "Medium",
-                    "Recruitment starts at contract award, with named backups from the bench."))
+        out.append(("Some team members are confirmed only at mobilisation.", "Low" if est["unfilled_roles"] <= 2 else "Medium",
+                    "Onboarding starts at contract award, with qualified backups identified for every key role."))
     return out
 
 

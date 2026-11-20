@@ -541,7 +541,7 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
         ]
         months = build_months + term + (int(round(stated_transition)) if stated_transition else 0)
         assumptions_extra = [
-            f"Build and migration over {build_months} months{' as required by the RFP' if meta.get('build_months') and not ov.get('duration_months') else ''}, "
+            f"Build{' and migration' if re.search(r'migrat', text_all, re.I) else ''} over {build_months} months{' as required by the RFP' if meta.get('build_months') and not ov.get('duration_months') else ''}, "
             f"from {round(build)} person-days of requirement-level effort plus project management, architecture and testing.",
             f"Managed service for {term} months after go-live{' as stated in the RFP' if meta.get('contract_term_months') else ' (assumed: not stated in the RFP)'}.",
             f"{'24x7' if is_247 else 'Business-hours'} coverage{' with P1 response within 15–30 minutes' if p1_fast else ''}; a {squad}-engineer change squad covers routine enhancements.",
@@ -716,17 +716,24 @@ def _rate_for(kb: CompanyKB, role: str, location: str, overrides: dict) -> tuple
     if key in overrides:
         o = overrides[key]
         return float(o.get("day_rate", 0)), float(o.get("day_cost", 0)), o.get("currency", "USD"), "Override"
-    rows = [r for r in kb.rates if K.normalize_role(r["role"]) == role]
+    # Same role on both sides: the team's title and the rate card's are compared in the same standard form ("Full Stack
+    # Developer" and "Full-stack Developer" are both Software Engineer). A rate card row with the same wording wins, then
+    # the row whose title shares most words with the team's, so "Support Engineer L2/L3" is priced from "Support Engineer".
+    words = lambda t: set(re.findall(r"[a-z0-9]+", (t or "").lower())) - {"and", "the", "of"}
+    flat = lambda t: " ".join(sorted(words(t)))
+    std = K.normalize_role(role)
+    same_words = [r for r in kb.rates if flat(r["role"]) == flat(role)]
+    rows = same_words or [r for r in kb.rates if K.normalize_role(r["role"]) in (role, std)]
     exact = [r for r in rows if r.get("location", "").lower().startswith(location.lower()[:4])]
     pick = exact or rows
     if pick:
-        r = max(pick, key=lambda x: x.get("day_rate", 0))
+        r = max(pick, key=lambda x: (len(words(x["role"]) & words(role)), x.get("day_rate", 0)))
         cost = r.get("day_cost") or r.get("day_rate", 0) * 0.5
         rate, cost = r.get("day_rate", 0), cost
         if not exact and location == "Onsite":
             rate, cost = rate * 2.1, cost * 2.0
         return float(rate), float(cost), r.get("currency", "USD") or "USD", "Rate card" if exact else "Rate card (location adjusted)"
-    rate, cost = DEFAULT_RATES.get(role, (450, 220))
+    rate, cost = DEFAULT_RATES.get(role) or DEFAULT_RATES.get(std, (450, 220))
     if location == "Onsite":
         rate, cost = rate * 2.1, cost * 2.0
     scaled = _scale_to_card(kb, rate, cost, location)

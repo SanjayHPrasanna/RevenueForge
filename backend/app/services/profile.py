@@ -245,7 +245,9 @@ _ORG_TAIL = {"centre", "center", "team", "office", "department", "services", "se
              "inc", "authority", "ministry", "council", "board", "committee", "bank", "society", "company", "parks", "park"}
 _GENERIC_ACRONYMS = {"RPO", "RTO", "BFSI", "SME", "SMEs", "IT", "SLA", "SLAS", "KPI", "UAT", "RFP", "RFI", "RFQ", "SOW", "TBD", "NA", "N/A", "FAQ", "GST", "VAT", "USD", "INR",
                      "EUR", "GBP", "AED", "AUD", "SGD", "CAD", "SAR", "QAR", "KWD", "PDF", "ID", "UK", "US", "USA", "UAE", "EU", "EEA", "CV", "CVS",
-                     "OK", "AM", "PM", "IST", "GMT", "UTC", "HQ", "MD", "CEO", "CFO", "CIO", "CTO", "CISO", "HR"}
+                     "OK", "AM", "PM", "IST", "GMT", "UTC", "HQ", "MD", "CEO", "CFO", "CIO", "CTO", "CISO", "HR",
+                     # words for what is being built, not a technology anyone holds as a skill
+                     "API", "APIS", "ETA", "SMS", "MMS", "OTP", "URL", "UI", "UX", "FAQ", "KYC", "ERP", "CRM", "SIT", "DR", "BCP", "MIS", "L1", "L2", "L3"}
 TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+#&/'-]*[A-Za-z0-9+#]|[A-Za-z0-9]")
 
 
@@ -348,6 +350,8 @@ def named_terms(text: str, corpus: str, exclude: set[str] | None = None) -> list
                 continue
             if all(p in _PLACES for p in words) or (len(words) == 1 and words[0].upper() in _GENERIC_ACRONYMS):
                 continue
+            if words[0].upper() in _GENERIC_ACRONYMS and all(re.fullmatch(r"[\d.,%]+", p) for p in words[1:]):
+                continue  # a figure, not a name: "RPO 1", "INR 10", "SLA 99.5"
             while phrase and phrase[0].lower() in exclude:
                 phrase = phrase[1:]
             while phrase and phrase[-1].lower() in exclude:

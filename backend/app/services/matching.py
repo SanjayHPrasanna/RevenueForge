@@ -28,6 +28,7 @@ class CompanyKB:
     employees: list[dict] = field(default_factory=list)
     rates: list[dict] = field(default_factory=list)
     won_capabilities: dict[str, int] = field(default_factory=dict)  # capability id -> wins (learning loop)
+    about: str = ""  # the company profile text (turnover, offices...), for eligibility conditions the library can't show
 
     def tech_inventory(self) -> dict[str, dict]:
         """tech -> {people, avg_level, capabilities, case_studies}"""
@@ -305,6 +306,11 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
         return reqs
     inv = kb.tech_inventory()
     company_techs = {t for t, v in inv.items() if v["people"] or v["capabilities"]}
+    # a certification the RFP names ("PMP or PRINCE2") is held when the register or a person holds it: it's not a missing technology
+    for cn in [c.get("name", "") for c in current_certs(kb.certifications)] + [str(x) for e in kb.employees for x in e.get("certifications", []) or []]:
+        if cn:
+            company_techs.add(cn)
+            company_techs |= {w for w in re.findall(r"\b[A-Z][A-Z0-9+]{2,9}\b", cn)}
     caps, css = kb.capabilities, kb.case_studies
     useful = {a["name"] for a in relevant_accelerators(kb, reqs)}
     accs = [a for a in kb.accelerators if a["name"] in useful]  # never cite an accelerator built for another domain
@@ -497,6 +503,27 @@ JUDGE_SYSTEM = ("You are the bid director of an IT services company deciding, re
                 "'gap' = nothing listed covers it. Do not mark a requirement down only because the evidence is worded differently.")
 
 
+def _cited(names, allowed: set[str]) -> list[str]:
+    """The library names the AI cited, matched the way people write them: case, quotes, a "Case study:" style prefix or a
+    shortened name don't stop a real citation from counting. A name that isn't in the candidate evidence still doesn't."""
+    def norm(x: str) -> str:
+        x = re.sub(r"^\s*(capability|case study|case-study|accelerator|certification|certificate|evidence)\s*[:\-\u2013]\s*", "", str(x), flags=re.I)
+        return re.sub(r"[^a-z0-9]+", " ", x.lower()).strip()
+    by_norm = {norm(a): a for a in allowed if a}
+    out = []
+    for n in names if isinstance(names, list) else []:
+        if not isinstance(n, str) or not n.strip():
+            continue
+        key = norm(n)
+        hit = by_norm.get(key)
+        if hit is None and len(key) >= 8:
+            close = [a for k, a in by_norm.items() if len(k) >= 8 and (key in k or k in key)]
+            hit = close[0] if len(close) == 1 else None
+        if hit and hit not in out:
+            out.append(hit)
+    return out
+
+
 def ai_judge(reqs: list[dict], kb: CompanyKB, inv: dict, guidance: str = "", progress=None) -> None:
     """AI decides strong / partial / gap for every technical and compliance requirement, citing evidence."""
     todo = [r for r in reqs if r["category"] != "Commercial" and r.get("subcategory") not in CONFIRM_SUBS and r["match_status"] != "confirm"
@@ -546,12 +573,12 @@ def ai_judge(reqs: list[dict], kb: CompanyKB, inv: dict, guidance: str = "", pro
             st = it.get("status")
             if st not in ("strong", "partial", "gap"):
                 continue
-            cited = [e for e in (it.get("evidence") or []) if isinstance(e, str) and e in allowed[k]]
+            cited = _cited(it.get("evidence"), allowed[k])
             # The AI's opinion never outranks the facts: "strong" needs evidence it can name from the library, and a
             # technology the company doesn't have can't be strong (the same rule the scorer follows).
             caps_note = ""
             if st == "strong" and not cited:
-                st, caps_note = "partial", " (Kept at partial: the AI named no library evidence.)"
+                st, caps_note = "partial", " (Kept at partial until a person confirms it: the AI's rating cited nothing from the library's list.)"
             elif st == "strong" and r["match"].get("technologies_missing"):
                 st, caps_note = "partial", f" (Kept at partial: no {', '.join(r['match']['technologies_missing'][:3])} in the library.)"
             r["match_status"] = st
