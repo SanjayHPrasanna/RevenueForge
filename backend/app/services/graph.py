@@ -57,8 +57,12 @@ def rebuild_company_graph(db: Session, tid: str) -> dict:
     roles: dict[str, dict] = {}
     for e in db.scalars(select(Employee).where(Employee.tenant_id == tid)):
         role = K.normalize_role(e.role)
-        rd = roles.setdefault(role, {"count": 0, "skills": {}})
+        rd = roles.setdefault(role, {"count": 0, "skills": {}, "certs": {}})
         rd["count"] += 1
+        for cn in e.certifications or []:
+            cn = str(cn).strip()
+            if cn:
+                rd["certs"][cn] = rd["certs"].get(cn, 0) + 1
         for s in e.skills or []:
             name = K.canonical_tech(s["name"])
             skills[name] = skills.get(name, 0) + 1
@@ -97,6 +101,13 @@ def rebuild_company_graph(db: Session, tid: str) -> dict:
         k = g.node("Certification", c.name, kind=c.kind)
         for t in K.find_technologies(c.name + " " + c.issuer):
             g.edge(k, g.node("Technology", t), "certifies")
+    # A role holds the certifications its people hold (PM -> Certified ScrumMaster), weighted by how many of them do.
+    for role, rd in roles.items():
+        for cn, n in rd["certs"].items():
+            ck = _key("Certification", cn)
+            if ck not in g.nodes:
+                ck = g.node("Certification", cn, kind="individual")
+            g.edge(_key("Resource", role), ck, "holds", weight=n)
     db.flush()
     return {"nodes": len(g.nodes), "edges": len(g.edges)}
 
