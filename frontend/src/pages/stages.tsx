@@ -678,7 +678,8 @@ export function EstimationStage({ deal }: P) {
               <tr key={i}>
                 {phased && <td className="td text-[13px]">{t.phase}<div className="text-[11.5px] text-ink-faint">{t.months} months</div></td>}
                 <td className="td"><div className="font-semibold text-[13.5px]">{t.role}</div><div className="text-[12px] text-ink-muted">{t.responsibility}</div>
-                  {(t.certs?.length > 0 || t.min_years > 0) && <div className="text-[11.5px] text-ink-faint mt-0.5">Needs {[t.certs?.length ? t.certs.join(t.any_cert ? " or " : " and ") : "", t.min_years ? `${t.min_years}+ years` : ""].filter(Boolean).join(", ")}</div>}</td>
+                  {(t.certs?.length > 0 || t.min_years > 0) && <div className="text-[11.5px] text-ink-faint mt-0.5">Needs {[t.certs?.length ? t.certs.join(t.any_cert ? " or " : " and ") : "", t.min_years ? `${t.min_years}+ years` : ""].filter(Boolean).join(", ")}</div>}
+                  {t.preferred_certs?.length > 0 && <div className="text-[11.5px] text-ink-faint mt-0.5">Preferred: {t.preferred_certs.join(", ")}</div>}</td>
                 <td className="td text-right num">{t.fte}</td>
                 <td className="td text-[13px]">{t.location}</td>
                 <td className="td">

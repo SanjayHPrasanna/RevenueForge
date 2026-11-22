@@ -283,6 +283,11 @@ def _held_tech(t: str, company_techs: set[str]) -> bool:
     RFP Profile ("Node.js", "Microsoft Sentinel") also matches its canonical dictionary name or the same product in the library."""
     if t in company_techs or K.canonical_tech(t) in company_techs:
         return True
+    # a standard written with or without its filler words: "WCAG 2.1 Level AA" is "WCAG 2.1 AA", "ISO/IEC 27001" is "ISO 27001"
+    squash = lambda x: re.sub(r"\b(level|version|ver|v|standard)\b|[^a-z0-9]+", "", x.lower().replace("iso/iec", "iso"))
+    st = squash(t)
+    if len(st) >= 5 and any(squash(c) == st for c in company_techs):
+        return True
     if t in K.TECHNOLOGIES:
         return False
     from .teamplan import _same
@@ -359,7 +364,7 @@ def match_requirements(reqs: list[dict], kb: CompanyKB, engagement_type: str = "
         if best_cap[1] is not None and caps[best_cap[1]].get("id") in kb.won_capabilities:
             cap_s = min(1.0, cap_s + 0.05)  # learning loop: capabilities that helped win before get a small boost
         cs_s = norm(cs_scores[0][0], 0.28) if cs_scores else 0
-        req_techs = [t for t in r.get("technologies", []) if t not in K.COMMODITY_TECH]
+        req_techs = [t for t in r.get("technologies", []) if t not in K.COMMODITY_TECH and not K.is_generic_term(t)]
         have = [t for t in req_techs if _held_tech(t, company_techs)]
         missing = [t for t in req_techs if not _held_tech(t, company_techs)]
         tech_cov = (len(have) / len(req_techs)) if req_techs else None
@@ -673,7 +678,7 @@ def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_
         if r["match_status"] not in ("gap", "partial"):
             r["gap"] = {}
             continue
-        missing = r["match"].get("technologies_missing", [])
+        missing = [t for t in r["match"].get("technologies_missing", []) if not K.is_generic_term(t)]
         options = []
         for t in missing:
             missing_counter[t].append(r["code"])

@@ -102,6 +102,45 @@ ok("T1 the project manager is filled from the company's own PMs (PMP or PRINCE2)
    pm and (pm["assigned"], pm["unfilled"], pm["any_cert"]))
 ok("T1 no note about a dedicated role was added", not any("dedicated role" in n for n in notes), notes)
 
+# T10 (22 Nov live run): the AI now attaches a "nice to have" certificate and years to most roles. They mustn't keep the
+# company's own people out of a role; only a condition the RFP states does.
+ai2 = {"roles": [
+    {"role": "Project Manager", "phase": "Build", "fte": 1, "location": "Offshore", "skills": ["Project Management"], "certs": ["PMP", "PRINCE2"],
+     "min_years": 8, "serves": ["STF-01"], "why": "STF-01"},
+    {"role": "Full Stack Developer", "phase": "Build", "fte": 2, "location": "Offshore", "skills": ["React"], "certs": ["Azure Developer Associate"],
+     "min_years": 7, "serves": ["FR-01"], "why": "portal"},
+    {"role": "Support & Maintenance Engineer (L2/L3)", "phase": "Run", "fte": 1, "location": "Offshore", "skills": ["Application Support"],
+     "certs": ["Azure Administrator Associate"], "min_years": 4, "serves": ["DEL-02"], "why": "support"}]}
+rows2 = teamplan.check_ai_plan(ai2, reqs, prof, ph, 4.8, rules)
+teamplan.assign(KB, rows2, {})
+dev = next(r for r in rows2 if r["role"] == "Full Stack Developer")
+ok("T10 an AI-suggested certificate doesn't keep the company's developers out", [a["code"] for a in dev["assigned"]] == ["VT-006", "VT-007"] and not dev["unfilled"],
+   (dev["assigned"], dev["unfilled"]))
+ok("T10 it is kept as a preference", dev["certs"] == [] and dev["preferred_certs"] == ["Azure Developer Associate"], (dev["certs"], dev.get("preferred_certs")))
+sup = next(r for r in rows2 if r["role"].startswith("Support"))
+ok("T10 nor do the AI's suggested years", sup["assigned"] and sup["assigned"][0]["code"] == "VT-025", sup["assigned"])
+pm2 = next(r for r in rows2 if r["role"] == "Project Manager")
+ok("T10 the RFP's own condition still applies (PMP or PRINCE2, 8 years)", pm2["certs"] == ["PMP", "PRINCE2"] and pm2["min_years"] == 8 and
+   pm2["assigned"][0]["code"] == "VT-002", (pm2["certs"], pm2["min_years"], pm2["assigned"]))
+from app.services import knowledge as K  # noqa: E402
+ok("T10 generic tags the AI attaches aren't technologies", all(K.is_generic_term(t) for t in ("API", "APIs", "ETA", "SMS", "RPO 1", "RTO 4 hours", "INR 10", "SLA 99.5%")))
+ok("T10 real ones are", not any(K.is_generic_term(t) for t in ("SAP S/4HANA", "OData", "Microsoft Entra External ID", "WCAG 2.1 Level AA", "Apache Kafka")))
+from app.services.matching import match_requirements  # noqa: E402
+tagged = [{"code": "REQ-004", "text": "The bidder shall provide secure REST APIs for tracking, ETA and documents through an API gateway.", "category": "Functional",
+           "subcategory": "Integration & APIs", "priority": "Mandatory", "technologies": ["API", "APIs", "ETA"]},
+          {"code": "REQ-013", "text": "Disaster recovery in South India (RPO 1 hour, RTO 4 hours).", "category": "Non-functional",
+           "subcategory": "Availability & Continuity", "priority": "Mandatory", "technologies": ["RPO 1", "RTO 4", "Microsoft Azure"]}]
+try:
+    match_requirements(tagged, KB)
+    miss = {t for r in tagged for t in r["match"].get("technologies_missing", [])}
+    ok("T10 AI-tagged generic words never show as missing technologies", not miss & {"API", "APIs", "ETA", "RPO 1", "RTO 4"}, miss)
+except Exception as ex:  # signature differences: report rather than crash the suite
+    ok("T10 AI-tagged generic words never show as missing technologies", False, repr(ex))
+
+from app.services.matching import _held_tech  # noqa: E402
+ok("T10 'WCAG 2.1 Level AA' is held when the library says 'WCAG 2.1 AA'", _held_tech("WCAG 2.1 Level AA", {"WCAG 2.1 AA"}))
+ok("T10 but a different version isn't", not _held_tech("WCAG 2.2 AA", {"WCAG 2.1 AA"}))
+
 # ------------------------------------------------------------------------------------------- T2 rate card names
 for role, want in (("Full Stack Developer", 12143), ("Full-stack Developer", 12143), ("Support Engineer L2/L3", 8095),
                    ("QA And Performance Engineer", 9445), ("Backend & API Engineer", 13493), ("Platform Engineer", 14166)):
