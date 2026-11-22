@@ -21,17 +21,17 @@ function AccuracyChart({ rows }: { rows: any[] }) {
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="Classification accuracy per deal">
       {[50, 75, 100].map((g) => (
         <g key={g}>
-          <line x1={P} x2={W - P} y1={y(g)} y2={y(g)} stroke="#E8EDF0" />
-          <text x={4} y={y(g) + 4} fontSize="10" fill="#8A99A3">{g}%</text>
+          <line x1={P} x2={W - P} y1={y(g)} y2={y(g)} style={{ stroke: "rgb(var(--line) / .1)" }} />
+          <text x={4} y={y(g) + 4} fontSize="10" style={{ fill: "rgb(var(--faint))" }}>{g}%</text>
         </g>
       ))}
-      <line x1={P} x2={W - P} y1={y(95)} y2={y(95)} stroke="#F5833A" strokeDasharray="4 4" />
-      <text x={W - P} y={y(95) - 5} fontSize="10" fill="#DD6A22" textAnchor="end">95% target</text>
-      <polyline fill="none" stroke="#118AC3" strokeWidth="2" points={pts.map((p, i) => `${x(i)},${y(Math.max(50, p.accuracy))}`).join(" ")} />
+      <line x1={P} x2={W - P} y1={y(95)} y2={y(95)} strokeDasharray="4 4" style={{ stroke: "rgb(var(--e500))" }} />
+      <text x={W - P} y={y(95) - 5} fontSize="10" textAnchor="end" style={{ fill: "rgb(var(--e600))" }}>95% target</text>
+      <polyline fill="none" strokeWidth="2" style={{ stroke: "rgb(var(--b500))" }} points={pts.map((p, i) => `${x(i)},${y(Math.max(50, p.accuracy))}`).join(" ")} />
       {pts.map((p, i) => (
         <g key={p.deal_id}>
-          <circle cx={x(i)} cy={y(Math.max(50, p.accuracy))} r="5" fill="#118AC3" stroke="#fff" strokeWidth="2"><title>{`${p.name}: ${p.accuracy}% (${p.reviewed} reviewed)`}</title></circle>
-          <text x={x(i)} y={H - 8} fontSize="10" fill="#5F707B" textAnchor="middle">Deal {i + 1}</text>
+          <circle cx={x(i)} cy={y(Math.max(50, p.accuracy))} r="5" strokeWidth="2" style={{ fill: "rgb(var(--b500))", stroke: "rgb(var(--surface))" }}><title>{`${p.name}: ${p.accuracy}% (${p.reviewed} reviewed)`}</title></circle>
+          <text x={x(i)} y={H - 8} fontSize="10" textAnchor="middle" style={{ fill: "rgb(var(--muted))" }}>Deal {i + 1}</text>
         </g>
       ))}
     </svg>
@@ -65,7 +65,7 @@ export default function Learning() {
     <div className="px-4 lg:px-8 py-6 max-w-[1400px] space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <div>
-          <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">AI learning</h1>
+          <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950">AI learning</h1>
           <p className="text-ink-muted text-sm mt-0.5 max-w-3xl">What RevenueForge has learned from your team. Every correction, approved answer and deal outcome makes the next deal sharper, and none of it is shared with other companies.</p>
         </div>
         <div className="flex-1" />
@@ -113,7 +113,7 @@ export default function Learning() {
           <div className="card p-5">
             <div className="flex items-center gap-2"><Gauge className="h-4 w-4 text-brand-600" /><h2 className="font-bold">Estimate calibration</h2></div>
             <p className="text-[12.5px] text-ink-muted mt-1">When a won deal is delivered, record its actual effort (Outcome → Won). Future estimates are scaled by how your actuals compare with plans.</p>
-            <div className="mt-3 flex items-baseline gap-2"><span className="num text-[26px] font-bold">×{data.calibration.factor}</span><span className="text-[12.5px] text-ink-muted">from {data.calibration.deals} delivered deal(s)</span></div>
+            <div className="mt-3 flex items-baseline gap-2"><span className="num text-[21px] font-bold">×{data.calibration.factor}</span><span className="text-[12.5px] text-ink-muted">from {data.calibration.deals} delivered deal(s)</span></div>
             {data.pricing.bands.length > 0 && (
               <div className="mt-4 text-[12.5px]">
                 <div className="font-semibold mb-1">Win rate by margin</div>
@@ -157,7 +157,7 @@ export default function Learning() {
                 <div className="text-[13px] text-ink-soft"><div className="line-clamp-3">{a.question}</div><div className="text-[11.5px] text-ink-faint mt-1">{a.source}</div></div>
                 <div className="text-[13.5px] leading-snug">{a.answer}</div>
                 <div className="flex lg:flex-col items-start gap-1.5 text-[11.5px]">
-                  <span className={clsx("chip", a.outcome === "won" ? "bg-ok-bg text-ok" : a.outcome === "lost" ? "bg-[#FBE7E5] text-fit-gap-ink" : "bg-line-soft text-ink-muted")}>{a.outcome === "pending" ? "Pending" : a.outcome === "won" ? "From a win" : "From a loss"}</span>
+                  <span className={clsx("chip", a.outcome === "won" ? "bg-ok-bg text-ok" : a.outcome === "lost" ? "bg-fit-gap-soft text-fit-gap-ink" : "bg-line-soft text-ink-muted")}>{a.outcome === "pending" ? "Pending" : a.outcome === "won" ? "From a win" : "From a loss"}</span>
                   <span className="chip bg-paper border border-line text-ink-soft">{a.origin === "human" ? "Team-written" : "AI, approved"}</span>
                   <span className="num text-ink-muted">Used {a.uses}×</span>
                   <div className="flex gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100">

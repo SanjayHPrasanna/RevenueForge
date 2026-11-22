@@ -29,7 +29,7 @@ type ChatMessage = {
 /** Maahi's face, cropped from the welcome picture into a small round avatar. */
 function MaahiAvatar({ className = "h-9 w-9" }: { className?: string }) {
   return (
-    <span aria-hidden className={`relative inline-block shrink-0 rounded-full bg-brand-50 bg-no-repeat ring-2 ring-white ${className}`}
+    <span aria-hidden className={`relative inline-block shrink-0 rounded-full bg-brand-50 bg-no-repeat ring-2 ring-surface ${className}`}
       style={{ backgroundImage: "url(/brand/maahi-avatar.webp)", backgroundSize: "cover", backgroundPosition: "center" }} />
   );
 }
@@ -52,7 +52,7 @@ function MaahiWelcome({ listening, onSpeak, title, sub }: { listening: boolean; 
           onClick={onSpeak}
           aria-label={listening ? "Stop voice input" : "Speak with Maahi"}
           aria-pressed={listening}
-          className="absolute bottom-2.5 left-2.5 z-20 flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full bg-white/90 px-3 text-[11.5px] font-semibold text-brand-950 shadow-lg backdrop-blur transition-all duration-200 hover:bg-white active:scale-95 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
+          className="absolute bottom-2.5 left-2.5 z-20 flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full bg-surface/90 px-3 text-[11.5px] font-semibold text-brand-950 shadow-lg backdrop-blur transition-all duration-200 hover:bg-surface active:scale-95 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-brand-500"
         >
           {listening ? <MicOff className="h-3.5 w-3.5 text-ember-600" aria-hidden /> : <Mic className="h-3.5 w-3.5" aria-hidden />}
           {listening ? "Stop listening" : "Speak with Maahi"}
@@ -60,7 +60,7 @@ function MaahiWelcome({ listening, onSpeak, title, sub }: { listening: boolean; 
         </button>
       </div>
       <div className="px-0.5 pb-2.5 pt-3">
-        <h2 className="text-[15px] font-semibold tracking-[-0.01em] leading-tight text-ink">
+        <h2 className="text-[14px] font-semibold tracking-[-0.01em] leading-tight text-ink">
           {listening ? "I’m listening..." : title}
         </h2>
         <p className="mt-1 text-[12px] leading-relaxed text-ink-muted">
@@ -268,13 +268,13 @@ export default function LandingAssistant({ mode = "public", company }: { mode?: 
           id="landing-assistant-panel"
           aria-label="Maahi, RevenueForge assistant"
           aria-modal="false"
-          className="fixed inset-0 z-50 flex h-[100dvh] min-h-0 w-full flex-col overflow-hidden bg-white anim-scale-in origin-bottom-right sm:inset-auto sm:bottom-5 sm:right-5 sm:h-[min(580px,calc(100dvh-2.5rem))] sm:w-[340px] sm:rounded-[22px] sm:border sm:border-line/70 sm:shadow-float"
+          className="fixed inset-0 z-50 flex h-[100dvh] min-h-0 w-full flex-col overflow-hidden bg-surface anim-scale-in origin-bottom-right sm:inset-auto sm:bottom-5 sm:right-5 sm:h-[min(580px,calc(100dvh-2.5rem))] sm:w-[340px] sm:rounded-[22px] sm:border sm:border-line/70 sm:shadow-float"
           role="dialog"
         >
-          <header className="flex shrink-0 items-center gap-2.5 border-b border-line-soft bg-white/90 px-3.5 py-2.5 backdrop-blur">
+          <header className="flex shrink-0 items-center gap-2.5 border-b border-line-soft bg-surface/90 px-3.5 py-2.5 backdrop-blur">
             <span className="relative">
               <MaahiAvatar className="h-8 w-8" />
-              <span aria-hidden className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-ok ring-2 ring-white" />
+              <span aria-hidden className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-ok ring-2 ring-surface" />
             </span>
             <div className="min-w-0 flex-1">
               <div className="text-[13.5px] font-semibold leading-tight text-ink">Maahi</div>
@@ -290,7 +290,7 @@ export default function LandingAssistant({ mode = "public", company }: { mode?: 
             </button>
           </header>
 
-          <div ref={messagesRef} className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-white" aria-live="polite">
+          <div ref={messagesRef} className="scroll-thin min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain bg-surface" aria-live="polite">
             <MaahiWelcome listening={listening} onSpeak={toggleVoice} title={copy.title(company)} sub={copy.sub} />
             <div className="space-y-3 px-3.5 pb-3.5">
               {messages.length === 1 && (
@@ -338,7 +338,7 @@ export default function LandingAssistant({ mode = "public", company }: { mode?: 
                       type="button"
                       onClick={() => sendMessage(suggestion)}
                       disabled={loading}
-                      className="block max-w-full rounded-full border border-line bg-white px-3 py-1.5 text-left text-[12px] text-ink-soft transition-all duration-200 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-800"
+                      className="block max-w-full rounded-full border border-line bg-surface px-3 py-1.5 text-left text-[12px] text-ink-soft transition-all duration-200 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-800"
                     >
                       {suggestion}
                     </button>
@@ -348,9 +348,9 @@ export default function LandingAssistant({ mode = "public", company }: { mode?: 
             </div>
           </div>
 
-          <div className="shrink-0 bg-white px-3 pb-2.5 pt-2">
+          <div className="shrink-0 bg-surface px-3 pb-2.5 pt-2">
             {voiceError && <p role="status" className="mb-2 text-[11px] leading-snug text-fit-gap-ink">{voiceError}</p>}
-            <form onSubmit={onSubmit} className="flex items-center gap-1 rounded-full border border-line bg-paper pl-4 pr-1 py-1 transition-all focus-within:border-brand-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-brand-500/10">
+            <form onSubmit={onSubmit} className="flex items-center gap-1 rounded-full border border-line bg-paper pl-4 pr-1 py-1 transition-all focus-within:border-brand-400 focus-within:bg-surface focus-within:ring-4 focus-within:ring-brand-500/10">
               <label className="sr-only" htmlFor="landing-assistant-input">Ask Maahi a question</label>
               <input
                 ref={inputRef}
@@ -374,7 +374,7 @@ export default function LandingAssistant({ mode = "public", company }: { mode?: 
                 type="submit"
                 disabled={!input.trim() || loading}
                 aria-label="Send message"
-                className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-700 text-white transition-all hover:bg-brand-800 active:scale-95 disabled:cursor-not-allowed disabled:bg-line"
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-700 text-white transition-all hover:bg-brand-500 active:scale-95 disabled:cursor-not-allowed disabled:bg-line"
               >
                 {loading ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/50 border-t-white" /> : <ArrowRight className="h-4 w-4" aria-hidden />}
               </button>
@@ -393,10 +393,10 @@ export default function LandingAssistant({ mode = "public", company }: { mode?: 
           aria-label="Ask Maahi about your workspace"
           title="Ask Maahi"
           onClick={() => setOpen(true)}
-          className="fixed bottom-5 right-5 z-40 grid h-12 w-12 place-items-center rounded-full bg-gradient-to-b from-brand-800 to-brand-950 p-[3px] shadow-[0_12px_30px_-8px_rgba(3,15,23,.55)] ring-1 ring-white/10 transition-all duration-300 ease-apple hover:-translate-y-0.5 hover:scale-105 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-200"
+          className="fixed bottom-5 right-5 z-40 grid h-12 w-12 place-items-center rounded-full bg-gradient-to-b from-brand-800 to-brand-950 p-[3px] shadow-[0_12px_30px_-8px_rgba(3,15,23,.55)] ring-1 ring-surface/10 transition-all duration-300 ease-apple hover:-translate-y-0.5 hover:scale-105 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-200"
         >
-          <MaahiAvatar className="h-full w-full ring-white/30" />
-          <span aria-hidden className="absolute -bottom-0 -right-0 h-3 w-3 rounded-full bg-ok ring-2 ring-white" />
+          <MaahiAvatar className="h-full w-full ring-surface/30" />
+          <span aria-hidden className="absolute -bottom-0 -right-0 h-3 w-3 rounded-full bg-ok ring-2 ring-surface" />
         </button>
       )}
 
@@ -408,10 +408,10 @@ export default function LandingAssistant({ mode = "public", company }: { mode?: 
           aria-controls="landing-assistant-panel"
           onClick={() => setOpen(true)}
           aria-label="Ask Maahi"
-          className="group fixed bottom-4 right-4 sm:bottom-5 sm:right-5 z-50 flex h-12 items-center gap-2 rounded-full bg-gradient-to-b from-brand-800 to-brand-950 pl-1.5 pr-1.5 sm:pr-4 text-white shadow-[0_12px_30px_-8px_rgba(3,15,23,.55)] ring-1 ring-white/10 transition-all duration-300 ease-apple hover:-translate-y-0.5 hover:shadow-[0_16px_36px_-8px_rgba(3,15,23,.6)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-200"
+          className="group fixed bottom-4 right-4 sm:bottom-5 sm:right-5 z-50 flex h-12 items-center gap-2 rounded-full bg-gradient-to-b from-brand-800 to-brand-950 pl-1.5 pr-1.5 sm:pr-4 text-white shadow-[0_12px_30px_-8px_rgba(3,15,23,.55)] ring-1 ring-surface/10 transition-all duration-300 ease-apple hover:-translate-y-0.5 hover:shadow-[0_16px_36px_-8px_rgba(3,15,23,.6)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-brand-200"
         >
           <span className="relative">
-            <MaahiAvatar className="h-9 w-9 ring-white/30" />
+            <MaahiAvatar className="h-9 w-9 ring-surface/30" />
             <span aria-hidden className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-ok ring-2 ring-brand-900" />
           </span>
           <MessageCircle className="sr-only" aria-hidden />

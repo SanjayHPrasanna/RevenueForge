@@ -74,8 +74,8 @@ const RFP_LINES = [
 ];
 const CAT_COLOR: Record<string, string> = {
   Functional: "bg-brand-50 text-brand-700 border-brand-200",
-  "Non-functional": "bg-[#EEF0FB] text-[#4A54A8] border-[#D5D9F4]",
-  Compliance: "bg-[#F3ECF8] text-[#7A3E9A] border-[#E3D2EE]",
+  "Non-functional": "bg-[rgb(110_120_230/.14)] text-[rgb(var(--cat-nf))] border-[#D5D9F4]",
+  Compliance: "bg-[rgb(170_90_210/.14)] text-[rgb(var(--cat-co))] border-[#E3D2EE]",
   Commercial: "bg-ember-50 text-ember-600 border-ember-100",
 };
 const MATCH: { s: string; t: string }[] = [
@@ -118,7 +118,7 @@ function HeroVisual() {
             {found} of {RFP_LINES.length - 1} requirements found on this page
           </div>
         </div>
-        <div className="border-t md:border-t-0 md:border-l border-line bg-[#FBFCFD] p-5 md:p-6">
+        <div className="border-t md:border-t-0 md:border-l border-line bg-paper p-5 md:p-6">
           <div className="text-[12.5px] font-semibold text-ink-muted mb-3">Extracted and matched</div>
           <ul className="divide-y divide-line-soft">
             {RFP_LINES.slice(1).map((l, i) => (
@@ -441,8 +441,8 @@ function Compare() {
           <table className="w-full min-w-[620px] text-[14.5px] text-left">
             <thead>
               <tr className="text-[13px]">
-                <th scope="col" className="w-[24%] px-5 py-3.5 font-semibold text-ink-muted bg-[#F8FAFB]"><span className="sr-only">Area</span></th>
-                <th scope="col" className="w-[32%] px-5 py-3.5 font-semibold text-ink-muted bg-[#F8FAFB]">Today</th>
+                <th scope="col" className="w-[24%] px-5 py-3.5 font-semibold text-ink-muted bg-paper"><span className="sr-only">Area</span></th>
+                <th scope="col" className="w-[32%] px-5 py-3.5 font-semibold text-ink-muted bg-paper">Today</th>
                 <th scope="col" className="px-5 py-3.5 font-semibold text-brand-800 bg-brand-50">With RevenueForge</th>
               </tr>
             </thead>
@@ -525,7 +525,7 @@ function Footer() {
 
 export default function Landing() {
   return (
-    <div className="bg-white">
+    <div data-theme="light" className="bg-white text-ink">
       <Header />
       <main>
         <Hero />

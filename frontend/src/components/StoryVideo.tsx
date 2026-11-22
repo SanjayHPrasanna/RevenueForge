@@ -33,8 +33,8 @@ function Player({ dealId, stamp }: { dealId: string; stamp?: string }) {
     return () => { alive = false; if (made) URL.revokeObjectURL(made); };
   }, [dealId, stamp]);
   if (err) return <div className="aspect-video grid place-items-center rounded-lg bg-paper text-[13px] text-fit-gap-ink">{err}</div>;
-  if (!url) return <div className="aspect-video grid place-items-center rounded-lg bg-brand-950"><Spinner className="h-6 w-6 text-white" /></div>;
-  return <video src={url} controls preload="metadata" className="w-full aspect-video rounded-lg bg-brand-950 shadow-card" />;
+  if (!url) return <div className="aspect-video grid place-items-center rounded-lg bg-brand-500"><Spinner className="h-6 w-6 text-white" /></div>;
+  return <video src={url} controls preload="metadata" className="w-full aspect-video rounded-lg bg-brand-500 shadow-card" />;
 }
 
 export default function StoryVideo({ dealId }: { dealId: string }) {
@@ -85,7 +85,7 @@ export default function StoryVideo({ dealId }: { dealId: string }) {
           <Player dealId={dealId} stamp={s.created_at} />
           <div className="space-y-3 text-[13px]">
             {s.stale && (
-              <div className="rounded-lg bg-[#FBF1DD] text-fit-partial-ink px-3 py-2.5 flex gap-2">
+              <div className="rounded-lg bg-fit-partial-soft text-fit-partial-ink px-3 py-2.5 flex gap-2">
                 <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
                 <span>The deal has changed since this video was made. <button className="font-semibold underline" onClick={() => make.mutate()}>Make it again</button> so it matches the proposal.</span>
               </div>
@@ -131,7 +131,7 @@ export function ProposalDownload({ dealId }: { dealId: string }) {
       <div className="grid grid-cols-2 rounded-lg border border-line p-1 bg-paper text-[13px] font-semibold" role="radiogroup" aria-label="What to download">
         {[[false, "Proposal only"], [true, "Proposal + video"]].map(([v, l]) => (
           <button key={String(v)} role="radio" aria-checked={withVideo === v} onClick={() => setWithVideo(v as boolean)}
-            className={clsx("h-8 rounded-md transition-colors", withVideo === v ? "bg-white shadow-card text-brand-900" : "text-ink-muted hover:text-ink")}>{l as string}</button>
+            className={clsx("h-8 rounded-md transition-colors", withVideo === v ? "bg-surface shadow-card text-brand-900" : "text-ink-muted hover:text-ink")}>{l as string}</button>
         ))}
       </div>
       {withVideo && !ready && <div className="text-[12px] text-fit-partial-ink mt-2">Make the solution video first (below the summary).</div>}

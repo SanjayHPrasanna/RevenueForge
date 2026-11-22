@@ -61,7 +61,7 @@ export function NoticeBar({ className = "", text }: { className?: string; text?:
   const notice = text !== undefined ? text : data?.notice;
   if (!notice) return null;
   return (
-    <div role="note" className={`bg-[#FBF1DD] text-[#6E4A06] border-b border-[#EED9A8] text-[13px] leading-snug px-4 py-2 text-center ${className}`}>
+    <div role="note" className={`bg-fit-partial-soft text-fit-partial-ink text-[13px] leading-snug px-4 py-2 text-center rounded-xl2 ${className}`}>
       {notice}
     </div>
   );
@@ -143,7 +143,7 @@ export function MicrosoftButton({ onCredential, label = "Sign in with Microsoft"
   };
   return (
     <button type="button" onClick={start} disabled={busy}
-      className="mb-3 flex h-10 w-full items-center justify-center gap-2.5 rounded-[10px] border border-[#8C8C8C]/40 bg-white text-[14px] font-semibold text-[#3C4043] transition-colors hover:bg-[#F7F8F8] disabled:opacity-60">
+      className="mb-3 flex h-10 w-full items-center justify-center gap-2.5 rounded-[10px] border border-[#8C8C8C]/40 bg-surface text-[14px] font-semibold text-[#3C4043] transition-colors hover:bg-paper disabled:opacity-60">
       <MicrosoftLogo /> {busy ? "Waiting for Microsoft…" : label}
     </button>
   );

@@ -5,7 +5,7 @@ import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-route
 import Shell from "./components/Shell";
 import { PageLoader, ToastProvider } from "./components/ui";
 import { TipProvider } from "./components/viz";
-import "@fontsource-variable/hanken-grotesk";
+import "@fontsource-variable/urbanist";
 import "@fontsource-variable/newsreader";
 import "./index.css";
 import { AuthProvider, useAuth } from "./lib/auth";
@@ -41,7 +41,7 @@ function NotFound() {
     <main className="min-h-screen grid place-items-center bg-paper px-4">
       <div className="text-center max-w-md">
         <div className="eyebrow mb-2">Page not found</div>
-        <h1 className="font-display text-[34px] leading-tight text-brand-950">We couldn't find that page</h1>
+        <h1 className="font-display font-semibold text-[26px] leading-tight text-brand-950">We couldn't find that page</h1>
         <p className="text-ink-muted text-[14px] mt-2">The link may be old or mistyped.</p>
         <div className="mt-6 flex justify-center gap-2">
           <a href="/" className="btn-outline">Home</a>

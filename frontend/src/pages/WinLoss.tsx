@@ -13,7 +13,7 @@ function Breakdown({ title, sub, rows, fmt = (s: string) => s }: { title: string
   const max = Math.max(1, ...rows.map((r) => r.won + r.lost));
   return (
     <section className="card card-hover p-5">
-      <h2 className="font-bold text-[15px]">{title}</h2>
+      <h2 className="font-bold text-[14px]">{title}</h2>
       <p className="text-[12.5px] text-ink-muted mt-0.5 mb-4">{sub}</p>
       {rows.length === 0 ? <div className="text-[13px] text-ink-muted">Not enough decided deals yet.</div> : (
         <ul className="space-y-3">
@@ -63,7 +63,7 @@ export default function WinLoss() {
     <div className="px-4 lg:px-8 py-7 max-w-[1400px]">
       <div className="stagger mb-6">
         <div className="eyebrow mb-1.5">Outcomes</div>
-        <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Win/loss insights</h1>
+        <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950">Win/loss insights</h1>
         <p className="text-ink-muted text-[14px] mt-1">What your won and lost deals have in common, so the next bid is priced and pitched better.</p>
       </div>
       {t.decided === 0 ? (
@@ -83,7 +83,7 @@ export default function WinLoss() {
             ]} />
           </div>
           <section className="card p-5 mt-5">
-            <h2 className="font-bold text-[15px]">Won compared with lost</h2>
+            <h2 className="font-bold text-[14px]">Won compared with lost</h2>
             <p className="text-[12.5px] text-ink-muted mt-0.5 mb-5">Averages across decided deals.</p>
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-x-8 gap-y-5">
               <Compare label="Bid readiness with the plan" won={wl.readiness[0]} lost={wl.readiness[1]} />
@@ -100,7 +100,7 @@ export default function WinLoss() {
               fmt={(s) => (s === "not_set" ? "Not set" : ENGAGEMENT[s] || s)} />
           </div>
           <section className="card mt-5 overflow-hidden">
-            <div className="px-5 py-4 border-b border-line"><h2 className="font-bold text-[15px]">Recent decisions</h2></div>
+            <div className="px-5 py-4 border-b border-line"><h2 className="font-bold text-[14px]">Recent decisions</h2></div>
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px]">
                 <thead><tr><th className="th">Deal</th><th className="th">Outcome</th><th className="th text-right">Price</th><th className="th text-right">Margin</th><th className="th text-right">Readiness</th><th className="th">Notes</th></tr></thead>

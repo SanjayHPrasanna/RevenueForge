@@ -22,7 +22,7 @@ const useTrust = () => useQuery({ queryKey: ["trust"], queryFn: () => api.get<Tr
 function Page({ title, eyebrow, children }: { title: string; eyebrow: string; children: ReactNode }) {
   return (
     <div className="min-h-screen bg-paper">
-      <header className="border-b border-line bg-white">
+      <header className="border-b border-line bg-surface">
         <div className="max-w-[920px] mx-auto px-6 h-14 flex items-center gap-4 text-[14px]">
           <Link to="/" className="inline-flex items-center gap-1.5 text-ink-muted hover:text-brand-900"><ArrowLeft className="h-4 w-4" /> RevenueForge</Link>
           <div className="flex-1" />
@@ -33,15 +33,15 @@ function Page({ title, eyebrow, children }: { title: string; eyebrow: string; ch
       </header>
       <main className="max-w-[920px] mx-auto px-6 py-10">
         <div className="eyebrow mb-1.5">{eyebrow}</div>
-        <h1 className="font-display text-[38px] leading-[1.05] tracking-[-0.025em] text-brand-950">{title}</h1>
-        <div className="mt-6 space-y-7 text-[15px] leading-relaxed text-ink-soft">{children}</div>
+        <h1 className="font-display font-semibold text-[28px] leading-[1.05] tracking-[-0.025em] text-brand-950">{title}</h1>
+        <div className="mt-6 space-y-7 text-[14px] leading-relaxed text-ink-soft">{children}</div>
       </main>
     </div>
   );
 }
 
 function H({ children }: { children: ReactNode }) {
-  return <h2 className="font-semibold text-[19px] text-ink mt-2 mb-2">{children}</h2>;
+  return <h2 className="font-semibold text-[16px] text-ink mt-2 mb-2">{children}</h2>;
 }
 
 function contact(t: Trust) {
@@ -63,7 +63,7 @@ export function TrustPage() {
       <section>
         <H>AI</H>
         <p>{t.ai.summary}</p>
-        {t.ai.training && <p className="mt-2 rounded-lg border border-line bg-white px-4 py-3 text-[14px]">{t.ai.training}
+        {t.ai.training && <p className="mt-2 rounded-lg border border-line bg-surface px-4 py-3 text-[14px]">{t.ai.training}
           {t.ai.terms_url && <> <a className="text-brand-700 underline inline-flex items-center gap-1" href={t.ai.terms_url} target="_blank" rel="noreferrer">Provider terms <ExternalLink className="h-3 w-3" /></a></>}</p>}
         <p className="mt-2">{t.company_ai_note}</p>
         <p className="mt-2">Nothing is decided by AI alone: every stage of a deal (requirements, matches, gaps, architecture, estimate, price,
@@ -96,7 +96,7 @@ export function TrustPage() {
           contact details are removed before storing; each tender links to the original notice.</p>
         <div className="space-y-2">
           {t.sources.map((s) => (
-            <div key={s.name} className="rounded-lg border border-line bg-white px-4 py-3 text-[14px]">
+            <div key={s.name} className="rounded-lg border border-line bg-surface px-4 py-3 text-[14px]">
               <div className="font-semibold">{s.name}{!s.enabled && <span className="ml-2 text-[12px] font-normal text-ink-muted">(not switched on)</span>}</div>
               <div className="text-ink-muted">{s.covers}</div>
               <div className="mt-1"><a className="text-brand-700 underline" href={s.licence_url} target="_blank" rel="noreferrer">{s.licence}</a> · {s.attribution}</div>

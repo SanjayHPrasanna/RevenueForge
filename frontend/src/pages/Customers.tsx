@@ -7,7 +7,7 @@ import { api, getToken } from "../lib/api";
 import { money } from "../lib/format";
 
 const BAND_STYLE: Record<string, string> = {
-  "Strong match": "bg-[#E4F1F7] text-fit-strong-ink", "Possible match": "bg-[#FBF1DD] text-fit-partial-ink", "Weak match": "bg-line-soft text-ink-muted",
+  "Strong match": "bg-fit-strong-soft text-fit-strong-ink", "Possible match": "bg-fit-partial-soft text-fit-partial-ink", "Weak match": "bg-line-soft text-ink-muted",
 };
 const REGIONS = ["Europe", "United Kingdom", "North America", "Latin America & Caribbean", "Middle East & North Africa", "Sub-Saharan Africa", "South Asia", "East Asia & Pacific", "Central Asia & Caucasus", "Other"];
 type Tab = "buying" | "before" | "renewals" | "customers";
@@ -19,7 +19,7 @@ function day(iso?: string | null) {
 function Score({ it }: { it: any }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="num font-bold text-[15px] w-8 text-right">{it.score}</span>
+      <span className="num font-bold text-[14px] w-8 text-right">{it.score}</span>
       <span className={clsx("chip whitespace-nowrap", BAND_STYLE[it.band] || BAND_STYLE["Weak match"])}>{it.band}</span>
     </div>
   );
@@ -97,7 +97,7 @@ export default function Customers() {
     <div className="px-4 lg:px-8 py-7 max-w-[1400px] space-y-5">
       <div className="stagger">
         <div className="eyebrow mb-1.5">Find customers</div>
-        <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Who could buy this product</h1>
+        <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950">Who could buy this product</h1>
         <p className="text-ink-muted text-[14px] mt-1">Pick a product from your library, or describe one you have built or plan to build. You'll see open tenders it could answer, who bought this kind of work before and from whom, and contracts ending in the next 6 to 18 months.</p>
       </div>
 
@@ -132,7 +132,7 @@ export default function Customers() {
           <div className="flex flex-wrap gap-1.5">
             {(r?.regions_available || REGIONS).map((g: string) => (
               <button key={g} aria-pressed={regions.includes(g)} onClick={() => setRegions((x) => x.includes(g) ? x.filter((y) => y !== g) : [...x, g])}
-                className={clsx("chip border", regions.includes(g) ? "bg-brand-700 text-white border-brand-700" : "bg-white border-line text-ink-soft hover:border-brand-400")}>{g}</button>
+                className={clsx("chip border", regions.includes(g) ? "bg-brand-700 text-white border-brand-700" : "bg-surface border-line text-ink-soft hover:border-brand-400")}>{g}</button>
             ))}
           </div>
         </div>

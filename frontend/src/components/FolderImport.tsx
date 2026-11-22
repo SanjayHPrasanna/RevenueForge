@@ -161,8 +161,8 @@ export default function FolderImport({ onDone, compact, autoStartFiles, driveSyn
           : `${result.files} files imported into your knowledge library`}</div>
         <div className="mt-3 grid sm:grid-cols-2 lg:grid-cols-4 gap-2">
           {TYPE_ORDER.filter((k) => c[k]).map((k) => (
-            <div key={k} className="rounded-lg bg-white border border-line px-3 py-2">
-              <div className="num text-[20px] font-bold text-brand-900 leading-none">{k === "template" ? "✓" : c[k]}</div>
+            <div key={k} className="rounded-lg bg-surface border border-line px-3 py-2">
+              <div className="num text-[17px] font-bold text-brand-900 leading-none">{k === "template" ? "✓" : c[k]}</div>
               <div className="text-[12.5px] text-ink-muted mt-1">{TYPE_LABEL[k]}</div>
             </div>
           ))}
@@ -186,7 +186,7 @@ export default function FolderImport({ onDone, compact, autoStartFiles, driveSyn
         onDragLeave={() => setOver(false)}
         onDrop={async (e) => { e.preventDefault(); setOver(false); if (!progress) start(await filesFromDrop(e.dataTransfer.items)); }}
         className={clsx("rounded-xl border-2 border-dashed text-center transition-colors", compact ? "px-5 py-6" : "px-6 py-10",
-          over ? "border-brand-500 bg-brand-50" : "border-brand-200 bg-gradient-to-b from-brand-50/70 to-white")}
+          over ? "border-brand-500 bg-brand-50" : "border-brand-200 bg-gradient-to-b from-brand-50/70 to-surface")}
       >
         <input ref={input} type="file" hidden multiple {...({ webkitdirectory: "", directory: "" } as any)}
           onChange={(e) => { const fs = Array.from(e.target.files || []); e.target.value = ""; start(fs.map((f) => ({ file: f, path: (f as any).webkitRelativePath || f.name }))); }} />
@@ -198,8 +198,8 @@ export default function FolderImport({ onDone, compact, autoStartFiles, driveSyn
           </div>
         ) : (
           <>
-            <div className="mx-auto h-12 w-12 rounded-2xl bg-white border border-brand-100 shadow-card grid place-items-center"><FolderUp className="h-6 w-6 text-brand-600" /></div>
-            <div className="mt-3 font-display text-[22px] text-brand-950 leading-tight">Import your whole knowledge folder</div>
+            <div className="mx-auto h-12 w-12 rounded-2xl bg-surface border border-brand-100 shadow-card grid place-items-center"><FolderUp className="h-6 w-6 text-brand-600" /></div>
+            <div className="mt-3 font-display font-semibold text-[18px] text-brand-950 leading-tight">Import your whole knowledge folder</div>
             <p className="mt-1.5 text-[14px] text-ink-soft max-w-xl mx-auto">
               Pick the folder with your capability decks, skills matrix, rate card, certifications, case studies and proposal template.
               RevenueForge reads every file and works out what each one is. You check it on one screen before anything is imported.
@@ -230,7 +230,7 @@ export default function FolderImport({ onDone, compact, autoStartFiles, driveSyn
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-        <div className="font-semibold text-[15px]">{driveSync ? `${rows.length} new or changed file${rows.length === 1 ? "" : "s"} from Google Drive` : `${rows.length} files from your folder`}</div>
+        <div className="font-semibold text-[14px]">{driveSync ? `${rows.length} new or changed file${rows.length === 1 ? "" : "s"} from Google Drive` : `${rows.length} files from your folder`}</div>
         <Stat n={ready.length} label="ready" cls="text-ok" />
         <Stat n={attention.length} label="to check" cls="text-fit-partial-ink" />
         <Stat n={left.length + skipped.length} label="left out" cls="text-ink-muted" />
@@ -242,7 +242,7 @@ export default function FolderImport({ onDone, compact, autoStartFiles, driveSyn
       <div className="card overflow-hidden">
         <div className="overflow-x-auto max-h-[min(60vh,560px)] scroll-thin">
           <table className="w-full min-w-[760px]">
-            <thead className="sticky top-0 z-10 bg-white">
+            <thead className="sticky top-0 z-10 bg-surface">
               <tr><th className="th">File</th><th className="th w-[230px]">What it is</th><th className="th">What we found</th></tr>
             </thead>
             <tbody>
@@ -294,7 +294,7 @@ export default function FolderImport({ onDone, compact, autoStartFiles, driveSyn
             </tbody>
           </table>
         </div>
-        <div className="px-4 py-3 border-t border-line flex flex-wrap items-center gap-x-4 gap-y-2 bg-white">
+        <div className="px-4 py-3 border-t border-line flex flex-wrap items-center gap-x-4 gap-y-2 bg-surface">
           <button className="btn-primary" disabled={pending > 0 || imp.isPending || !ready.length} onClick={() => imp.mutate()}>
             {imp.isPending && <Spinner />} Import {ready.length} file{ready.length === 1 ? "" : "s"}
           </button>

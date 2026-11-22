@@ -67,7 +67,7 @@ function StageRail({ deal, current, metric, onPick }: { deal: any; current: stri
             <li key={s.key} className="flex-none">
               <button onClick={() => onPick(s.key)} aria-current={active ? "page" : undefined}
                 className={clsx("w-full text-left px-3 pt-2.5 pb-3 border-b-2 -mb-px rounded-t-xl transition-all duration-200 ease-apple",
-                  active ? "border-brand-950 bg-white/80 shadow-[0_-6px_18px_-12px_rgba(8,43,61,.35)]" : "border-transparent hover:border-line hover:bg-white/50")}>
+                  active ? "border-brand-950 bg-surface/80 shadow-[0_-6px_18px_-12px_rgba(8,43,61,.35)]" : "border-transparent hover:border-line hover:bg-surface/50")}>
                 <span className="flex items-center gap-1.5">
                   <StepGlyph status={status} n={i} />
                   <span className={clsx("text-[13px] whitespace-nowrap", active ? "font-bold text-ink" : "font-medium text-ink-soft")}>
@@ -88,12 +88,12 @@ function StageRail({ deal, current, metric, onPick }: { deal: any; current: stri
 }
 
 function StepGlyph({ status, n }: { status: string; n: number }) {
-  if (status === "overview") return <span className="h-4 w-4 grid grid-cols-2 gap-[2px] shrink-0" aria-hidden>{[0, 1, 2, 3].map((i) => <span key={i} className="rounded-[1.5px] bg-brand-800" />)}</span>;
+  if (status === "overview") return <span className="h-4 w-4 grid grid-cols-2 gap-[2px] shrink-0" aria-hidden>{[0, 1, 2, 3].map((i) => <span key={i} className="rounded-[1.5px] bg-brand-500" />)}</span>;
   if (status === "approved") return <span className="h-4 w-4 rounded-full bg-ok text-white grid place-items-center shrink-0" aria-label="Approved"><Check className="h-2.5 w-2.5" strokeWidth={3.5} /></span>;
   if (status === "running") return <Spinner className="h-4 w-4 text-ember-500 shrink-0" />;
   return (
     <span className={clsx("h-4 w-4 rounded-full grid place-items-center text-[9.5px] font-bold num shrink-0 border-[1.5px]",
-      status === "draft" ? "border-brand-500 text-brand-700 bg-white" : "border-line text-ink-faint bg-white")} aria-label={status === "draft" ? "Ready to review" : "Waiting"}>{n}</span>
+      status === "draft" ? "border-brand-500 text-brand-700 bg-surface" : "border-line text-ink-faint bg-surface")} aria-label={status === "draft" ? "Ready to review" : "Waiting"}>{n}</span>
   );
 }
 
@@ -107,7 +107,7 @@ function Standfirst({ deal, est }: { deal: any; est: any }) {
     if (est?.headcount) s += `, delivered by ${plural(est.headcount, "person", "people")} over ${est.contract_months || est.duration_months} months`;
     parts.push(s + ".");
   }
-  return <p className="font-display text-[17px] md:text-[19px] leading-snug text-ink-soft mt-3 max-w-[72ch]">{parts.join(" ")}</p>;
+  return <p className="font-display font-semibold text-[15px] md:text-[16px] leading-snug text-ink-soft mt-3 max-w-[72ch]">{parts.join(" ")}</p>;
 }
 
 function Processing({ deal }: { deal: any }) {
@@ -119,7 +119,7 @@ function Processing({ deal }: { deal: any }) {
     <div className="card p-6 md:p-8 my-6">
       <div className="flex items-center gap-3">
         <Spinner className="h-5 w-5 text-ember-500" />
-        <div className="font-bold text-[17px]">{p.message || "Working on it"}</div>
+        <div className="font-bold text-[15px]">{p.message || "Working on it"}</div>
         <div className="flex-1" />
         <div className="num text-ink-muted text-sm">{p.pct ?? 0}%</div>
       </div>
@@ -136,7 +136,7 @@ function Processing({ deal }: { deal: any }) {
       </ol>
       {cfg?.email_notifications && user?.email && (
         <div className="mt-6 flex items-start gap-3 rounded-xl bg-brand-50/70 border border-brand-100 px-4 py-3 text-[13.5px] text-ink-soft">
-          <span className="h-8 w-8 shrink-0 rounded-lg bg-white border border-brand-100 grid place-items-center text-brand-600"><Mail className="h-4 w-4" aria-hidden /></span>
+          <span className="h-8 w-8 shrink-0 rounded-lg bg-surface border border-brand-100 grid place-items-center text-brand-600"><Mail className="h-4 w-4" aria-hidden /></span>
           <div>
             <div className="font-semibold text-ink">I’ll email you when it’s ready for review</div>
             <div className="mt-0.5">We’ll send a note to <span className="font-semibold text-ink">{user.email}</span>, so you can close this page and come back later.</div>
@@ -225,7 +225,7 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
       <Link to="/app/deals" className="text-[13px] text-ink-muted hover:text-ink inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" /> Deals</Link>
       <div className="mt-2 flex flex-wrap items-start gap-x-6 gap-y-3">
         <div className="min-w-[min(100%,30rem)] flex-1">
-          <h1 className="font-display text-[30px] md:text-[42px] leading-[1.04] tracking-[-0.025em] text-brand-950">{deal.name}</h1>
+          <h1 className="font-display font-semibold text-[24px] md:text-[30px] leading-[1.04] tracking-[-0.025em] text-brand-950">{deal.name}</h1>
           <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-ink-muted">
             <span className="inline-flex items-center gap-1.5 font-semibold text-ink-soft" title={deal.confidential ? "Client name masked" : undefined}>{deal.confidential && <EyeOff className="h-3.5 w-3.5" />}{deal.client}</span>
             <span>{deal.doc_type}</span>
@@ -278,7 +278,7 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
               </div>
             )}
             <div><label className="label">{outcome.status === "won" ? "Why we won" : "Why we lost"}</label><textarea className="input h-20 py-2" value={outcome.outcome_notes} onChange={(e) => setOutcome({ ...outcome, outcome_notes: e.target.value })} placeholder={outcome.status === "won" ? "e.g. strongest references, best transition plan" : "e.g. price, missing certification"} /></div>
-            {update.isError && <div role="alert" className="text-[13px] text-rose-700">{(update.error as any)?.message}</div>}
+            {update.isError && <div role="alert" className="text-[13px] text-fit-gap-ink">{(update.error as any)?.message}</div>}
             <button className="btn-primary" disabled={update.isPending}>Save outcome</button>
           </form>
         )}
@@ -289,7 +289,7 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
       </div>
 
       {deal.status === "failed" && (
-        <div className="card mt-4 p-4 border-[#F1C4C0] flex flex-wrap items-center gap-3 text-sm">
+        <div className="card mt-4 p-4 border-fit-gap/30 flex flex-wrap items-center gap-3 text-sm">
           <span className="text-fit-gap-ink font-semibold">{deal.progress?.message || "Processing stopped."}</span>
           <div className="flex-1" />
           <button className="btn-primary" onClick={() => rerun.mutate(deal.progress?.stage || "requirements")}>Try again</button>
@@ -305,7 +305,7 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
           <div className="flex flex-wrap items-start gap-3 mb-4">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-3">
-                <h2 className="text-[20px] font-bold tracking-tight">{STAGES.find((s) => s.key === stage)?.label}</h2>
+                <h2 className="text-[17px] font-bold tracking-tight">{STAGES.find((s) => s.key === stage)?.label}</h2>
                 {stageInfo && <StageStatus status={stageInfo.status} />}
                 {stageInfo?.approved_by && <span className="text-[12.5px] text-ink-muted">by {stageInfo.approved_by}</span>}
               </div>

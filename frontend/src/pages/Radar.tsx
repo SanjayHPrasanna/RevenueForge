@@ -16,7 +16,7 @@ type Item = {
 };
 
 const BAND_STYLE: Record<string, string> = {
-  "Strong fit": "bg-[#E4F1F7] text-fit-strong-ink", "Possible fit": "bg-[#FBF1DD] text-fit-partial-ink", "Weak fit": "bg-line-soft text-ink-muted",
+  "Strong fit": "bg-fit-strong-soft text-fit-strong-ink", "Possible fit": "bg-fit-partial-soft text-fit-partial-ink", "Weak fit": "bg-line-soft text-ink-muted",
 };
 
 function daysLeft(iso: string | null) {
@@ -39,7 +39,7 @@ function Fit({ score, band }: { score: number | null; band: string | null }) {
   if (score == null) return <span className="text-ink-faint">—</span>;
   return (
     <div className="flex items-center gap-2">
-      <span className="num font-bold text-[15px] w-8 text-right">{score}</span>
+      <span className="num font-bold text-[14px] w-8 text-right">{score}</span>
       <span className={clsx("chip whitespace-nowrap", BAND_STYLE[band || ""] || BAND_STYLE["Weak fit"])}>{band}</span>
     </div>
   );
@@ -225,7 +225,7 @@ function Detail({ id, onClose, onStart }: { id: string; onClose: () => void; onS
       <div className="flex items-start gap-2 px-5 pt-4 pb-3 border-b border-line-soft">
         <div className="min-w-0 flex-1">
           <div className="text-[12px] text-ink-muted">{t.source_name} · {t.notice_type || "Tender"}</div>
-          <h2 className="font-bold text-[15.5px] leading-snug mt-0.5">{t.title}</h2>
+          <h2 className="font-bold text-[14px] leading-snug mt-0.5">{t.title}</h2>
           <div className="text-[12.5px] text-ink-muted mt-1">{t.buyer} · {t.country}{t.region && t.region !== t.country ? `, ${t.region}` : ""}</div>
         </div>
         <button className="btn-ghost h-8 px-2" onClick={onClose} aria-label="Close detail"><X className="h-4 w-4" /></button>
@@ -262,7 +262,7 @@ function Detail({ id, onClose, onStart }: { id: string; onClose: () => void; onS
             {t.licence_url && <a href={t.licence_url} target="_blank" rel="noreferrer" className="underline">{t.licence}</a>}</p>}
         </div>
       </div>
-      <div className="sticky bottom-0 bg-white/95 backdrop-blur border-t border-line-soft px-5 py-3 flex flex-wrap gap-2">
+      <div className="sticky bottom-0 bg-surface/95 backdrop-blur border-t border-line-soft px-5 py-3 flex flex-wrap gap-2">
         {t.status === "deal" && t.deal_id ? (
           <Link to={`/app/deals/${t.deal_id}`} className="btn-primary">Open the deal</Link>
         ) : canBid ? (
@@ -312,7 +312,7 @@ export default function RadarPage() {
     <div className="px-4 lg:px-8 py-7 max-w-[1500px]">
       <div className="stagger mb-5">
         <div className="eyebrow mb-1.5">Opportunity radar</div>
-        <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Public tenders you could win</h1>
+        <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950">Public tenders you could win</h1>
         <p className="text-ink-muted text-[14px] mt-1">Open tenders from public procurement sources, scored against what your company has actually delivered.</p>
       </div>
       <Invitations />

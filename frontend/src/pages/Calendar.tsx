@@ -27,8 +27,8 @@ function Chip({ e }: { e: Ev }) {
   return (
     <Link to={e.link} title={deal ? `${e.title}${e.client ? ` (${e.client})` : ""} · owner ${e.owner?.name || "not set"}` : `${e.title} · ${e.buyer || ""}`}
       className={clsx("block truncate rounded-[5px] px-1.5 py-[2px] text-[11.5px] font-medium leading-tight border",
-        deal ? (e.closed ? "bg-paper border-line text-ink-muted line-through" : "bg-brand-800 border-brand-800 text-white")
-          : e.saved ? "bg-ember-50 border-ember-400 text-ember-600" : "bg-white border-line text-ink-soft border-dashed")}>
+        deal ? (e.closed ? "bg-paper border-line text-ink-muted line-through" : "bg-brand-500 border-brand-800 text-white")
+          : e.saved ? "bg-ember-50 border-ember-400 text-ember-600" : "bg-surface border-line text-ink-soft border-dashed")}>
       {deal ? <Briefcase className="inline h-3 w-3 -mt-px mr-1" /> : <Radar className="inline h-3 w-3 -mt-px mr-1" />}{e.title}
     </Link>
   );
@@ -94,7 +94,7 @@ function Row({ e, why }: { e: Ev; why?: string }) {
   if (e.kind === "deal") {
     return (
       <div className="flex items-start gap-3">
-        <span className="mt-0.5 h-7 w-7 rounded-lg bg-brand-800 text-white grid place-items-center shrink-0"><Briefcase className="h-3.5 w-3.5" /></span>
+        <span className="mt-0.5 h-7 w-7 rounded-lg bg-brand-500 text-white grid place-items-center shrink-0"><Briefcase className="h-3.5 w-3.5" /></span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2"><Link to={e.link} className="font-semibold text-[13.5px] hover:text-brand-700">{e.title}</Link><OwnerTag owner={e.owner} />
             {e.closed && <span className="chip bg-paper text-ink-muted capitalize">{e.status.replace("_", " ")}</span>}</div>
@@ -107,7 +107,7 @@ function Row({ e, why }: { e: Ev; why?: string }) {
   }
   return (
     <div className="flex items-start gap-3">
-      <span className={clsx("mt-0.5 h-7 w-7 rounded-lg grid place-items-center shrink-0 border", e.saved ? "bg-ember-50 border-ember-400 text-ember-600" : "bg-white border-line text-ink-muted")}><Radar className="h-3.5 w-3.5" /></span>
+      <span className={clsx("mt-0.5 h-7 w-7 rounded-lg grid place-items-center shrink-0 border", e.saved ? "bg-ember-50 border-ember-400 text-ember-600" : "bg-surface border-line text-ink-muted")}><Radar className="h-3.5 w-3.5" /></span>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2"><Link to={e.link} className="font-semibold text-[13.5px] hover:text-brand-700 line-clamp-1">{e.title}</Link>
           <span className={clsx("chip", e.saved ? "bg-ember-50 text-ember-600" : "bg-paper text-ink-muted")}>{e.saved ? "Saved" : `Strong fit · ${e.score}`}</span></div>
@@ -138,7 +138,7 @@ export default function CalendarPage() {
       <div className="flex flex-wrap items-end gap-4">
         <div className="flex-1 min-w-[260px]">
           <div className="eyebrow mb-1.5">Deadlines</div>
-          <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Every date that matters</h1>
+          <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950">Every date that matters</h1>
           <p className="text-ink-muted text-[14px] mt-1">Each deal's submission date and the closing date of every tender you saved or that fits you strongly.</p>
         </div>
         <button className="btn-outline" onClick={() => download(`/calendar/deadlines.ics?tenders=${tenders === "saved_strong" ? "saved" : tenders}`, "revenueforge-deadlines.ics").then(() => toast("ok", "Open the file to add the dates to Outlook or Google Calendar. Each has reminders 3 days and 1 day before.")).catch((e) => toast("error", e.message))}
@@ -166,7 +166,7 @@ export default function CalendarPage() {
       <div className="flex flex-wrap items-center gap-2">
         <button className="btn-ghost p-2" onClick={() => move(-1)} aria-label="Previous month"><ChevronLeft className="h-4 w-4" /></button>
         <button className="btn-ghost p-2" onClick={() => move(1)} aria-label="Next month"><ChevronRight className="h-4 w-4" /></button>
-        <div className="font-bold text-[17px] min-w-[180px]">{monthLabel}</div>
+        <div className="font-bold text-[15px] min-w-[180px]">{monthLabel}</div>
         <button className="btn-outline py-1.5 text-[13px]" onClick={() => { const d = new Date(); setCursor(new Date(d.getFullYear(), d.getMonth(), 1)); }}>Today</button>
         {isFetching && <Spinner />}
         <div className="flex-1" />
@@ -176,17 +176,17 @@ export default function CalendarPage() {
         </select>
         <label className="text-[13px] inline-flex items-center gap-1.5 text-ink-soft"><input type="checkbox" checked={hideClosed === "1"} onChange={(e) => setHideClosed(e.target.checked ? "1" : "0")} /> Hide submitted and closed deals</label>
         <div className="flex rounded-lg border border-line overflow-hidden">
-          <button className={clsx("px-2.5 py-1.5 text-[13px] inline-flex items-center gap-1", view === "month" ? "bg-brand-800 text-white" : "bg-white text-ink-soft")} onClick={() => setView("month")}><CalendarDays className="h-3.5 w-3.5" /> Month</button>
-          <button className={clsx("px-2.5 py-1.5 text-[13px] inline-flex items-center gap-1", view === "list" ? "bg-brand-800 text-white" : "bg-white text-ink-soft")} onClick={() => setView("list")}><List className="h-3.5 w-3.5" /> List</button>
+          <button className={clsx("px-2.5 py-1.5 text-[13px] inline-flex items-center gap-1", view === "month" ? "bg-brand-500 text-white" : "bg-surface text-ink-soft")} onClick={() => setView("month")}><CalendarDays className="h-3.5 w-3.5" /> Month</button>
+          <button className={clsx("px-2.5 py-1.5 text-[13px] inline-flex items-center gap-1", view === "list" ? "bg-brand-500 text-white" : "bg-surface text-ink-soft")} onClick={() => setView("list")}><List className="h-3.5 w-3.5" /> List</button>
         </div>
       </div>
 
       {isLoading || !data ? <div className="py-16 grid place-items-center"><Spinner /></div> : view === "month" ? <Month cursor={cursor} events={events} today={data.today} /> : <Agenda events={events} />}
 
       <div className="flex flex-wrap gap-4 text-[12px] text-ink-muted">
-        <span className="inline-flex items-center gap-1.5"><span className="h-3 w-5 rounded bg-brand-800" /> Deal submission</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-3 w-5 rounded bg-brand-500" /> Deal submission</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-3 w-5 rounded bg-ember-50 border border-ember-400" /> Saved tender closes</span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-3 w-5 rounded bg-white border border-dashed border-line" /> Strong-fit tender closes (not saved yet)</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-3 w-5 rounded bg-surface border border-dashed border-line" /> Strong-fit tender closes (not saved yet)</span>
       </div>
 
       {data?.undated?.length > 0 && (

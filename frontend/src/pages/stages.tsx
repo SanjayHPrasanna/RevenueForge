@@ -40,7 +40,7 @@ function SourcePanel({ dealId, req, onClose }: { dealId: string; req: any; onClo
         <button className="btn-ghost h-7 px-1.5" onClick={() => setPage(Math.min(data.pages, page + 1))} aria-label="Next page"><ChevronRight className="h-4 w-4" /></button>
         <button className="btn-ghost h-7 px-1.5" onClick={onClose} aria-label="Close source"><X className="h-4 w-4" /></button>
       </div>
-      <div ref={box} className="relative overflow-auto scroll-thin px-6 py-5 bg-[#FDFCFA] space-y-3">
+      <div ref={box} className="relative overflow-auto scroll-thin px-6 py-5 bg-paper space-y-3">
         {blocks.length === 0 && <div className="text-sm text-ink-muted">No text on this page (it may be an image).</div>}
         {blocks.map((b: any) => {
           const hit = b.idx === req.block_idx;
@@ -66,12 +66,12 @@ function ReqSide({ dealId, req, onClose }: { dealId: string; req: any; onClose: 
   return (
     <div className="min-w-0 self-start lg:sticky lg:top-[72px]">
       <div className="mb-2 flex items-center gap-1">
-        <div className="inline-flex rounded-xl border border-line bg-white p-0.5 shadow-card" role="tablist" aria-label={`${req.source_ref || req.code} details`}>
+        <div className="inline-flex rounded-xl border border-line bg-surface p-0.5 shadow-card" role="tablist" aria-label={`${req.source_ref || req.code} details`}>
           {([["source", "Source", BookOpen], ["talk", "Discussion", MessageSquare]] as const).map(([k, label, Icon]) => (
             <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-              className={clsx("inline-flex h-8 items-center gap-1.5 rounded-[10px] px-3 text-[12.5px] font-semibold transition-all", tab === k ? "bg-brand-900 text-white shadow-sm" : "text-ink-soft hover:text-ink")}>
+              className={clsx("inline-flex h-8 items-center gap-1.5 rounded-[10px] px-3 text-[12.5px] font-semibold transition-all", tab === k ? "bg-brand-500 text-white shadow-sm" : "text-ink-soft hover:text-ink")}>
               <Icon className="h-3.5 w-3.5" /> {label}
-              {k === "talk" && req.comments > 0 && <span className={clsx("num rounded-full px-1.5 text-[10.5px]", tab === k ? "bg-white/20" : "bg-ember-50 text-ember-600")}>{req.comments}</span>}
+              {k === "talk" && req.comments > 0 && <span className={clsx("num rounded-full px-1.5 text-[10.5px]", tab === k ? "bg-surface/20" : "bg-ember-50 text-ember-600")}>{req.comments}</span>}
             </button>
           ))}
         </div>
@@ -137,34 +137,34 @@ export function RequirementsStage({ deal }: P) {
       <div className="card p-5 mb-4 grid lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,0.8fr)] gap-x-8 gap-y-6">
         <div className="min-w-0">
           <div className="text-[12.5px] text-ink-muted">Requirements found</div>
-          <div className="font-display num text-[34px] leading-tight text-brand-950">{reqs.length}</div>
+          <div className="font-display num text-[26px] leading-tight text-brand-950">{reqs.length}</div>
           <div className="text-[12px] text-ink-muted mb-4">{st?.data?.pages ?? "—"} pages, {st?.data?.engine === "ai" ? "read by AI" : "read by the rules engine"}{st?.data?.learned_examples ? `, ${st.data.learned_examples} lessons from your team applied` : ""}</div>
           <div className="text-[12.5px] font-semibold text-ink-soft mb-2">By category <span className="font-normal text-ink-muted">· select one to filter</span></div>
           <div className="flex gap-[2px] h-[12px]">
             {CATEGORIES.map((c, i) => by(c) > 0 && (
               <button key={c} onClick={() => setCat(cat === c ? "" : c)} aria-label={`${c}: ${by(c)}`} className="h-full first:rounded-l last:rounded-r"
-                style={{ flex: by(c), background: ["#0C3D55", "#1A82AE", "#5BA6CC", "#9FC6D9"][i], opacity: cat && cat !== c ? 0.35 : 1 }} />
+                style={{ flex: by(c), background: ["rgb(var(--b500))", "rgb(var(--fit-strong))", "rgb(var(--b400) / .7)", "rgb(var(--b400) / .45)"][i], opacity: cat && cat !== c ? 0.35 : 1 }} />
             ))}
           </div>
           <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-[12.5px]">
             {CATEGORIES.map((c, i) => (
               <button key={c} onClick={() => setCat(cat === c ? "" : c)} className={clsx("inline-flex items-center gap-1.5", cat === c ? "font-semibold text-ink" : "text-ink-soft")}>
-                <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: ["#0C3D55", "#1A82AE", "#5BA6CC", "#9FC6D9"][i] }} />{c}<span className="num font-semibold text-ink">{by(c)}</span>
+                <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: ["rgb(var(--b500))", "rgb(var(--fit-strong))", "rgb(var(--b400) / .7)", "rgb(var(--b400) / .45)"][i] }} />{c}<span className="num font-semibold text-ink">{by(c)}</span>
               </button>
             ))}
           </div>
         </div>
         <div className="min-w-0">
           <div className="text-[12.5px] font-semibold text-ink-soft mb-3">Where they come from</div>
-          <Bars rows={sections.slice(0, 6).map(([k, n]) => ({ label: k, value: n }))} format={(v) => `${v}`} color="#1A82AE"
+          <Bars rows={sections.slice(0, 6).map(([k, n]) => ({ label: k, value: n }))} format={(v) => `${v}`} color="rgb(var(--fit-strong))"
             onPick={(label) => setQ(label)} />
         </div>
         <div className="min-w-0 lg:border-l lg:border-line-soft lg:pl-8">
           <div className="text-[12.5px] text-ink-muted">Classification accuracy</div>
-          <div className="font-display num text-[34px] leading-tight text-brand-950">{acc?.accuracy != null ? `${acc.accuracy}%` : "—"}</div>
+          <div className="font-display num text-[26px] leading-tight text-brand-950">{acc?.accuracy != null ? `${acc.accuracy}%` : "—"}</div>
           <div className="text-[12px] text-ink-muted">{acc?.reviewed ? `${acc.correct} of ${acc.reviewed} kept after review` : "Review rows to measure it"}</div>
           <button onClick={() => setReview(!review)} className={clsx("mt-5 w-full text-left rounded-md border px-3 py-2.5", review ? "border-ember-500 bg-ember-50" : "border-line hover:border-ember-400")}>
-            <div className="num text-[20px] font-bold text-ember-600 leading-none">{lowConf}</div>
+            <div className="num text-[17px] font-bold text-ember-600 leading-none">{lowConf}</div>
             <div className="text-[12.5px] text-ink-soft mt-1">{review ? "Showing only these. Select to show all." : "Low-confidence rows to check first"}</div>
           </button>
         </div>
@@ -340,7 +340,7 @@ export function MatchingStage({ deal }: P) {
         <div className="card">
           <div className="px-3 py-2.5 border-b border-line flex flex-wrap gap-2 items-center">
             {[["all", "Technical & compliance"], ["strong", "Strong"], ["partial", "Partial"], ["gap", "Gaps"], ["confirm", "To confirm"]].map(([k, l]) => (
-              <button key={k} onClick={() => setTab(k)} className={clsx("btn h-8 px-3", tab === k ? "bg-brand-900 text-white" : "text-ink-soft hover:bg-line-soft")}>
+              <button key={k} onClick={() => setTab(k)} className={clsx("btn h-8 px-3", tab === k ? "bg-brand-500 text-white" : "text-ink-soft hover:bg-line-soft")}>
                 {k === "all" && cat ? "All" : l} {k !== "all" && <span className="num opacity-80">{mix[k] || 0}</span>}
               </button>
             ))}
@@ -369,7 +369,7 @@ export function MatchingStage({ deal }: P) {
                         return <span key={i} className="chip bg-paper border border-line text-ink-soft font-medium"><I className="h-3 w-3 text-brand-600" />{e.name}</span>;
                       })}
                       {r.match?.people_count > 0 && <span className="chip bg-paper border border-line text-ink-soft font-medium"><Users className="h-3 w-3 text-brand-600" />{plural(r.match.people_count, "person", "people")}</span>}
-                      {(r.match?.technologies_missing || []).map((t: string) => <span key={t} className="chip bg-[#FBE7E5] text-fit-gap-ink">Missing: {t}</span>)}
+                      {(r.match?.technologies_missing || []).map((t: string) => <span key={t} className="chip bg-fit-gap-soft text-fit-gap-ink">Missing: {t}</span>)}
                     </div>
                   </div>
                   <div onClick={(e) => e.stopPropagation()} className="shrink-0">
@@ -392,8 +392,8 @@ export function MatchingStage({ deal }: P) {
 
 // =============================================================== 3. gaps
 const OPT_STYLE: Record<string, string> = {
-  Partner: "bg-[#EEF0FB] text-[#4A54A8]", Upskill: "bg-brand-50 text-brand-700", Hire: "bg-ember-50 text-ember-600",
-  Certify: "bg-[#F3ECF8] text-[#7A3E9A]", Build: "bg-line-soft text-ink-soft", "Strengthen evidence": "bg-ok-bg text-ok", "Define method": "bg-ok-bg text-ok",
+  Partner: "bg-[rgb(110_120_230/.14)] text-[rgb(var(--cat-nf))]", Upskill: "bg-brand-50 text-brand-700", Hire: "bg-ember-50 text-ember-600",
+  Certify: "bg-[rgb(170_90_210/.14)] text-[rgb(var(--cat-co))]", Build: "bg-line-soft text-ink-soft", "Strengthen evidence": "bg-ok-bg text-ok", "Define method": "bg-ok-bg text-ok",
 };
 const FIX_LABEL: Record<string, string> = {
   Partner: "Bring in a partner", Upskill: "Upskill the team", Hire: "Hire", Certify: "Get certified", Build: "Build it",
@@ -421,7 +421,7 @@ export function GapsStage({ deal }: P) {
       <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.9fr)] gap-4">
         <div className="card p-5">
           <div className="text-[12.5px] text-ink-muted">Bid recommendation</div>
-          <div className="font-display text-[28px] leading-tight text-brand-950 mt-0.5">{g.verdict}</div>
+          <div className="font-display font-semibold text-[22px] leading-tight text-brand-950 mt-0.5">{g.verdict}</div>
           <div className="mt-5"><ReadinessScale today={g.readiness} mitigated={g.mitigated_readiness} /></div>
           <div className="mt-3 text-[12.5px] text-ink-muted leading-relaxed">
             {g.coverage_pct}% of mandatory requirements are covered by what you have today. {g.high_risk} high-risk gaps{g.partner_led ? `, ${g.partner_led} best closed with a partner` : ""}.
@@ -430,7 +430,7 @@ export function GapsStage({ deal }: P) {
         <div className="card p-5">
           <div className="font-bold">Fix by type</div>
           <div className="text-[12.5px] text-ink-muted mb-4">Select one to show only those requirements.</div>
-          <Bars rows={Object.entries(fixes).sort((x, y) => y[1] - x[1]).map(([k, n]) => ({ label: FIX_LABEL[k] || k, value: n }))} format={(v) => `${v}`} color="#0C3D55"
+          <Bars rows={Object.entries(fixes).sort((x, y) => y[1] - x[1]).map(([k, n]) => ({ label: FIX_LABEL[k] || k, value: n }))} format={(v) => `${v}`} color="rgb(var(--b500))"
             highlight={fix ? FIX_LABEL[fix] || fix : undefined}
             onPick={(label) => { const k = Object.keys(fixes).find((x) => (FIX_LABEL[x] || x) === label) || ""; setFix(fix === k ? "" : k); }} />
         </div>
@@ -455,7 +455,7 @@ export function GapsStage({ deal }: P) {
         <div className="px-4 py-2.5 border-b border-line flex flex-wrap gap-2 items-center">
           <div className="font-bold mr-2">Mitigation plan</div>
           {["", ...order].map((k) => (
-            <button key={k || "all"} onClick={() => setRisk(k)} className={clsx("btn h-8 px-3", risk === k ? "bg-brand-900 text-white" : "text-ink-soft hover:bg-line-soft")}>
+            <button key={k || "all"} onClick={() => setRisk(k)} className={clsx("btn h-8 px-3", risk === k ? "bg-brand-500 text-white" : "text-ink-soft hover:bg-line-soft")}>
               {k ? `${k} risk` : "All risks"} <span className="num opacity-80">{k ? g.risk_counts?.[k] ?? 0 : all.length}</span>
             </button>
           ))}
@@ -474,7 +474,7 @@ export function GapsStage({ deal }: P) {
           const shown = isOpen ? sorted : sorted.slice(0, 4);
           return (
             <section key={k} className="border-b border-line last:border-0">
-              <div className="px-4 py-3.5 bg-[#F8FAFB] flex flex-wrap items-start gap-x-4 gap-y-1">
+              <div className="px-4 py-3.5 bg-paper flex flex-wrap items-start gap-x-4 gap-y-1">
                 <div className="flex-1 min-w-[220px]">
                   <div className="font-semibold text-[14px]">{FIX_LABEL[k] || k} <span className="text-ink-muted font-normal num">· {rs.length} requirement{rs.length === 1 ? "" : "s"}</span></div>
                   {shared && <div className="text-[13px] text-ink-soft mt-0.5">{shared}</div>}
@@ -515,10 +515,10 @@ export function GapsStage({ deal }: P) {
 // =============================================================== 4. architecture
 const SRC_STYLE: Record<string, string> = {
   "RFP-mandated": "border-brand-500 bg-brand-50 text-brand-900",
-  Proposed: "border-line bg-white text-ink",
+  Proposed: "border-line bg-surface text-ink",
   "Client-owned": "border-dashed border-ink-faint bg-paper text-ink-soft",
   "Partner product": "border-[#8C93D8] bg-[#EEF0FB] text-[#353D8C]",
-  "Assessment scope": "border-brand-200 bg-white text-ink",
+  "Assessment scope": "border-brand-200 bg-surface text-ink",
 };
 export function ArchitectureStage({ deal }: P) {
   const { data: st } = useStage(deal.id, "architecture");
@@ -530,7 +530,7 @@ export function ArchitectureStage({ deal }: P) {
   const a = st.data;
   return (
     <div className="space-y-4">
-      <div className="card p-5 text-[14.5px] leading-relaxed text-ink-soft">
+      <div className="card p-5 text-[13.5px] leading-relaxed text-ink-soft">
         <span className={clsx("chip mr-2", a.engine === "ai" ? "bg-brand-50 text-brand-700" : "bg-line-soft text-ink-muted")}>{a.engine === "ai" ? "AI-designed" : "Rules draft"}</span>{a.summary}
       </div>
       {a.not_in_library?.length > 0 && (
@@ -685,10 +685,10 @@ export function EstimationStage({ deal }: P) {
                 <td className="td">
                   <div className="flex flex-wrap gap-1">
                     {t.assigned.map((pp: any) => (
-                      <span key={pp.code} className={clsx("chip border", pp.status === "Available" ? "bg-white border-line text-ink-soft" : "bg-ember-50 border-ember-100 text-ember-600")}
+                      <span key={pp.code} className={clsx("chip border", pp.status === "Available" ? "bg-surface border-line text-ink-soft" : "bg-ember-50 border-ember-100 text-ember-600")}
                         title={`${pp.role}, ${pp.level}, ${pp.location}, ${pp.availability}% available${pp.fte != null ? `, ${pp.fte} FTE on this role` : ""}`}>{pp.code}{pp.fte != null && pp.fte < 1 ? ` · ${pp.fte}` : ""}</span>
                     ))}
-                    {t.unfilled > 0 && <span className="chip bg-[#FBE7E5] text-fit-gap-ink">{t.open_fte != null && t.open_fte % 1 ? `${t.open_fte} FTE open` : `+${t.unfilled} to hire`}</span>}
+                    {t.unfilled > 0 && <span className="chip bg-fit-gap-soft text-fit-gap-ink">{t.open_fte != null && t.open_fte % 1 ? `${t.open_fte} FTE open` : `+${t.unfilled} to hire`}</span>}
                   </div>
                 </td>
               </tr>
@@ -737,7 +737,7 @@ function OtherCosts({ deal, lines, current, m }: { deal: any; lines: any[]; curr
                       onClick={() => save.mutate({ [l.id]: { amount: Number(draft[l.id]) } })}>Save</button>
                     {l.amount > 0 && <button className="btn-ghost h-8 px-2 text-[12.5px]" disabled={save.isPending} onClick={() => save.mutate({ [l.id]: { confirmed: true } })}>Use estimate</button>}
                   </div>
-                ) : <span className="chip bg-white border border-line text-ink-soft">{l.needs_quote === false && l.basis.includes("entered") ? "Quoted" : "Confirmed"}</span>}
+                ) : <span className="chip bg-surface border border-line text-ink-soft">{l.needs_quote === false && l.basis.includes("entered") ? "Quoted" : "Confirmed"}</span>}
               </td>
             </tr>
           ))}
@@ -766,9 +766,9 @@ export function PricingStage({ deal }: P) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div className="text-[13px] text-ink-muted">Show in</div>
-        <div className="inline-flex rounded-md border border-line bg-white p-0.5">
+        <div className="inline-flex rounded-md border border-line bg-surface p-0.5">
           {(["rfp", "base"] as const).map((k) => (
-            <button key={k} onClick={() => setCcyView(k)} className={clsx("px-3 h-7 rounded text-[12.5px] font-semibold", ccyView === k ? "bg-brand-900 text-white" : "text-ink-soft")}>
+            <button key={k} onClick={() => setCcyView(k)} className={clsx("px-3 h-7 rounded text-[12.5px] font-semibold", ccyView === k ? "bg-brand-500 text-white" : "text-ink-soft")}>
               {k === "rfp" ? `${p.rfp_currency} (RFP)` : `${p.currency} (rate card)`}
             </button>
           ))}
@@ -785,7 +785,7 @@ export function PricingStage({ deal }: P) {
         const over = sel && sel.price > p.budget.high;
         const range = p.budget.low === p.budget.high ? m(p.budget.high) : `${m(p.budget.low)} – ${m(p.budget.high)}`;
         return (
-          <div role={over ? "alert" : undefined} className={clsx("card px-5 py-3.5 text-[13px]", over ? "border-rose-200 bg-rose-50/60 text-rose-800" : "border-emerald-200 bg-emerald-50/50 text-emerald-800")}>
+          <div role={over ? "alert" : undefined} className={clsx("card px-5 py-3.5 text-[13px]", over ? "border-fit-gap/30 bg-fit-gap-soft text-fit-gap-ink" : "border-ok/30 bg-ok/[.12] text-ok")}>
             <b>{over ? `The ${sel.name} price is ${sel.vs_budget_pct}% above the RFP's budget.` : `The ${sel?.name || "selected"} price is within the RFP's budget.`}</b>{" "}
             Stated budget: {range} ("{p.budget.stated}").
             {over && (p.budget.all_over ? " Every price option is above it: check the contract term, team size and scope before you bid." : " A lower option fits: compare the options below.")}
@@ -815,7 +815,7 @@ export function PricingStage({ deal }: P) {
                 <span className="font-bold">{s.name}</span>
                 {active && <span className="chip bg-ember-50 text-ember-600 ml-auto">In proposal</span>}
               </div>
-              <div className="font-display num text-[26px] leading-tight mt-2 text-brand-950">{m(s.price)}</div>
+              <div className="font-display num text-[21px] leading-tight mt-2 text-brand-950">{m(s.price)}</div>
               <div className="text-[12.5px] text-ink-muted mt-0.5"><span className={clsx("num font-semibold", below ? "text-fit-gap-ink" : "text-ink")}>{s.margin_pct}% margin</span>, {s.vs_list_pct > 0 ? "+" : ""}{s.vs_list_pct}% vs rate card</div>
               <div className="text-[12px] text-ink-muted mt-1">{s.note}</div>
             </button>
@@ -846,7 +846,7 @@ export function PricingStage({ deal }: P) {
             })()}
             {(() => {
               const sel = p.scenarios.find((x: any) => x.name === (p.selected || "Target")) || p.scenarios[0];
-              return <ShareBar fmt={m} parts={p.milestones.map((ms: any, i: number) => ({ label: ms.name, value: (sel.price * ms.pct) / 100, color: ["#0C3D55", "#1A82AE", "#5BA6CC", "#9FC6D9", "#C9DEE9"][i % 5] }))} />;
+              return <ShareBar fmt={m} parts={p.milestones.map((ms: any, i: number) => ({ label: ms.name, value: (sel.price * ms.pct) / 100, color: ["rgb(var(--b500))", "rgb(var(--fit-strong))", "rgb(var(--b400) / .7)", "rgb(var(--b400) / .45)", "rgb(var(--b400) / .25)"][i % 5] }))} />;
             })()}
           </div>
           <div className="card p-5 text-[13px] text-ink-soft space-y-1.5">
@@ -961,9 +961,9 @@ export function ProposalStage({ deal }: P) {
   return (
     <div className="space-y-4">
       <div className="grid lg:grid-cols-[minmax(0,1fr)_320px] gap-4">
-        <article className="card px-6 md:px-12 py-10 bg-[#FDFCFA]">
+        <article className="card px-6 md:px-12 py-10 bg-paper">
           <div className="font-sans text-[12px] font-semibold text-brand-700">Executive summary</div>
-          <h3 className="font-display text-[28px] leading-tight text-brand-950 mt-1 mb-5">{deal.name}</h3>
+          <h3 className="font-display font-semibold text-[22px] leading-tight text-brand-950 mt-1 mb-5">{deal.name}</h3>
           <div className="doc-text space-y-4 max-w-[68ch]">{(d.executive_summary || "").split("\n\n").map((p: string, i: number) => <p key={i}>{p}</p>)}</div>
         </article>
         <aside className="space-y-4">
@@ -975,7 +975,7 @@ export function ProposalStage({ deal }: P) {
               and deliverables acknowledged in the matrix, and {reqs.filter((r) => r.category === "Commercial").length} commercial terms in the appendix.
             </div>
             {deal.confidential && <div className="text-[12px] text-ink-muted mt-1">{deal.client_name ? `The document names the client as "${deal.client_name}"; the app and the AI only see "${deal.client_alias || "the Client"}".` : "No real client name was given when the deal was created, so the document says \u201cthe Client\u201d."}</div>}
-            <div className="num text-[22px] font-bold mt-3">{money(d.price, d.currency)}</div>
+            <div className="num text-[18px] font-bold mt-3">{money(d.price, d.currency)}</div>
             <div className="text-[12px] text-ink-muted">{d.scenario} pricing scenario</div>
             {edited && <button className="btn-ember w-full mt-4" disabled={rebuild.isPending} onClick={() => rebuild.mutate()}>{rebuild.isPending ? <Spinner /> : <RefreshCw className="h-4 w-4" />} Update document with edits</button>}
             <ProposalDownload dealId={deal.id} />
@@ -985,7 +985,7 @@ export function ProposalStage({ deal }: P) {
           {checks?.enabled && <ProposalChecks checks={checks} />}
           <div className="card p-5 text-[13px]">
             <div className="font-bold text-[14px] mb-2">Where the answers came from</div>
-            <ShareBar parts={[["library", "#0C3D55"], ["human", "#F5833A"], ["ai", "#1A82AE"], ["rules", "#9FC6D9"]].map(([k, c]) => ({ label: SRC[k][0], value: counts[k] || 0, color: c }))} />
+            <ShareBar parts={[["library", "rgb(var(--b500))"], ["human", "rgb(var(--e500))"], ["ai", "rgb(var(--fit-strong))"], ["rules", "rgb(var(--b400) / .45)"]].map(([k, c]) => ({ label: SRC[k][0], value: counts[k] || 0, color: c }))} />
             {(counts.rules || 0) > 0 && d.engine === "ai" && <div className="text-[12px] text-ember-600 mt-3">{counts.rules} answer{counts.rules === 1 ? "" : "s"} use the template because the AI couldn't write them (busy or out of quota). Use "Re-draft with AI" to try again; your team's edits are kept.</div>}
             <div className="text-[12px] text-ink-muted mt-3">Approving this stage adds these answers to your library, so the next similar RFP starts from them{checks?.enabled ? " (only answers that pass the checks)" : ""}.</div>
           </div>
@@ -996,7 +996,7 @@ export function ProposalStage({ deal }: P) {
         <div className="px-4 py-2.5 border-b border-line flex flex-wrap gap-2 items-center">
           <div className="font-bold mr-2">Answers in the compliance matrix</div>
           {[["all", "All"], ["library", "Library"], ["ai", "AI draft"], ["human", "Team-written"]].map(([k, l]) => (
-            <button key={k} onClick={() => setFilter(k)} className={clsx("btn h-8 px-3", filter === k ? "bg-brand-900 text-white" : "text-ink-soft hover:bg-line-soft")}>{l} <span className="num opacity-80">{k === "all" ? reqs.filter((r) => r.response).length : counts[k] || 0}</span></button>
+            <button key={k} onClick={() => setFilter(k)} className={clsx("btn h-8 px-3", filter === k ? "bg-brand-500 text-white" : "text-ink-soft hover:bg-line-soft")}>{l} <span className="num opacity-80">{k === "all" ? reqs.filter((r) => r.response).length : counts[k] || 0}</span></button>
           ))}
           <div className="flex-1" /><span className="text-[12px] text-ink-muted">Edit any answer; RevenueForge learns your team's style from rewrites.</span>
         </div>
@@ -1019,7 +1019,7 @@ export function HandoffStage({ deal }: P) {
   return (
     <div className="space-y-4">
       <div className="card p-5 flex flex-wrap items-center gap-4">
-        <div className="flex-1 min-w-[260px] text-[14.5px] text-ink-soft">{h.summary}</div>
+        <div className="flex-1 min-w-[260px] text-[13.5px] text-ink-soft">{h.summary}</div>
         <button className="btn-primary" onClick={() => download(`/deals/${deal.id}/download/handoff`, "handoff.docx").catch((e) => toast("error", e.message))}><Download className="h-4 w-4" /> Download handoff pack</button>
       </div>
       <div className="grid lg:grid-cols-2 gap-4">

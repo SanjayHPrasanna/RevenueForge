@@ -32,7 +32,7 @@ function Profile({ company, onSaved }: { company: any; onSaved: () => void }) {
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
   return (
     <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
-      <p className="text-ink-soft text-[14.5px]">Used in proposal boilerplate (“About us”) and to judge industry fit.</p>
+      <p className="text-ink-soft text-[13.5px]">Used in proposal boilerplate (“About us”) and to judge industry fit.</p>
       <div className="grid sm:grid-cols-2 gap-4">
         <div><label className="label">Company name</label><input className="input" value={f.name} onChange={set("name")} required /></div>
         <div><label className="label">Industry</label><input className="input" value={f.industry} onChange={set("industry")} placeholder="e.g. IT services – integration" required /></div>
@@ -83,7 +83,7 @@ export default function Onboarding() {
 
   return (
     <div className="min-h-screen bg-paper">
-      <header className="h-16 bg-white border-b border-line flex items-center px-4 md:px-8">
+      <header className="h-16 bg-surface border-b border-line flex items-center px-4 md:px-8">
         <ProductMark />
         <div className="flex-1" />
         <Link to="/app" className="btn-ghost">Go to workspace</Link>
@@ -94,7 +94,7 @@ export default function Onboarding() {
           <button
             onClick={() => setStep("folder")}
             className={clsx("w-full mb-3 flex items-center gap-3 rounded-lg px-2.5 py-2.5 text-left border transition-colors",
-              step === "folder" ? "bg-white shadow-card border-brand-200" : "bg-brand-50/70 border-brand-100 hover:bg-white")}
+              step === "folder" ? "bg-surface shadow-card border-brand-200" : "bg-brand-50/70 border-brand-100 hover:bg-surface")}
           >
             <span className="h-6 w-6 rounded-full grid place-items-center bg-brand-500 text-white shrink-0"><FolderUp className="h-3.5 w-3.5" /></span>
             <span className="flex-1 min-w-0">
@@ -108,7 +108,7 @@ export default function Onboarding() {
               <li key={s.key}>
                 <button
                   onClick={() => setStep(s.key)}
-                  className={clsx("w-full flex items-center gap-3 rounded-md px-2.5 h-10 text-left text-[14px]", s.key === step ? "bg-white shadow-card font-semibold" : "hover:bg-white/60")}
+                  className={clsx("w-full flex items-center gap-3 rounded-md px-2.5 h-10 text-left text-[14px]", s.key === step ? "bg-surface shadow-card font-semibold" : "hover:bg-surface/60")}
                 >
                   <span className={clsx("h-6 w-6 rounded-full grid place-items-center text-[11px] font-bold shrink-0",
                     steps[s.key] ? "bg-ok text-white" : s.key === step ? "bg-brand-500 text-white" : "bg-line text-ink-muted")}>
@@ -134,8 +134,8 @@ export default function Onboarding() {
         {step === "folder" ? (
           <section className="card p-6 md:p-8 min-w-0">
             <div className="text-[12.5px] text-ink-muted">Fastest way to set up</div>
-            <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950 mt-1 mb-2">Bring in everything at once</h1>
-            <p className="text-ink-soft text-[14.5px] mb-5">No need to upload files one by one. Point RevenueForge at the folder where your company knowledge lives, check what it found, and import it all in one go. You can still fix or add single files afterwards.</p>
+            <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950 mt-1 mb-2">Bring in everything at once</h1>
+            <p className="text-ink-soft text-[13.5px] mb-5">No need to upload files one by one. Point RevenueForge at the folder where your company knowledge lives, check what it found, and import it all in one go. You can still fix or add single files afterwards.</p>
             <FolderImport onDone={firstOpen} />
             <div className="mt-6 pt-5 border-t border-line-soft flex items-center">
               <div className="flex-1" />
@@ -145,7 +145,7 @@ export default function Onboarding() {
         ) : (
         <section className="card p-6 md:p-8 min-w-0">
           <div className="text-[12.5px] text-ink-muted num">Step {idx + 1} of {STEPS.length}</div>
-          <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950 mt-1 mb-4">{cur.key === "profile" ? "Tell us about your company" : cur.key === "template" ? "Your proposal template" : KIND_INFO[cur.key].title}</h1>
+          <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950 mt-1 mb-4">{cur.key === "profile" ? "Tell us about your company" : cur.key === "template" ? "Your proposal template" : KIND_INFO[cur.key].title}</h1>
           {cur.key === "profile" ? (
             <Profile company={company} onSaved={() => next("profile")} />
           ) : cur.key === "template" ? (

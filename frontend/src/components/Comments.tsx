@@ -76,7 +76,7 @@ export function CommentsPanel({ dealId, req }: { dealId: string; req: any }) {
         )}
         {comments?.map((c) => (
           <div key={c.id} className="group flex gap-2.5 anim-fade-in">
-            <span className="h-7 w-7 shrink-0 rounded-full bg-gradient-to-br from-brand-500 to-brand-900 text-white text-[11px] font-bold grid place-items-center">
+            <span className="h-7 w-7 shrink-0 rounded-full bg-gradient-to-br from-brand-500 to-brand-600 text-white text-[11px] font-bold grid place-items-center">
               {c.author.split(" ").map((p) => p[0]).slice(0, 2).join("")}
             </span>
             <div className="min-w-0 flex-1">
@@ -109,13 +109,13 @@ export function CommentsPanel({ dealId, req }: { dealId: string; req: any }) {
             ))}
           </ul>
         )}
-        <div className="flex items-end gap-2 rounded-2xl border border-line bg-paper px-3 py-2 transition-all focus-within:border-brand-400 focus-within:bg-white focus-within:ring-4 focus-within:ring-brand-500/10">
+        <div className="flex items-end gap-2 rounded-2xl border border-line bg-paper px-3 py-2 transition-all focus-within:border-brand-400 focus-within:bg-surface focus-within:ring-4 focus-within:ring-brand-500/10">
           <label className="sr-only" htmlFor={`c-${req.id}`}>Comment on {req.source_ref || req.code}</label>
           <textarea id={`c-${req.id}`} ref={box} rows={2} value={text} placeholder={`Comment on ${req.source_ref || req.code}… (@ to mention)`}
             onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); }} onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
             onClick={(e) => setCaret(e.currentTarget.selectionStart)} onKeyDown={onKey}
             className="min-h-[40px] max-h-40 flex-1 resize-y border-0 bg-transparent text-[13px] leading-relaxed focus:outline-none focus:ring-0" />
-          <button className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-700 text-white transition-all hover:bg-brand-800 active:scale-95 disabled:bg-line"
+          <button className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-brand-700 text-white transition-all hover:bg-brand-500 active:scale-95 disabled:bg-line"
             disabled={!text.trim() || add.isPending} onClick={() => add.mutate()} aria-label="Post comment">
             {add.isPending ? <Spinner className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
           </button>
