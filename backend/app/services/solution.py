@@ -612,7 +612,8 @@ def estimate(reqs: list[dict], kb: CompanyKB, meta: dict, arch: dict, overrides:
             team.append({"role": r["role"], "fte": r["fte"], "headcount": r["headcount"], "location": r["location"], "responsibility": r["responsibility"],
                          "phase": r["phase"], "months": r["months"], "person_days": round(r["fte"] * r["months"] * 21, 1), "assigned": r["assigned"],
                          "unfilled": r["unfilled"], "open_fte": r.get("open_fte", 0), "skills": r["skills"], "certs": r["certs"],
-                         "any_cert": r.get("any_cert", False), "min_years": r["min_years"], "serves": r["serves"]})
+                         "any_cert": r.get("any_cert", False), "min_years": r["min_years"], "serves": r["serves"],
+                         "preferred_certs": r.get("preferred_certs", []), "preferred_years": r.get("preferred_years", 0)})
         if not re.search(r"enhancement|change request|minor change", text_all):
             phases = [p for p in phases if not p["name"].startswith("Change & enhancement")]
         assumptions_extra = [a for a in assumptions_extra if "change squad" not in a]

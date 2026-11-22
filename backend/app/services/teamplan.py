@@ -508,8 +508,12 @@ def check_ai_plan(res, reqs: list[dict], profile: dict, phases: list[tuple[str, 
             continue
         out.append({"role": role, "fte": round(_round_q(fte), 2), "location": "Onsite" if str(x.get("location", "")).lower().startswith("on") else "Offshore",
                     "responsibility": str(x.get("why", ""))[:160] or f"{role} work", "phase": ph, "months": months[ph],
-                    "skills": [str(s)[:60] for s in (x.get("skills") or [])][:12], "certs": [str(s)[:80] for s in (x.get("certs") or [])][:6],
-                    "any_cert": True, "min_years": int(x.get("min_years") or 0), "serves": [str(s) for s in (x.get("serves") or [])][:20]})
+                    "skills": [str(s)[:60] for s in (x.get("skills") or [])][:12],
+                    # the AI's certificates and years are what a good fit looks like, not a filter: only a condition the RFP
+                    # states (merged in below from the rules plan) keeps a person out of a role
+                    "certs": [], "any_cert": True, "min_years": 0,
+                    "preferred_certs": [str(s)[:80] for s in (x.get("certs") or [])][:6], "preferred_years": int(x.get("min_years") or 0),
+                    "serves": [str(s) for s in (x.get("serves") or [])][:20]})
     if not out:
         return None
     served = {s for r in out for s in r["serves"]}
@@ -575,6 +579,10 @@ def assign(kb, rows: list[dict], committed: dict[str, float] | None = None) -> N
             if row["skills"] and not hits and tf < 2:
                 continue  # a close title alone doesn't carry a role that names technologies
             fit = sum(l for _, l in hits) + 2 * tf
+            if any(_has_cert(e, c) for c in row.get("preferred_certs") or []):
+                fit += 3
+            if row.get("preferred_years") and (e.get("years") or 0) >= row["preferred_years"]:
+                fit += 1
             f = free(e, row["phase"])
             if f < 0.25:
                 continue

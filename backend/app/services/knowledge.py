@@ -305,6 +305,21 @@ TECH_FAMILY = {t: f for f, ts in FAMILIES.items() for t in ts}
 PARTNER_PRODUCTS = {"Behavioral Biometrics", "Device Fingerprinting", "Geolocation Intelligence", "Bot Detection", "Fraud Monitoring Platform", "SIEM"}
 # Generic protocols/formats: never a gap on their own.
 COMMODITY_TECH = {"JSON", "XML", "REST APIs", "SOAP", "TCP/IP", "SFTP", "Git", "Agile/Scrum", "EHR/EMR", "HIS", "LIS", "RIS", "PACS", "iOS", "Android"}
+# words the AI or the reader tags as a "technology" that no one holds as a skill: what is being built (API, ETA, SMS),
+# a measure (RPO 1, RTO 4, SLA 99.5) or money (INR 10)
+GENERIC_TERMS = {"API", "APIS", "ETA", "SMS", "MMS", "OTP", "URL", "UI", "UX", "KYC", "SLA", "SLAS", "KPI", "KPIS", "RPO", "RTO", "MTTR",
+                 "MTBF", "UAT", "SIT", "DR", "BCP", "MIS", "FAQ", "L1", "L2", "L3", "INR", "USD", "EUR", "GBP", "AED", "GST", "VAT", "IT",
+                 "EMAIL", "E-MAIL", "PORTAL", "DASHBOARD", "DASHBOARDS", "MOBILE", "WEB"}
+
+
+def is_generic_term(t: str) -> bool:
+    """A tag that isn't a technology: shown as "missing" it reads as "Hire: API"."""
+    w = (t or "").strip().split()
+    if not w:
+        return True
+    if len(w) == 1:
+        return w[0].upper() in GENERIC_TERMS
+    return w[0].upper() in GENERIC_TERMS and all(re.fullmatch(r"[\d.,%]+|hours?|hrs?|minutes?|mins?|seconds?|days?|crores?|lakhs?|million", x, re.I) for x in w[1:])
 
 
 def best_subcategory(text: str, section: str, category: str) -> str:

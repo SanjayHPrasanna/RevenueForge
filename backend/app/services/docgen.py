@@ -283,8 +283,7 @@ def executive_summary(ctx: dict) -> str:
             facts = {
                 "client": client, "rfp_title": d["name"], "engagement": ENG_LABEL.get(d["engagement_type"], ""),
                 "company": company["name"], "company_about": company.get("about", ""), "requirements": len(ctx["requirements"]),
-                "technical_requirements": len(tech), "requirements_answered_with_capability_or_plan": counts.get("strong", 0) + counts.get("partial", 0) + planned_gaps,
-                "gaps_without_a_plan_do_not_claim_these": open_gaps,
+                "open_gaps_so_never_claim_every_requirement_is_met": open_gaps,
                 "team_size": est["headcount"], "duration_months": est["contract_months"],
                 "build_months": est.get("build_months") if d["engagement_type"] == "build_run" else None,
                 "managed_service_months": est.get("run_months"),
@@ -300,7 +299,8 @@ def executive_summary(ctx: dict) -> str:
                     raise ValueError("client name still in the facts; using the written summary instead")
             return llm.complete("You write crisp, factual executive summaries for enterprise proposals. Use only the facts given. 3 short paragraphs, "
                                 "no headings, no bullet points. This goes to the client: never give a breakdown of fully met, partly met or gap "
-                                "requirements (that scoring is internal), don't mention counts that are zero, don't describe the company as serving "
+                                "requirements and don't say how many requirements are covered or addressed (that scoring is internal: the compliance matrix "
+                                "answers each one), don't mention counts that are zero, don't describe the company as serving "
                                 "industries that aren't in the facts, and never say every requirement is met or covered unless the facts show "
                                 "no gaps without a plan.",
                                 f"Facts (JSON): {facts}", max_tokens=900).strip()
@@ -308,10 +308,8 @@ def executive_summary(ctx: dict) -> str:
             pass
     p1 = (f"{client} is seeking a partner for {d['name']}. {company['name']} proposes {_a(ENG_LABEL.get(d['engagement_type'], 'engagement'))} "
           f"in response to the {len(ctx['requirements'])} requirements identified in the RFP, including {len(tech)} functional and non-functional requirements.")
-    bits = [f"{counts.get('strong', 0)} requirements are met by proven, in-house capabilities"]
-    if counts.get("partial"):
-        bits.append(f"{counts['partial']} by extending them")
-    p2 = "; ".join(bits) + (f", and {planned_gaps} more are covered by the mitigation plan in this proposal. " if planned_gaps else ". ") \
+    p2 = ("Each requirement is answered in the compliance matrix, from capabilities we deliver today" +
+          (", with a mitigation plan where we extend them. " if planned_gaps or counts.get("partial") else ". ")) \
         + (f"[INTERNAL - remove before sending: {open_gaps} requirement{'s have' if open_gaps != 1 else ' has'} no capability or mitigation yet.] "
            if open_gaps else "") \
         + (f"Relevant references include {cs_txt}. " if cs_txt else "") + ctx["architecture"]["summary"]
