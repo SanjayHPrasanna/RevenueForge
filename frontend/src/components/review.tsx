@@ -171,7 +171,7 @@ export function LeftToFix({ deal }: { deal: any }) {
 }
 
 /** Owner line in the deal header, with a picker for the owner or an admin to hand the deal over. */
-export function OwnerPicker({ deal }: { deal: any }) {
+export function OwnerPicker({ deal, compact = false }: { deal: any; compact?: boolean }) {
   const { user } = useAuth();
   const qc = useQueryClient();
   const toast = useToast();
@@ -190,6 +190,17 @@ export function OwnerPicker({ deal }: { deal: any }) {
         {!deal.owner && <option value="">Pick an owner</option>}
         {people.filter((p) => p.active !== false && p.role !== "viewer").map((p) => <option key={p.id} value={p.id}>{p.name} · {ROLE_NAME[p.role] || p.role}</option>)}
       </select>
+    );
+  }
+  if (compact) {
+    const name = deal.owner?.name || "No owner";
+    const ini = name.split(" ").map((x: string) => x[0]).slice(0, 2).join("").toUpperCase();
+    return (
+      <button type="button" disabled={!canChange} onClick={() => setEditing(true)} title={canChange ? "Change the owner" : `Owner: ${name}`}
+        className="h-9 inline-flex items-center gap-2 rounded-[12px] pl-1 pr-3 text-[12.5px] text-ink-soft shadow-[inset_0_0_0_1px_rgb(var(--line)/.14)] enabled:hover:bg-ink/[.05] disabled:cursor-default">
+        <span className="h-7 w-7 rounded-full grid place-items-center text-[10.5px] font-bold text-white bg-gradient-to-br from-brand-400 to-brand-600">{deal.owner ? ini : "?"}</span>
+        <span className="max-w-[9rem] truncate capitalize">{deal.owner ? name.split(" ").map((w: string, i: number) => (i === 0 ? w.toLowerCase() : w[0] + ".")).join(" ") : "Pick owner"}</span>
+      </button>
     );
   }
   return (
@@ -219,11 +230,15 @@ export function DueDate({ deal }: { deal: any }) {
         onChange={(e) => e.target.value && set.mutate(e.target.value)} onBlur={() => !set.isPending && setEditing(false)} aria-label="Due date" />
     );
   }
-  const shown = isoGuess ? new Date(isoGuess + "T00:00:00").toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : deal.due_date;
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      {shown ? <span>Due {shown}</span> : <span className="text-ink-faint">No due date</span>}
-      {canEdit && <button className="text-[12px] text-brand-700 hover:underline" onClick={() => setEditing(true)}>{shown ? "Change" : "Set"}</button>}
-    </span>
-  );
+  const parsed = isoGuess ? new Date(isoGuess + "T00:00:00") : deal.due_date && !isNaN(Date.parse(deal.due_date)) ? new Date(Date.parse(deal.due_date)) : null;
+  const shown = parsed ? parsed.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) : deal.due_date;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = parsed ? Math.round((parsed.getTime() - today.getTime()) / 86400000) : null;
+  const open = !["won", "lost", "no_bid", "submitted"].includes(deal.status);
+  const when = days == null || !open ? "" : days < 0 ? ` · ${-days} day${days === -1 ? "" : "s"} overdue` : days === 0 ? " · due today" : ` · ${days} day${days === 1 ? "" : "s"} left`;
+  const tone = days == null || !open ? "" : days < 0 ? "text-fit-gap-ink font-semibold" : days <= 7 ? "text-ember-600 font-semibold" : "";
+  const label = shown ? `Due ${shown}${when}` : "No due date";
+  return canEdit ? (
+    <button type="button" className={clsx("hover:underline underline-offset-2", tone, !shown && "text-ink-faint")} onClick={() => setEditing(true)} title={shown ? "Change the due date" : "Set the due date"}>{shown ? label : "Set a due date"}</button>
+  ) : <span className={tone}>{label}</span>;
 }

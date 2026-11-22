@@ -50,7 +50,7 @@ def similar(db, deal: Deal, limit: int = 3) -> list[dict]:
             "id": d.id, "name": mask(d.name), "client": d.client_alias if d.confidential else d.client_name, "status": d.status,
             "industry": d.industry, "engagement_type": d.engagement_type, "created_at": d.created_at, "due_date": d.due_date,
             "similarity": round(score * 100), "common_technologies": sorted(tech0 & tech)[:8], "common_capabilities": sorted(caps0 & caps)[:5],
-            "readiness": g.get("mitigated_readiness"), "verdict": g.get("verdict"),
+            "readiness": g.get("readiness"), "verdict": g.get("verdict"),
             "value": round(sel["price"] * pr.get("fx_to_rfp", 1)) if sel else (d.final_value or None),
             "value_currency": pr.get("rfp_currency") or pr.get("currency") if sel else None,
             "margin_pct": sel["margin_pct"] if sel else None, "outcome_notes": mask(d.outcome_notes or "")[:240],

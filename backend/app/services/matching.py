@@ -661,6 +661,9 @@ def _is_standard(t: str) -> bool:
     return t.startswith("ISO ") or t in _STD_NAMES
 
 
+PLAN_CAP = 25  # most points a mitigation plan can add to today's readiness
+
+
 def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_options: dict | None = None,
                  products: set[str] | None = None) -> dict:
     """products: (generalised pipeline) named vendor products in this RFP; one the company lacks is partner-led."""
@@ -722,24 +725,39 @@ def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_
     else:
         coverage = 0.0
     high = sum(1 for r in gap_items if r["gap"]["risk"] == "High")
-    readiness = round(coverage * 100 - min(15, high * 1.5))
-    # Readiness once the recommended mitigations (partner, upskill, hire, certify) are in place.
-    credit = {"Partner": 0.75, "Upskill": 0.7, "Strengthen evidence": 0.9, "Define method": 0.85, "Hire": 0.55, "Build": 0.5, "Certify": 0.4}
+    readiness = max(0, round(coverage * 100 - min(15, high * 1.5)))
+    # Readiness once the recommended fixes are in place. A plan is a promise, not a capability: each fix earns partial
+    # credit, and the plan can add at most PLAN_CAP points to what the library shows today.
+    credit = {"Strengthen evidence": 0.85, "Partner": 0.6, "Define method": 0.6, "Upskill": 0.55, "Hire": 0.4, "Certify": 0.3, "Build": 0.3}
     if mand:
-        mitigated = sum(1.0 if r["match_status"] == "strong" else max(0.7, credit.get(r["gap"].get("recommended", ""), 0.5)) if r["match_status"] == "partial"
-                        else credit.get(r["gap"].get("recommended", ""), 0.3) for r in mand) / len(mand)
+        mitigated = sum(1.0 if r["match_status"] == "strong" else max(0.7, credit.get(r["gap"].get("recommended", ""), 0.4)) if r["match_status"] == "partial"
+                        else credit.get(r["gap"].get("recommended", ""), 0.25) for r in mand) / len(mand)
     else:
         mitigated = 0.0
-    mitigated_readiness = round(mitigated * 100)
+    mitigated_readiness = min(round(mitigated * 100), readiness + PLAN_CAP)
     partner_led = sum(1 for r in gap_items if r["gap"].get("recommended") == "Partner")
-    if readiness >= 70:
-        verdict = "Bid"
-    elif mitigated_readiness >= 70:
+    strong_n = sum(1 for r in mand if r["match_status"] == "strong")
+    library_empty = not (kb.capabilities or kb.employees or kb.case_studies or kb.accelerators or kb.certifications)
+    # The verdict follows what the company can show today. A mitigation plan can tip a close call into a bid, never a
+    # thin one: the words say plainly which it is.
+    if library_empty:
+        verdict, mitigated_readiness = "Can't assess", readiness
+        reason = "Your knowledge library is empty, so no requirement could be matched to anything you've done. Add your capabilities, people, certifications and case studies, then re-run the deal."
+    elif not mand:
+        verdict, reason = "Can't assess", "No mandatory requirements were found to score against. Check the Requirements stage."
+    elif readiness >= 70:
+        verdict, reason = "Bid", f"Your library covers {round(coverage * 100)}% of the mandatory requirements today."
+    elif readiness >= 50 and mitigated_readiness >= 70:
         verdict = "Bid with partners" if partner_led >= 3 else "Bid with mitigations"
-    elif mitigated_readiness >= 55:
+        reason = (f"Readiness is {readiness}% today. It reaches {mitigated_readiness}% only if the plan works: "
+                  f"{sum(1 for r in gap_items if r['gap'].get('recommended') == 'Hire')} hires, {partner_led} partners and the other fixes in Gaps & risks.")
+    elif readiness >= 35 and mitigated_readiness >= 55:
         verdict = "Qualify carefully"
+        reason = f"Readiness is {readiness}% today: too much of this RFP depends on capabilities you don't have yet. Bid only if the gaps can be closed before submission."
     else:
         verdict = "No bid"
+        reason = (f"Readiness is {readiness}% today: your library shows {strong_n} of {len(mand)} mandatory requirements met"
+                  f"{' and none partly' if not any(r['match_status'] == 'partial' for r in mand) else ''}. A mitigation plan can't make up that much.")
     top_missing = sorted(({"technology": t, "requirements": len(v), "codes": v[:8],
                            "recommendation": ("Partner" if t in K.PARTNER_PRODUCTS or t.lower() in products else "Certify" if _is_standard(t)
                                               else "Upskill" if families_have.get(K.TECH_FAMILY.get(t, "")) else "Hire")}
@@ -747,7 +765,7 @@ def analyze_gaps(reqs: list[dict], kb: CompanyKB, engagement_type: str = "", ai_
     counts = defaultdict(int)
     for r in reqs:
         counts[r["match_status"]] += 1
-    return {"coverage_pct": round(coverage * 100), "readiness": max(0, readiness), "mitigated_readiness": mitigated_readiness,
-            "verdict": verdict, "partner_led": partner_led, "counts": dict(counts),
+    return {"coverage_pct": round(coverage * 100), "readiness": readiness, "mitigated_readiness": mitigated_readiness,
+            "verdict": verdict, "verdict_reason": reason, "library_empty": library_empty, "partner_led": partner_led, "counts": dict(counts),
             "high_risk": high, "top_missing": top_missing[:12],
             "risk_counts": {k: sum(1 for r in gap_items if r["gap"]["risk"] == k) for k in ("High", "Medium", "Low")}}

@@ -98,7 +98,7 @@ export default function Dashboard() {
       <StatStrip items={[
         { label: "Pipeline value", value: money(k.pipeline_value, ccy), sub: `${money(k.weighted_pipeline, ccy)} weighted by bid readiness` },
         { label: "Active deals", value: k.active, sub: `${k.deals} in total, ${k.requirements.toLocaleString()} requirements analysed` },
-        { label: "Average bid readiness", value: k.avg_readiness != null ? `${k.avg_readiness}%` : "—", sub: "With mitigation plans in place" },
+        { label: "Average bid readiness", value: k.avg_readiness != null ? `${k.avg_readiness}%` : "—", sub: "What your library shows today" },
         { label: "Classification accuracy", value: k.classification_accuracy != null ? `${k.classification_accuracy}%` : "—", sub: k.reviewed ? `Measured on ${k.reviewed} reviewed requirements` : "Review requirements in a deal to measure it" },
         { label: "Win rate", value: k.win_rate != null ? `${k.win_rate}%` : "—", sub: `${k.won} won, ${k.lost} lost` },
       ]} />

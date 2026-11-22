@@ -421,8 +421,9 @@ export function GapsStage({ deal }: P) {
       <div className="grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.9fr)] gap-4">
         <div className="card p-5">
           <div className="text-[12.5px] text-ink-muted">Bid recommendation</div>
-          <div className="font-display font-semibold text-[22px] leading-tight text-brand-950 mt-0.5">{g.verdict}</div>
-          <div className="mt-5"><ReadinessScale today={g.readiness} mitigated={g.mitigated_readiness} /></div>
+          <div className={clsx("font-display font-semibold text-[22px] leading-tight mt-0.5", g.verdict === "No bid" ? "text-fit-gap-ink" : g.verdict === "Can't assess" ? "text-ink-muted" : "text-brand-950")}>{g.verdict}</div>
+          {g.verdict_reason && <div className="text-[12.5px] text-ink-soft mt-2 leading-relaxed">{g.verdict_reason}</div>}
+          {g.verdict !== "Can't assess" && <div className="mt-5"><ReadinessScale today={g.readiness} mitigated={g.mitigated_readiness} /></div>}
           <div className="mt-3 text-[12.5px] text-ink-muted leading-relaxed">
             {g.coverage_pct}% of mandatory requirements are covered by what you have today. {g.high_risk} high-risk gaps{g.partner_led ? `, ${g.partner_led} best closed with a partner` : ""}.
           </div>

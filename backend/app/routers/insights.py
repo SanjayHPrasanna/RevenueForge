@@ -85,16 +85,16 @@ def dashboard(ctx: Ctx = Depends(current_ctx)):
         deal_val, deal_ccy = price * pr.get("fx_to_rfp", 1), pr.get("rfp_currency") or base
         if d.status not in ("won", "lost", "no_bid"):  # the pipeline is open deals; a decided deal has left it
             pipeline_value += val_usd
-            weighted += val_usd * (g.get("mitigated_readiness", 50) / 100)
+            weighted += val_usd * (g.get("readiness", 0) / 100)  # weighted by what the company can show today
         if g.get("readiness") is not None:
-            readiness.append(g["mitigated_readiness"])
+            readiness.append(g["readiness"])
         if (d.meta or {}).get("first_draft_seconds"):
             first_draft.append(d.meta["first_draft_seconds"])
         approved = sum(1 for s in st.values() if s.status == "approved")
         mask = deal_masker(d)
         rows.append({"id": d.id, "name": mask(d.name), "client": d.client_alias if d.confidential else d.client_name, "status": d.status,
                      "industry": d.industry, "engagement_type": d.engagement_type, "value": deal_val if sel else 0, "value_currency": deal_ccy if sel else None, "margin_pct": sel["margin_pct"] if sel else None,
-                     "coverage_pct": g.get("coverage_pct"), "readiness": g.get("mitigated_readiness"), "verdict": g.get("verdict"),
+                     "coverage_pct": g.get("coverage_pct"), "readiness": g.get("readiness"), "mitigated_readiness": g.get("mitigated_readiness"), "verdict": g.get("verdict"),
                      "approved_stages": approved, "created_at": d.created_at, "due_date": d.due_date})
     from ..models import User
     names = {u.id: u.name for u in ctx.db.scalars(select(User).where(User.tenant_id == tid))}
@@ -180,7 +180,7 @@ def win_loss(ctx: Ctx = Depends(current_ctx)):
         mask = deal_masker(d)
         rows.append({"id": d.id, "name": mask(d.name), "client": d.client_alias if d.confidential else d.client_name, "status": d.status,
                      "industry": d.industry or "Not set", "engagement_type": d.engagement_type or "not_set", "value": round(value),
-                     "margin_pct": sel["margin_pct"] if sel else None, "readiness": g.get("mitigated_readiness"), "coverage": g.get("coverage_pct"),
+                     "margin_pct": sel["margin_pct"] if sel else None, "readiness": g.get("readiness"), "coverage": g.get("coverage_pct"),
                      "updated_at": d.updated_at, "notes": mask(d.outcome_notes or "")[:200]})
     decided = [r for r in rows if r["status"] in ("won", "lost")]
 
