@@ -264,7 +264,9 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
             g = gates_mod.evaluate(prof, kb, deal.industry or "", deal.due_date or "", rfp_text(db, deal))
             # an eligibility condition the library proves is met, whatever the capability scorer made of its wording:
             # the requirement row, the gap plan and the proposal must agree with the gate
-            passed = {x["ref"]: x for x in g["gates"] if x["status"] == "pass" and x["ref"]}
+            # only conditions the library proves (certificates, references, people, turnover); a rule on how to bid
+            # ("consortium bids are not allowed") is honoured, not a capability, so it stays "to confirm"
+            passed = {x["ref"]: x for x in g["gates"] if x["status"] == "pass" and x["ref"] and x.get("kind") != "other"}
             for r in reqs:
                 gt = passed.get(r.get("source_ref") or "") or passed.get(r.get("code") or "")
                 if not gt or r.get("match_status") == "strong":
@@ -304,7 +306,7 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
                 r["gap"] = gp
             summary["high_risk"] = sum(1 for r in reqs if (r.get("gap") or {}).get("risk") == "High")
             summary["risk_counts"] = {k: sum(1 for r in reqs if (r.get("gap") or {}).get("risk") == k) for k in ("High", "Medium", "Low")}
-            if g["verdict"]:
+            if g["verdict"] and not summary.get("library_empty"):
                 summary["verdict_before_gates"] = summary["verdict"]
                 summary["verdict"] = g["verdict"]
                 summary["verdict_reason"] = "Mandatory eligibility not met: " + ", ".join(g["failed"])

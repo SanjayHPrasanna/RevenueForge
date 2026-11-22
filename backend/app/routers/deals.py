@@ -78,7 +78,7 @@ def deal_out(ctx: Ctx, d: Deal, full: bool = False, pre: dict | None = None, use
         "industry": d.industry, "sector": d.sector, "region": d.region, "doc_type": d.doc_type, "engagement_type": d.engagement_type,
         "currency": d.currency, "due_date": d.due_date, "status": d.status, "progress": d.progress or {}, "created_at": d.created_at,
         "updated_at": d.updated_at, "requirement_count": req_count, "final_value": d.final_value, "outcome_notes": d.outcome_notes,
-        "coverage_pct": gaps.get("coverage_pct"), "readiness": gaps.get("readiness"), "mitigated_readiness": gaps.get("mitigated_readiness"),
+        "coverage_pct": gaps.get("coverage_pct"), "readiness": gaps.get("readiness"), "mitigated_readiness": gaps.get("mitigated_readiness"), "verdict_reason": gaps.get("verdict_reason"),
         "verdict": gaps.get("verdict"),
         "value": round(sel["price"] * pricing.get("fx_to_rfp", 1), 2) if sel else None, "value_currency": pricing.get("rfp_currency") if sel else None,
         "margin_pct": sel["margin_pct"] if sel else None,

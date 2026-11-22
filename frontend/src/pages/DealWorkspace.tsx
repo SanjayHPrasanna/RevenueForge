@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowLeft, Check, ChevronDown, Download, EyeOff, Mail, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Download, EyeOff, Info, LayoutGrid, Mail, RefreshCw, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Modal, PageLoader, Spinner, StageStatus, useToast } from "../components/ui";
@@ -31,83 +31,177 @@ const APPROVER: Record<string, string[]> = {
 };
 
 function useMetrics(deal: any) {
-  const { data: reqs } = useQuery({ queryKey: ["reqs", deal.id], queryFn: () => api.get<any[]>(`/deals/${deal.id}/requirements`), enabled: deal.status !== "processing" });
-  const { data: est } = useQuery({ queryKey: ["stage", deal.id, "estimation"], queryFn: () => api.get(`/deals/${deal.id}/stages/estimation`), enabled: deal.status !== "processing" });
-  const gaps = reqs?.filter((r) => r.match_status === "gap").length;
-  const partial = reqs?.filter((r) => r.match_status === "partial").length || 0;
+  const done = deal.status !== "processing";
+  const { data: reqs } = useQuery({ queryKey: ["reqs", deal.id], queryFn: () => api.get<any[]>(`/deals/${deal.id}/requirements`), enabled: done });
+  const { data: est } = useQuery({ queryKey: ["stage", deal.id, "estimation"], queryFn: () => api.get(`/deals/${deal.id}/stages/estimation`), enabled: done });
+  const { data: arch } = useQuery({ queryKey: ["stage", deal.id, "architecture"], queryFn: () => api.get(`/deals/${deal.id}/stages/architecture`), enabled: done });
+  const n = (k: string) => reqs?.filter((r) => r.match_status === k).length || 0;
+  const gaps = reqs ? n("gap") : undefined;
+  const partial = n("partial");
   const answers = reqs?.filter((r) => r.response).length;
+  const high = reqs?.filter((r) => r.gap?.risk === "High").length || 0;
+  const mandatory = reqs?.filter((r) => r.priority === "Mandatory").length;
   const e = (est as any)?.data;
+  const a = (arch as any)?.data;
+  const toHire = e?.team ? e.team.reduce((t: number, r: any) => t + (r.unfilled || 0), 0) : 0;
   return {
-    reqs, est: e,
+    reqs, est: e, gaps,
     metric: {
       overview: "",
       requirements: deal.requirement_count ? `${deal.requirement_count} found` : "",
       matching: deal.coverage_pct != null ? `${deal.coverage_pct}% covered` : "",
       gaps: gaps == null ? "" : gaps ? `${gaps} gap${gaps === 1 ? "" : "s"}` : partial ? `${partial} to mitigate` : "No gaps",
-      architecture: "",
+      architecture: a?.layers?.length ? plural(a.layers.length, "layer") : "",
       estimation: e?.headcount ? plural(e.headcount, "person", "people") : "",
       pricing: deal.value ? money(deal.value, deal.value_currency) : "",
       proposal: answers ? `${answers} answers` : "",
       handoff: "",
     } as Record<string, string>,
+    sub: {
+      requirements: mandatory != null ? `${mandatory} mandatory` : "",
+      matching: reqs ? `${n("strong")} strong · ${partial} partial` : "",
+      gaps: reqs ? (high ? `${high} high risk` : "No high-risk gaps") : "",
+      architecture: a?.choices?.length ? plural(a.choices.length, "technology choice") : "Layers and technology choices",
+      estimation: e ? `${e.contract_months || e.duration_months} months${toHire ? ` · ${toHire} to hire` : ""}` : "",
+      pricing: deal.margin_pct != null ? `${deal.margin_pct}% margin` : "",
+      proposal: "Summary, answers, compliance matrix",
+      handoff: "Scope, team, risks, first 30 days",
+    } as Record<string, string>,
   };
 }
 
-function StageRail({ deal, current, metric, onPick }: { deal: any; current: string; metric: Record<string, string>; onPick: (s: string) => void }) {
-  const st = Object.fromEntries(deal.stages.map((s: any) => [s.stage, s]));
-  const runningStage = deal.status === "processing" ? deal.progress?.stage : null;
-  const items = [{ key: "overview", label: "Overview", short: "Overview", role: "" }, ...STAGES];
+type StageState = "overview" | "approved" | "running" | "draft" | "pending";
+function stageState(deal: any, key: string): StageState {
+  if (key === "overview") return "overview";
+  if (deal.status === "processing" && deal.progress?.stage === key) return "running";
+  return (deal.stages.find((s: any) => s.stage === key)?.status || "pending") as StageState;
+}
+
+function StatusChip({ deal, k }: { deal: any; k: string }) {
+  const st = stageState(deal, k);
+  const info = deal.stages.find((s: any) => s.stage === k);
+  const by = info?.approved_by ? ` by ${info.approved_by.split(" ")[0]}` : "";
+  const [cls, label] = st === "approved" ? ["bg-ok/[.14] text-ok", `Approved${by}`] : st === "running" ? ["bg-ember-500/15 text-ember-600", "Working…"]
+    : st === "draft" ? ["bg-brand-500/15 text-brand-700", "Ready to review"] : ["bg-ink/[.07] text-ink-muted", "Waiting"];
+  return <span className={clsx("chip", cls)}>{label}</span>;
+}
+
+/** Inside a stage: the eight steps in one slim line, no scrolling. */
+function StageStrip({ deal, current, onPick }: { deal: any; current: string; onPick: (s: string) => void }) {
+  const items = [{ key: "overview", short: "Overview" }, ...STAGES];
   return (
-    <nav aria-label="Deal stages" className="overflow-x-auto scroll-thin -mx-4 px-4 lg:-mx-8 lg:px-8 border-b border-line">
-      <ol className="flex min-w-max">
-        {items.map((s, i) => {
-          const status = s.key === "overview" ? "overview" : runningStage === s.key ? "running" : st[s.key]?.status || "pending";
-          const active = current === s.key;
-          return (
-            <li key={s.key} className="flex-none">
-              <button onClick={() => onPick(s.key)} aria-current={active ? "page" : undefined}
-                className={clsx("w-full text-left px-3 pt-2.5 pb-3 border-b-2 -mb-px rounded-t-xl transition-all duration-200 ease-apple",
-                  active ? "border-brand-950 bg-surface/80 shadow-[0_-6px_18px_-12px_rgba(8,43,61,.35)]" : "border-transparent hover:border-line hover:bg-surface/50")}>
-                <span className="flex items-center gap-1.5">
-                  <StepGlyph status={status} n={i} />
-                  <span className={clsx("text-[13px] whitespace-nowrap", active ? "font-bold text-ink" : "font-medium text-ink-soft")}>
-                    <span className="min-[1400px]:hidden">{s.short}</span><span className="hidden min-[1400px]:inline">{s.label}</span>
-                  </span>
-                </span>
-                <span className={clsx("block text-[11.5px] mt-0.5 pl-[22px] whitespace-nowrap num", status === "pending" ? "text-ink-faint" : "text-ink-muted")}>
-                  {st[s.key]?.open_notes > 0 && <span className="mr-1.5 rounded-full bg-ember-500 text-white px-1.5 text-[10.5px] font-bold" title={`${st[s.key].open_notes} review notes to fix`}>{st[s.key].open_notes} to fix</span>}
-                  {status === "running" ? "Working…" : status === "approved" ? `Approved${st[s.key]?.approved_by ? ` by ${st[s.key].approved_by.split(" ")[0]}` : ""}` : metric[s.key] || (status === "pending" ? "Waiting" : status === "overview" ? "" : "Ready to review")}
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ol>
+    <nav aria-label="Deal stages" className="glass rounded-[18px] p-1.5 flex flex-wrap gap-1">
+      {items.map((s, i) => {
+        const active = current === s.key;
+        const st = stageState(deal, s.key);
+        const notes = deal.stages.find((x: any) => x.stage === s.key)?.open_notes || 0;
+        return (
+          <button key={s.key} onClick={() => onPick(s.key)} aria-current={active ? "page" : undefined}
+            className={clsx("flex-1 min-w-[96px] h-9 rounded-[12px] px-2.5 inline-flex items-center justify-center gap-2 text-[12.5px] font-semibold whitespace-nowrap transition-colors duration-200",
+              active ? "bg-brand-500 text-white shadow-btn" : "text-ink-soft hover:bg-ink/[.06] hover:text-ink")}>
+            <StepGlyph status={st} n={i} active={active} />
+            {s.short}
+            {notes > 0 && <span className="rounded-full bg-ember-500 text-white px-1.5 text-[10px] font-bold" title={`${notes} review notes to fix`}>{notes}</span>}
+          </button>
+        );
+      })}
     </nav>
   );
 }
 
-function StepGlyph({ status, n }: { status: string; n: number }) {
-  if (status === "overview") return <span className="h-4 w-4 grid grid-cols-2 gap-[2px] shrink-0" aria-hidden>{[0, 1, 2, 3].map((i) => <span key={i} className="rounded-[1.5px] bg-brand-500" />)}</span>;
-  if (status === "approved") return <span className="h-4 w-4 rounded-full bg-ok text-white grid place-items-center shrink-0" aria-label="Approved"><Check className="h-2.5 w-2.5" strokeWidth={3.5} /></span>;
-  if (status === "running") return <Spinner className="h-4 w-4 text-ember-500 shrink-0" />;
+/** On the overview: the overview card on top, then the eight stages as two rows of four big cards. */
+function StageGrid({ deal, metric, sub, onPick }: { deal: any; metric: Record<string, string>; sub: Record<string, string>; onPick: (s: string) => void }) {
+  const approved = deal.stages.filter((s: any) => s.status === "approved").length;
+  const bad = deal.verdict === "No bid";
   return (
-    <span className={clsx("h-4 w-4 rounded-full grid place-items-center text-[9.5px] font-bold num shrink-0 border-[1.5px]",
-      status === "draft" ? "border-brand-500 text-brand-700 bg-surface" : "border-line text-ink-faint bg-surface")} aria-label={status === "draft" ? "Ready to review" : "Waiting"}>{n}</span>
+    <section aria-label="Deal stages">
+      <div className="flex items-center justify-between mb-3 px-0.5">
+        <h2 className="text-[15px] font-semibold">Deal stages</h2>
+        <div className="flex items-center gap-3 text-[12.5px] text-ink-muted">
+          <span className="num">{approved} of 8 approved</span>
+          <span className="w-40 h-1.5 rounded-full bg-ink/[.1] overflow-hidden"><span className="block h-full bg-brand-500 rounded-full transition-all duration-500" style={{ width: `${(approved / 8) * 100}%` }} /></span>
+        </div>
+      </div>
+      <button onClick={() => onPick("overview")} className="card w-full text-left px-6 py-5 flex flex-wrap items-center gap-4 shadow-[inset_0_0_0_1.5px_rgb(var(--b500)/.7),var(--shadow)]">
+        <span className="h-11 w-11 rounded-[14px] grid place-items-center bg-brand-500/15 text-brand-600"><LayoutGrid className="h-5 w-5" /></span>
+        <span className="min-w-0">
+          <span className="block text-[16px] font-semibold">Overview</span>
+          <span className="block text-[13px] text-ink-muted mt-0.5">Coverage map, bid decision, how the client scores bids</span>
+        </span>
+        {deal.verdict && (
+          <span className="ml-auto text-right max-w-[52ch] flex flex-col items-end">
+            <span className={clsx("block text-[18px] font-semibold", bad ? "text-fit-gap-ink" : deal.verdict === "Can't assess" ? "text-ink-muted" : "text-ink")}>{deal.verdict}</span>
+            {deal.verdict_reason && <span className="text-[12.5px] text-ink-muted mt-0.5 line-clamp-2" title={deal.verdict_reason}>{deal.verdict_reason}</span>}
+          </span>
+        )}
+      </button>
+      {[STAGES.slice(0, 4), STAGES.slice(4)].map((row, r) => (
+        <div key={r} className="grid grid-cols-2 xl:grid-cols-4 gap-4 mt-4">
+          {row.map((s, j) => {
+            const i = r * 4 + j + 1;
+            const st = stageState(deal, s.key);
+            const notes = deal.stages.find((x: any) => x.stage === s.key)?.open_notes || 0;
+            const red = (s.key === "matching" && deal.coverage_pct === 0);
+            return (
+              <button key={s.key} onClick={() => onPick(s.key)} className="card card-hover text-left px-5 pt-4 pb-4 min-h-[148px] flex flex-col">
+                <span className="flex items-center gap-2.5">
+                  <StepGlyph status={st} n={i} big />
+                  <span className="text-[15px] font-semibold truncate">{s.label}</span>
+                  {notes > 0 && <span className="ml-auto chip bg-ember-500/15 text-ember-600" title="Review notes to fix">{notes} to fix</span>}
+                </span>
+                <span className={clsx("block text-[22px] font-semibold tracking-[-0.01em] mt-3.5 leading-tight num", red && "text-fit-gap-ink")}>{metric[s.key] || (st === "pending" ? "—" : "Ready")}</span>
+                <span className="block text-[12px] text-ink-muted mt-0.5 truncate">{sub[s.key]}</span>
+                <span className="mt-auto pt-3 flex items-center justify-between gap-2 text-[12px] text-ink-muted">
+                  <span>{s.role}</span>
+                  <StatusChip deal={deal} k={s.key} />
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ))}
+    </section>
   );
 }
 
-function Standfirst({ deal, est }: { deal: any; est: any }) {
+function StepGlyph({ status, n, active = false, big = false }: { status: StageState; n: number; active?: boolean; big?: boolean }) {
+  const size = big ? "h-7 w-7 rounded-[9px] text-[12px]" : "h-[18px] w-[18px] rounded-full text-[10px]";
+  if (status === "overview") return <LayoutGrid className={clsx(big ? "h-5 w-5" : "h-4 w-4", active ? "text-white" : "text-brand-600")} aria-hidden />;
+  if (status === "approved") return <span className={clsx(size, "bg-ok text-white grid place-items-center shrink-0")} aria-label="Approved"><Check className={big ? "h-3.5 w-3.5" : "h-2.5 w-2.5"} strokeWidth={3.5} /></span>;
+  if (status === "running") return <Spinner className={clsx(big ? "h-6 w-6" : "h-4 w-4", "text-ember-500 shrink-0")} />;
+  return (
+    <span className={clsx(size, "grid place-items-center font-bold num shrink-0",
+      active ? "bg-white/20 text-white" : status === "draft" ? "text-brand-700 shadow-[inset_0_0_0_1.5px_rgb(var(--b500)/.6)]" : "text-ink-faint shadow-[inset_0_0_0_1.5px_rgb(var(--line)/.25)]")}
+      aria-label={status === "draft" ? "Ready to review" : "Waiting"}>{n}</span>
+  );
+}
+
+/** The four numbers that matter, as tiles: today's readiness first, so the honest figure is the one people see. */
+function HeadlineTiles({ deal, est, gaps }: { deal: any; est: any; gaps?: number }) {
   if (deal.readiness == null) return null;
-  const parts: string[] = [];
-  parts.push(`${deal.requirement_count} requirements found.`);
-  parts.push(`Bid readiness is ${deal.readiness}% today and ${deal.mitigated_readiness}% with the mitigation plan.`);
-  if (deal.value) {
-    let s = `Priced at ${money(deal.value, deal.value_currency)} with a ${deal.margin_pct}% margin`;
-    if (est?.headcount) s += `, delivered by ${plural(est.headcount, "person", "people")} over ${est.contract_months || est.duration_months} months`;
-    parts.push(s + ".");
-  }
-  return <p className="font-display font-semibold text-[15px] md:text-[16px] leading-snug text-ink-soft mt-3 max-w-[72ch]">{parts.join(" ")}</p>;
+  const empty = deal.verdict === "Can't assess";
+  const low = deal.readiness < 35;
+  const tiles = [
+    { cls: low ? "kpi-gap" : "kpi-1", label: "Readiness today", value: empty ? "—" : `${deal.readiness}%`, tone: low && !empty ? "text-fit-gap-ink" : "",
+      sub: empty ? "Knowledge library is empty: nothing to match" : `${deal.mitigated_readiness}% only if the mitigation plan works` },
+    { cls: "kpi-1", label: "Price", value: deal.value ? money(deal.value, deal.value_currency) : "—", tone: "",
+      sub: empty ? "Estimate from market benchmark rates" : deal.margin_pct != null ? `${deal.margin_pct}% margin` : "" },
+    { cls: "kpi-2", label: "Team", value: est?.headcount ? plural(est.headcount, "person", "people") : "—", tone: "",
+      sub: est ? `${est.contract_months || est.duration_months} months${deal.engagement_type ? ` · ${(ENGAGEMENT[deal.engagement_type] || "").toLowerCase()}` : ""}` : "" },
+    { cls: "kpi-4", label: "Requirements", value: String(deal.requirement_count ?? "—"), tone: "",
+      sub: [gaps != null ? plural(gaps, "gap") : "", deal.coverage_pct != null ? `${deal.coverage_pct}% covered` : ""].filter(Boolean).join(" · ") },
+  ];
+  return (
+    <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mt-6">
+      {tiles.map((t) => (
+        <div key={t.label} className={clsx("card px-5 pt-4 pb-4 min-h-[108px] flex flex-col", t.cls)}>
+          <div className="text-[12.5px] font-semibold text-ink-muted">{t.label}</div>
+          <div className={clsx("num text-[24px] font-semibold tracking-[-0.01em] mt-2 leading-tight", t.tone)}>{t.value}</div>
+          <div className="text-[12px] text-ink-muted mt-auto pt-1.5 leading-snug">{t.sub}</div>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function Processing({ deal }: { deal: any }) {
@@ -221,24 +315,27 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
   const props = { deal, stage, onChanged: () => qc.invalidateQueries({ queryKey: ["deal", id] }) };
 
   return (
-    <div className="px-4 lg:px-8 py-5 max-w-[1500px]">
+    <div className="px-4 lg:px-6 py-6 max-w-[1480px]">
       <Link to="/app/deals" className="text-[13px] text-ink-muted hover:text-ink inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" /> Deals</Link>
-      <div className="mt-2 flex flex-wrap items-start gap-x-6 gap-y-3">
+      <div className="mt-3 flex flex-wrap items-start gap-x-6 gap-y-3">
         <div className="min-w-[min(100%,30rem)] flex-1">
-          <h1 className="font-display font-semibold text-[24px] md:text-[30px] leading-[1.04] tracking-[-0.025em] text-brand-950">{deal.name}</h1>
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-ink-muted">
-            <span className="inline-flex items-center gap-1.5 font-semibold text-ink-soft" title={deal.confidential ? "Client name masked" : undefined}>{deal.confidential && <EyeOff className="h-3.5 w-3.5" />}{deal.client}</span>
-            <span>{deal.doc_type}</span>
-            {deal.engagement_type && <span>{ENGAGEMENT[deal.engagement_type]}</span>}
-            {deal.industry && <span>{deal.industry}{deal.sector ? `, ${deal.sector.toLowerCase()} sector` : ""}</span>}
-            {deal.region && <span>{deal.region}</span>}
-            <DueDate deal={deal} />
-            <DealStatus s={deal.status} />
-            <OwnerPicker deal={deal} />
+          <div className="flex items-start gap-3">
+            <h1 className="min-w-0 font-display font-semibold text-[26px] md:text-[30px] leading-[1.1] tracking-[-0.02em] text-ink">{deal.name}</h1>
+            <span className="shrink-0 mt-2"><DealStatus s={deal.status} /></span>
           </div>
-          <Standfirst deal={deal} est={m.est} />
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13.5px] text-ink-muted">
+            {[
+              <span key="c" className="inline-flex items-center gap-1.5 font-semibold text-ink-soft" title={deal.confidential ? "Client name masked" : undefined}>{deal.confidential && <EyeOff className="h-3.5 w-3.5" />}{deal.client}</span>,
+              deal.doc_type && <span key="d">{deal.doc_type}</span>,
+              deal.engagement_type && <span key="e">{ENGAGEMENT[deal.engagement_type]}</span>,
+              deal.industry && <span key="i">{deal.industry}</span>,
+              deal.region && <span key="r">{deal.region}</span>,
+              <DueDate key="due" deal={deal} />,
+            ].filter(Boolean).flatMap((el, i) => (i ? [<span key={`s${i}`} className="text-ink-faint" aria-hidden>·</span>, el] : [el]))}
+          </div>
         </div>
-        <div className="flex gap-2 relative">
+        <div className="flex items-center gap-2 relative">
+          <OwnerPicker deal={deal} compact />
           <button className="btn-outline" onClick={() => setMenu(menu === "dl" ? null : "dl")} disabled={processing}><Download className="h-4 w-4" /> Download <ChevronDown className="h-3.5 w-3.5" /></button>
           <button className="btn-outline" aria-haspopup="menu" aria-expanded={menu === "outcome"} onClick={() => setMenu(menu === "outcome" ? null : "outcome")}>Outcome <ChevronDown className="h-3.5 w-3.5" /></button>
           {menu === "dl" && (
@@ -284,8 +381,12 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
         )}
       </Modal>
 
-      <div className="mt-6">
-        <StageRail deal={deal} current={stage} metric={m.metric} onPick={(s) => nav(`/app/deals/${id}/${s === "overview" ? "" : s}`)} />
+      <HeadlineTiles deal={deal} est={m.est} gaps={m.gaps} />
+
+      <div className="mt-8">
+        {stage === "overview" && !processing
+          ? <StageGrid deal={deal} metric={m.metric} sub={m.sub} onPick={(s) => nav(`/app/deals/${id}/${s === "overview" ? "" : s}`)} />
+          : <StageStrip deal={deal} current={stage} onPick={(s) => nav(`/app/deals/${id}/${s === "overview" ? "" : s}`)} />}
       </div>
 
       {deal.status === "failed" && (
@@ -299,18 +400,15 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
       {processing && (stage === "overview" || (stageInfo?.status !== "draft" && stageInfo?.status !== "approved")) ? (
         <Processing deal={deal} />
       ) : stage === "overview" ? (
-        <div className="mt-6"><LeftToFix deal={deal} /><OverviewStage deal={deal} /></div>
+        <div className="mt-8"><LeftToFix deal={deal} /><OverviewStage deal={deal} /></div>
       ) : (
         <div className="mt-6">
-          <div className="flex flex-wrap items-start gap-3 mb-4">
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-3">
-                <h2 className="text-[17px] font-bold tracking-tight">{STAGES.find((s) => s.key === stage)?.label}</h2>
-                {stageInfo && <StageStatus status={stageInfo.status} />}
-                {stageInfo?.approved_by && <span className="text-[12.5px] text-ink-muted">by {stageInfo.approved_by}</span>}
-              </div>
-              <p className="text-[13px] text-ink-muted mt-1 max-w-[80ch]">{STAGE_HELP[stage]}</p>
-            </div>
+          <div className="glass rounded-2xl px-5 py-3.5 flex flex-wrap items-center gap-3 mb-4">
+            <span className="h-7 w-7 rounded-[9px] grid place-items-center bg-brand-500 text-white text-[12px] font-bold num">{STAGES.findIndex((s) => s.key === stage) + 1}</span>
+            <h2 className="text-[17px] font-semibold tracking-[-0.01em]">{STAGES.find((s) => s.key === stage)?.label}</h2>
+            <StatusChip deal={deal} k={stage} />
+            <span className="text-ink-faint cursor-help" title={STAGE_HELP[stage]} aria-label={STAGE_HELP[stage]}><Info className="h-4 w-4" /></span>
+            <div className="flex-1" />
             {stageInfo?.status === "draft" && (
               <button className="btn-primary" disabled={!canApprove || approve.isPending} onClick={() => approve.mutate()} title={canApprove ? "" : `Needs the ${APPROVER[stage].join(" or ")} role`}>
                 {approve.isPending ? <Spinner /> : <Check className="h-4 w-4" />} Approve {STAGES.find((s) => s.key === stage)?.short.toLowerCase()}

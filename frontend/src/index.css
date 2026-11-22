@@ -153,6 +153,7 @@
   /* the one call to action on a page: the accent as a glowing panel */
   .accent-panel { background: linear-gradient(135deg, #5d86ff, #3d6bff 48%, #2449d8); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 18px 40px -20px rgb(61 107 255 / .7); }
   /* KPI tiles: glass with a soft hue */
+  .kpi-gap { background: linear-gradient(160deg, var(--glass-hi), transparent 46%), linear-gradient(rgb(var(--fit-gap-bg) / .13), rgb(var(--fit-gap-bg) / .13)), var(--card) !important; }
   .kpi-1 { background: linear-gradient(160deg, var(--glass-hi), transparent 46%), linear-gradient(rgb(var(--b500) / .14), rgb(var(--b500) / .14)), var(--card) !important; }
   .kpi-2 { background: linear-gradient(160deg, var(--glass-hi), transparent 46%), linear-gradient(rgb(20 160 210 / .13), rgb(20 160 210 / .13)), var(--card) !important; }
   .kpi-3 { background: linear-gradient(160deg, var(--glass-hi), transparent 46%), linear-gradient(rgb(20 170 130 / .12), rgb(20 170 130 / .12)), var(--card) !important; }

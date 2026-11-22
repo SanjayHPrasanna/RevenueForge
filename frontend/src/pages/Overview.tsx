@@ -1,3 +1,4 @@
+import clsx from "clsx";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, History } from "lucide-react";
 import { useMemo } from "react";
@@ -90,12 +91,13 @@ export function OverviewStage({ deal }: { deal: any }) {
 
         <div className="space-y-4 min-w-0">
           <Panel title="Bid decision">
-            <div className="font-display font-semibold text-[24px] leading-tight text-brand-950">{deal.verdict || "Not scored yet"}</div>
-            {deal.readiness != null && (
+            <div className={clsx("font-display font-semibold text-[24px] leading-tight", deal.verdict === "No bid" ? "text-fit-gap-ink" : deal.verdict === "Can't assess" ? "text-ink-muted" : "text-brand-950")}>{deal.verdict || "Not scored yet"}</div>
+            {deal.verdict_reason && <p className="text-[13px] text-ink-soft mt-2 leading-relaxed">{deal.verdict_reason}</p>}
+            {deal.readiness != null && deal.verdict !== "Can't assess" && (
               <div className="mt-5">
                 <ReadinessScale today={deal.readiness} mitigated={deal.mitigated_readiness ?? deal.readiness} />
                 <p className="text-[13px] text-ink-soft mt-3 leading-relaxed">
-                  Readiness is <b className="num">{deal.readiness}%</b> with what you have today and <b className="num">{deal.mitigated_readiness}%</b> once the mitigation plan is in place.
+                  Readiness is <b className="num">{deal.readiness}%</b> from what your library shows today, and <b className="num">{deal.mitigated_readiness}%</b> only if every fix in the mitigation plan works.
                   {deal.coverage_pct != null && <> Your library covers <b className="num">{deal.coverage_pct}%</b> of the mandatory requirements.</>}
                 </p>
               </div>
