@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,7 +7,11 @@
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="apple-touch-icon" href="/brand/apple-touch-icon.png" />
     <meta name="description" content="RevenueForge turns an RFP into a reviewed requirement set, capability match, solution, estimate, priced proposal and delivery handoff." />
-    <meta name="theme-color" content="#0C3D55" />
+    <meta name="theme-color" content="#050a18" />
+    <script>
+      // theme before first paint: the person's choice, dark by default
+      try { var t = localStorage.getItem("rf-theme"); document.documentElement.setAttribute("data-theme", t === "light" ? "light" : "dark"); } catch (e) {}
+    </script>
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="RevenueForge" />
     <meta property="og:title" content="RevenueForge: from RFP to priced proposal" />

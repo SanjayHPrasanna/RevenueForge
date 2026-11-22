@@ -15,7 +15,7 @@ function Panel({ title, sub, action, children, className = "" }: { title: string
     <section className={`card p-5 md:p-6 min-w-0 flex flex-col ${className}`}>
       <div className="flex items-start gap-3 mb-4">
         <div className="min-w-0 flex-1">
-          <h3 className="font-bold text-[15.5px] text-ink">{title}</h3>
+          <h3 className="font-bold text-[14px] text-ink">{title}</h3>
           {sub && <p className="text-[12.5px] text-ink-muted mt-0.5 leading-snug">{sub}</p>}
         </div>
         {action}
@@ -90,7 +90,7 @@ export function OverviewStage({ deal }: { deal: any }) {
 
         <div className="space-y-4 min-w-0">
           <Panel title="Bid decision">
-            <div className="font-display text-[30px] leading-tight text-brand-950">{deal.verdict || "Not scored yet"}</div>
+            <div className="font-display font-semibold text-[24px] leading-tight text-brand-950">{deal.verdict || "Not scored yet"}</div>
             {deal.readiness != null && (
               <div className="mt-5">
                 <ReadinessScale today={deal.readiness} mitigated={deal.mitigated_readiness ?? deal.readiness} />
@@ -104,12 +104,12 @@ export function OverviewStage({ deal }: { deal: any }) {
           {mitigations.length > 0 && (
             <Panel title="How the plan closes the gaps" sub="Recommended fix for each gap or partial match. Select one to see those requirements."
               action={<Link to={`/app/deals/${deal.id}/gaps`} className="text-[13px] font-semibold text-brand-700 hover:underline whitespace-nowrap">Open gaps</Link>}>
-              <Bars rows={mitigations.map(([k, n]) => ({ label: MITIGATION_LABEL[k] || k, value: n }))} format={(v) => `${v}`} color="#0C3D55"
+              <Bars rows={mitigations.map(([k, n]) => ({ label: MITIGATION_LABEL[k] || k, value: n }))} format={(v) => `${v}`} color="rgb(var(--b500))"
                 onPick={(label) => { const k = mitigations.find(([key]) => (MITIGATION_LABEL[key] || key) === label)?.[0]; nav(`/app/deals/${deal.id}/gaps${k ? `?fix=${encodeURIComponent(k)}` : ""}`); }} />
               {missing.length > 0 && (
                 <div className="mt-4 pt-4 border-t border-line-soft">
                   <div className="text-[12.5px] text-ink-muted mb-2">Technologies the RFP names that you don't have</div>
-                  <div className="flex flex-wrap gap-1.5">{missing.map((m: any) => <span key={m.technology} className="chip bg-[#FBE7E5] text-fit-gap-ink">{m.technology}</span>)}</div>
+                  <div className="flex flex-wrap gap-1.5">{missing.map((m: any) => <span key={m.technology} className="chip bg-fit-gap-soft text-fit-gap-ink">{m.technology}</span>)}</div>
                 </div>
               )}
             </Panel>
@@ -131,9 +131,9 @@ export function OverviewStage({ deal }: { deal: any }) {
             <PriceLadder cost={p.total_cost} floorMargin={p.min_margin} scenarios={p.scenarios} selected={p.selected || "Target"} list={p.list_price} fmt={fmt}
               onPick={() => nav(`/app/deals/${deal.id}/pricing`)} />
             <dl className="grid grid-cols-3 lg:grid-cols-1 gap-4 lg:border-l lg:border-line-soft lg:pl-8">
-              <div><dt className="text-[12px] text-ink-muted">Proposed price</dt><dd className="font-display num text-[20px] sm:text-[24px] leading-tight text-brand-950">{fmt(deal.value / fx)}</dd></div>
-              <div><dt className="text-[12px] text-ink-muted">Margin</dt><dd className="font-display num text-[20px] sm:text-[24px] leading-tight text-brand-950">{deal.margin_pct}%</dd></div>
-              <div><dt className="text-[12px] text-ink-muted">Total cost</dt><dd className="font-display num text-[20px] sm:text-[24px] leading-tight text-brand-950">{fmt(p.total_cost)}</dd></div>
+              <div><dt className="text-[12px] text-ink-muted">Proposed price</dt><dd className="font-display num text-[17px] sm:text-[20px] leading-tight text-brand-950">{fmt(deal.value / fx)}</dd></div>
+              <div><dt className="text-[12px] text-ink-muted">Margin</dt><dd className="font-display num text-[17px] sm:text-[20px] leading-tight text-brand-950">{deal.margin_pct}%</dd></div>
+              <div><dt className="text-[12px] text-ink-muted">Total cost</dt><dd className="font-display num text-[17px] sm:text-[20px] leading-tight text-brand-950">{fmt(p.total_cost)}</dd></div>
             </dl>
           </div>
         </Panel>
@@ -161,12 +161,12 @@ function NextStep({ deal }: { deal: any }) {
     <div className="card p-5 flex items-center gap-4"><div className="flex-1 text-[14px]">Every stage is approved. Download the proposal and the handoff pack from the menu at the top.</div></div>
   ) : null;
   return (
-    <div className="rounded-lg bg-brand-950 text-white p-5 md:p-6 flex flex-wrap items-center gap-4">
+    <div className="accent-panel rounded-2xl text-white px-6 py-5 flex flex-wrap items-center gap-4">
       <div className="flex-1 min-w-[240px]">
-        <div className="text-[13px] text-brand-200">{approved} of 8 stages approved</div>
-        <div className="font-display text-[22px] mt-0.5">Next, {APPROVER_ROLE[next.stage]} reviews {STAGE_LABEL[next.stage]}.</div>
+        <div className="text-[13px] text-white/75">{approved} of 8 stages approved</div>
+        <div className="font-display font-semibold text-[18px] mt-0.5">Next, {APPROVER_ROLE[next.stage]} reviews {STAGE_LABEL[next.stage]}.</div>
       </div>
-      <Link to={`/app/deals/${deal.id}/${next.stage}`} className="btn bg-white text-brand-950 hover:bg-brand-50 h-10 px-5">Review {STAGE_LABEL[next.stage]} <ArrowRight className="h-4 w-4" /></Link>
+      <Link to={`/app/deals/${deal.id}/${next.stage}`} className="btn bg-white text-[#0d1630] hover:bg-white/90 h-10 px-5">Review {STAGE_LABEL[next.stage]} <ArrowRight className="h-4 w-4" /></Link>
     </div>
   );
 }
@@ -178,15 +178,15 @@ function SimilarDeals({ deal }: { deal: any }) {
   return (
     <section className="card p-5 md:p-6">
       <div className="flex items-start gap-3 mb-4">
-        <span className="h-9 w-9 shrink-0 rounded-xl bg-gradient-to-b from-brand-50 to-white border border-brand-100 text-brand-600 grid place-items-center"><History className="h-[18px] w-[18px]" /></span>
+        <span className="h-9 w-9 shrink-0 rounded-xl bg-gradient-to-b from-brand-50 to-surface border border-brand-100 text-brand-600 grid place-items-center"><History className="h-[18px] w-[18px]" /></span>
         <div className="min-w-0">
-          <h3 className="font-bold text-[15.5px] text-ink">You've bid this before</h3>
+          <h3 className="font-bold text-[14px] text-ink">You've bid this before</h3>
           <p className="text-[12.5px] text-ink-muted mt-0.5">Your past deals most like this one, by technologies, capabilities, industry and engagement type. Learn from how they went.</p>
         </div>
       </div>
       <div className="grid md:grid-cols-3 gap-3">
         {data.map((s) => (
-          <Link key={s.id} to={`/app/deals/${s.id}`} className="group rounded-xl border border-line-soft bg-[#FBFCFD] p-4 transition-all duration-300 hover:border-brand-200 hover:bg-white hover:shadow-hover">
+          <Link key={s.id} to={`/app/deals/${s.id}`} className="group rounded-xl border border-line-soft bg-paper p-4 transition-all duration-300 hover:border-brand-200 hover:bg-surface hover:shadow-hover">
             <div className="flex items-center gap-2">
               <span className="num text-[12px] font-bold text-brand-700">{s.similarity}% alike</span>
               <span className="ml-auto"><DealStatus s={s.status} /></span>
@@ -202,7 +202,7 @@ function SimilarDeals({ deal }: { deal: any }) {
             </dl>
             {s.common_technologies?.length > 0 && (
               <div className="mt-3 flex flex-wrap gap-1">
-                {s.common_technologies.slice(0, 5).map((t: string) => <span key={t} className="chip bg-white border border-line text-ink-soft font-medium">{t}</span>)}
+                {s.common_technologies.slice(0, 5).map((t: string) => <span key={t} className="chip bg-surface border border-line text-ink-soft font-medium">{t}</span>)}
               </div>
             )}
             {s.outcome_notes && <p className="mt-3 text-[12px] text-ink-soft italic line-clamp-2">“{s.outcome_notes}”</p>}

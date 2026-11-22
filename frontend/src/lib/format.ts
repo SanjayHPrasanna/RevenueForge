@@ -40,22 +40,22 @@ export const STAGES = [
 
 export const MATCH_LABEL: Record<string, string> = { strong: "Strong", partial: "Partial", gap: "Gap", confirm: "Confirm" };
 export const MATCH_STYLE: Record<string, string> = {
-  strong: "bg-[#E4F1F7] text-fit-strong-ink",
-  partial: "bg-[#FBF1DD] text-fit-partial-ink",
-  gap: "bg-[#FBE7E5] text-fit-gap-ink",
-  confirm: "bg-white text-fit-confirm-ink ring-1 ring-inset ring-fit-confirm",
+  strong: "bg-fit-strong-soft text-fit-strong-ink",
+  partial: "bg-fit-partial-soft text-fit-partial-ink",
+  gap: "bg-fit-gap-soft text-fit-gap-ink",
+  confirm: "bg-surface text-fit-confirm-ink ring-1 ring-inset ring-fit-confirm",
 };
 // One definition of the match statuses for every chart: order = strongest to weakest, then unknown.
 export const FIT = [
-  { key: "strong", label: "Strong", long: "Covered by what you have", fill: "#1A82AE", ink: "#13698D" },
-  { key: "partial", label: "Partial", long: "Covered by extending it", fill: "#D09516", ink: "#8A5F07" },
-  { key: "gap", label: "Gap", long: "Not covered today", fill: "#CC3D3D", ink: "#A8302F" },
-  { key: "confirm", label: "To confirm", long: "Commercial or to confirm", fill: "#8A99A3", ink: "#56656F", hollow: true },
+  { key: "strong", label: "Strong", long: "Covered by what you have", fill: "rgb(var(--fit-strong))", ink: "rgb(var(--fit-strong-ink))" },
+  { key: "partial", label: "Partial", long: "Covered by extending it", fill: "rgb(var(--fit-partial))", ink: "rgb(var(--fit-partial-ink))" },
+  { key: "gap", label: "Gap", long: "Not covered today", fill: "rgb(var(--fit-gap))", ink: "rgb(var(--fit-gap-ink))" },
+  { key: "confirm", label: "To confirm", long: "Commercial or to confirm", fill: "rgb(var(--faint))", ink: "rgb(var(--fit-confirm-ink))", hollow: true },
 ] as const;
 export const CAT_STYLE: Record<string, string> = {
   Functional: "bg-brand-50 text-brand-700",
-  "Non-functional": "bg-[#EEF0FB] text-[#4A54A8]",
-  Compliance: "bg-[#F3ECF8] text-[#7A3E9A]",
+  "Non-functional": "bg-[rgb(110_120_230/.14)] text-[rgb(var(--cat-nf))]",
+  Compliance: "bg-[rgb(170_90_210/.14)] text-[rgb(var(--cat-co))]",
   Commercial: "bg-ember-50 text-ember-600",
 };
 export const CATEGORIES = ["Functional", "Non-functional", "Compliance", "Commercial"];

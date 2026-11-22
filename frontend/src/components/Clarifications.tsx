@@ -49,9 +49,9 @@ export function Clarifications({ deal }: { deal: any }) {
   return (
     <section className="card mb-4 overflow-hidden">
       <button className="w-full flex items-center gap-3 px-5 py-3.5 text-left hover:bg-paper/60 transition-colors" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <span className="h-9 w-9 shrink-0 rounded-xl bg-gradient-to-b from-ember-50 to-white border border-ember-100 text-ember-600 grid place-items-center"><HelpCircle className="h-[18px] w-[18px]" /></span>
+        <span className="h-9 w-9 shrink-0 rounded-xl bg-gradient-to-b from-ember-50 to-surface border border-ember-100 text-ember-600 grid place-items-center"><HelpCircle className="h-[18px] w-[18px]" /></span>
         <div className="min-w-0 flex-1">
-          <div className="font-semibold text-[14.5px]">Questions for the client</div>
+          <div className="font-semibold text-[13.5px]">Questions for the client</div>
           <div className="text-[12.5px] text-ink-muted">
             {n ? `${n} question${n === 1 ? "" : "s"} about vague, open-ended or missing details${data?.by === "ai" ? ", drafted by AI" : ""}. Review, edit and send before you answer.`
               : "Draft questions about vague or missing details, to send the client before you answer."}
@@ -79,7 +79,7 @@ export function Clarifications({ deal }: { deal: any }) {
           {n === 0 && !make.isPending && <div className="text-[13px] text-ink-muted py-2">No questions yet.</div>}
           <ol className="space-y-2.5">
             {items.map((it, i) => (
-              <li key={i} className="group flex gap-3 rounded-xl border border-line-soft bg-[#FBFCFD] px-3 py-2.5">
+              <li key={i} className="group flex gap-3 rounded-xl border border-line-soft bg-paper px-3 py-2.5">
                 <span className="num text-[12px] font-semibold text-ink-faint pt-1 w-5 text-right">{i + 1}.</span>
                 <div className="min-w-0 flex-1">
                   {canEdit ? (

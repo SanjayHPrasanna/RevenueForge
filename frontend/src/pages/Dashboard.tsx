@@ -62,8 +62,8 @@ const STATUS: Record<string, string> = {
 };
 export function DealStatus({ s }: { s: string }) {
   const c: Record<string, string> = {
-    processing: "bg-ember-50 text-ember-600", in_review: "bg-brand-50 text-brand-700", submitted: "bg-[#EEF0FB] text-[#4A54A8]",
-    won: "bg-ok-bg text-ok", lost: "bg-[#FBE7E5] text-fit-gap-ink", failed: "bg-[#FBE7E5] text-fit-gap-ink", no_bid: "bg-line-soft text-ink-muted",
+    processing: "bg-ember-50 text-ember-600", in_review: "bg-brand-50 text-brand-700", submitted: "bg-[rgb(110_120_230/.14)] text-[rgb(var(--cat-nf))]",
+    won: "bg-ok-bg text-ok", lost: "bg-fit-gap-soft text-fit-gap-ink", failed: "bg-fit-gap-soft text-fit-gap-ink", no_bid: "bg-line-soft text-ink-muted",
   };
   return <span className={clsx("chip", c[s] || "bg-line-soft text-ink-muted")}>{STATUS[s] || s}</span>;
 }
@@ -85,7 +85,7 @@ export default function Dashboard() {
       <div className="flex flex-wrap items-end gap-3 mb-6">
         <div className="stagger">
           <div className="eyebrow mb-1.5">Pipeline overview</div>
-          <h1 className="font-display text-[34px] md:text-[44px] leading-[1.05] tracking-[-0.02em] text-brand-950">{hello}, {user?.name.split(" ")[0]}</h1>
+          <h1 className="font-display font-semibold text-[26px] md:text-[32px] leading-[1.05] tracking-[-0.02em] text-brand-950">{hello}, {user?.name.split(" ")[0]}</h1>
           <p className="text-ink-muted text-[14px] mt-1">Your bid pipeline, and what it says about your capabilities.</p>
         </div>
         <div className="flex-1" />
@@ -107,7 +107,7 @@ export default function Dashboard() {
 
       <section className="card mt-5 min-w-0 overflow-hidden rise-3d" style={{ animationDelay: ".08s" }}>
         <div className="px-5 py-4 border-b border-line flex items-center gap-3">
-          <div className="flex-1 min-w-0"><h2 className="font-bold text-[15.5px]">Deals</h2><p className="text-[12.5px] text-ink-muted">Each bar is a deal's requirements, coloured by how well you cover them.</p></div>
+          <div className="flex-1 min-w-0"><h2 className="font-bold text-[14px]">Deals</h2><p className="text-[12.5px] text-ink-muted">Each bar is a deal's requirements, coloured by how well you cover them.</p></div>
           <FitLegend className="hidden lg:flex" />
           <Link to="/app/deals" className="text-[13px] text-brand-700 font-semibold inline-flex items-center gap-1 whitespace-nowrap">All deals <ArrowRight className="h-3.5 w-3.5" /></Link>
         </div>
@@ -136,7 +136,7 @@ export default function Dashboard() {
                           <div className="flex gap-[2px] h-[10px] mt-1.5" role="img" aria-label={FIT.map((f) => `${f.label} ${d.match_mix?.[f.key] || 0}`).join(", ")}
                             onMouseMove={(e) => show(e, <div><b>{d.name}</b>{FIT.map((f) => <div key={f.key} className="num">{f.label}: {d.match_mix?.[f.key] || 0}</div>)}</div>)} onMouseLeave={hide}>
                             {FIT.map((f) => d.match_mix?.[f.key] ? (
-                              <div key={f.key} className="h-full first:rounded-l last:rounded-r" style={{ flex: d.match_mix[f.key], background: "hollow" in f ? "white" : f.fill, boxShadow: "hollow" in f ? `inset 0 0 0 1.5px ${f.fill}` : undefined }} />
+                              <div key={f.key} className="h-full first:rounded-l last:rounded-r" style={{ flex: d.match_mix[f.key], background: "hollow" in f ? "transparent" : f.fill, boxShadow: "hollow" in f ? `inset 0 0 0 1.5px ${f.fill}` : undefined }} />
                             ) : null)}
                           </div>
                         ) : <span className="text-ink-faint text-[13px]">—</span>}
@@ -162,21 +162,21 @@ export default function Dashboard() {
 
       <div className="grid lg:grid-cols-3 gap-5 mt-5 stagger">
         <section className="card card-hover p-5">
-          <h2 className="font-bold text-[15px]">Skills the pipeline is asking for</h2>
+          <h2 className="font-bold text-[14px]">Skills the pipeline is asking for</h2>
           <p className="text-[12.5px] text-ink-muted mt-0.5 mb-4">Technologies in RFPs you can't cover today. A hiring and training signal.</p>
           {data.skill_gaps.length ? (
-            <Bars rows={data.skill_gaps.map((g: any) => ({ label: g.technology, value: g.requirements }))} format={(v) => `${v}`} color="#CC3D3D" />
+            <Bars rows={data.skill_gaps.map((g: any) => ({ label: g.technology, value: g.requirements }))} format={(v) => `${v}`} color="rgb(var(--fit-gap))" />
           ) : <div className="text-sm text-ink-muted">No gaps yet.</div>}
         </section>
 
         <section className="card card-hover p-5">
-          <h2 className="font-bold text-[15px]">Most-matched capabilities</h2>
+          <h2 className="font-bold text-[14px]">Most-matched capabilities</h2>
           <p className="text-[12.5px] text-ink-muted mt-0.5 mb-4">Where your offer is landing with clients.</p>
           {data.capability_demand.length ? <Bars rows={data.capability_demand.map((c: any) => ({ label: c.capability, value: c.requirements }))} format={(v) => `${v}`} /> : <div className="text-sm text-ink-muted">No matches yet.</div>}
         </section>
 
         <section className="card card-hover p-5">
-          <h2 className="font-bold text-[15px]">Across all deals</h2>
+          <h2 className="font-bold text-[14px]">Across all deals</h2>
           <p className="text-[12.5px] text-ink-muted mt-0.5 mb-4">How every requirement analysed so far is covered.</p>
           <MatchMixBar mix={data.match_mix} />
           <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-2 text-[13px]">

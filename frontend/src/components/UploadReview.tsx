@@ -72,7 +72,7 @@ export default function UploadReview({ kind, onImported, compact }: { kind: stri
 
   return (
     <div className="space-y-4">
-      {!compact && <p className="text-ink-soft text-[14.5px]">{info.what}</p>}
+      {!compact && <p className="text-ink-soft text-[13.5px]">{info.what}</p>}
       {!upload && (
         <>
           <Dropzone accept={info.accept} onFile={(f) => up.mutate(f)} busy={up.isPending} hint={info.hint} />
@@ -160,7 +160,7 @@ export function MappingAndPreview({ kind, docId, analysis, onAnalysis }: { kind:
             </div>
           )}
           {analysis.missing?.length > 0 && (
-            <div className="mt-3 text-[12.5px] rounded bg-[#FBF1DD] text-fit-partial-ink px-3 py-2">
+            <div className="mt-3 text-[12.5px] rounded bg-fit-partial-soft text-fit-partial-ink px-3 py-2">
               Still needed: {analysis.missing.map((m: string) => FIELD_LABEL[m] || m).join(", ")}. Pick the matching column above.
             </div>
           )}
@@ -209,7 +209,7 @@ export function TemplateUpload({ onDone }: { onDone?: () => void }) {
   });
   return (
     <div className="space-y-4">
-      <p className="text-ink-soft text-[14.5px]">
+      <p className="text-ink-soft text-[13.5px]">
         Your Word template keeps its branding, styles, header and footer. RevenueForge works with either kind of template: one with your own
         section headings and placeholders such as <code className="mx-1 text-[12.5px] bg-paper px-1 rounded">[Insert Solution Overview Here]</code>,
         which it fills section by section, or one with a{" "}

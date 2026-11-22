@@ -16,7 +16,7 @@ const TABS: { key: Tab; label: string; icon: any }[] = [
   { key: "security", label: "Security", icon: ShieldAlert },
 ];
 const ROLES = ["admin", "presales", "architect", "finance", "delivery", "viewer"];
-const C = { a: "#118AC3", b: "#F5833A", c: "#0C3D55", d: "#B4232A", grid: "#E6EDF1", ink: "#5B6B76" };
+const C = { a: "rgb(var(--b500))", b: "rgb(var(--e500))", c: "rgb(var(--b500))", d: "rgb(var(--fit-gap))", grid: "rgb(var(--line) / .1)", ink: "rgb(var(--muted))" };
 
 const num = (n: number | undefined) => (n ?? 0).toLocaleString();
 // The server stores UTC times; SQLite drops the "Z", so add it back before the browser reads them as local time.
@@ -47,14 +47,14 @@ function Card({ title, sub, children, right }: { title: string; sub?: string; ch
 }
 
 function Dot({ ok, warn }: { ok: boolean; warn?: boolean }) {
-  return <span className={clsx("inline-block h-2.5 w-2.5 rounded-full", ok ? "bg-emerald-500" : warn ? "bg-amber-500" : "bg-rose-600")} />;
+  return <span className={clsx("inline-block h-2.5 w-2.5 rounded-full", ok ? "bg-ok" : warn ? "bg-fit-partial" : "bg-fit-gap")} />;
 }
 
 function Days({ value, onChange }: { value: number; onChange: (n: number) => void }) {
   return (
     <div className="flex gap-1">
       {[7, 30, 90].map((d) => (
-        <button key={d} onClick={() => onChange(d)} className={clsx("chip border px-2 py-1", value === d ? "bg-brand-700 text-white border-brand-700" : "bg-white border-line text-ink-soft")}>{d} days</button>
+        <button key={d} onClick={() => onChange(d)} className={clsx("chip border px-2 py-1", value === d ? "bg-brand-700 text-white border-brand-700" : "bg-surface border-line text-ink-soft")}>{d} days</button>
       ))}
     </div>
   );
@@ -139,7 +139,7 @@ function Companies() {
             <tr key={c.id} className="border-t border-line-soft hover:bg-paper cursor-pointer" onClick={() => setOpen(c.id)}>
               <td className="td"><div className="font-semibold text-brand-900">{c.name}{c.is_mine && <span className="chip bg-brand-50 text-brand-700 ml-2">Yours</span>}</div>
                 <div className="text-[11.5px] text-ink-muted">{c.kind === "buyer" ? "Buyer" : "Seller"} · since {day(c.created_at)}</div></td>
-              <td className="td">{c.paused ? <span className="chip bg-rose-50 text-rose-700">Paused</span> : <span className="chip bg-emerald-50 text-emerald-700">Active</span>}</td>
+              <td className="td">{c.paused ? <span className="chip bg-fit-gap-soft text-fit-gap-ink">Paused</span> : <span className="chip bg-ok/[.12] text-ok">Active</span>}</td>
               <td className="td text-right num">{c.people}{c.people_paused ? <div className="text-[11px] text-ink-muted">{c.people_paused} paused</div> : null}</td>
               <td className="td">{when(c.last_active)}<div className="text-[11px] text-ink-muted">{c.active_30d} active this month</div></td>
               <td className="td text-right num">{c.deals}<span className="text-ink-muted"> ({c.deals_30d})</span></td>
@@ -170,7 +170,7 @@ function CompanyDetail({ id, onClose }: { id: string; onClose: () => void }) {
       {!c ? <div className="py-12 grid place-items-center"><Spinner /></div> : (
         <div className="space-y-5">
           <div className="flex flex-wrap items-center gap-3 text-[13px]">
-            {c.paused ? <span className="chip bg-rose-50 text-rose-700">Paused{c.pause_reason ? `: ${c.pause_reason}` : ""}</span> : <span className="chip bg-emerald-50 text-emerald-700">Active</span>}
+            {c.paused ? <span className="chip bg-fit-gap-soft text-fit-gap-ink">Paused{c.pause_reason ? `: ${c.pause_reason}` : ""}</span> : <span className="chip bg-ok/[.12] text-ok">Active</span>}
             <span className="text-ink-muted">{c.kind === "buyer" ? "Buyer" : "Seller"} · since {day(c.created_at)} · {c.deals} deals · {bytes(c.storage_bytes)} of files · AI: {c.ai?.own_key ? `own ${c.ai.provider} key` : "server default"}</span>
           </div>
           {!c.is_mine && (
@@ -180,7 +180,7 @@ function CompanyDetail({ id, onClose }: { id: string; onClose: () => void }) {
               ) : (
                 <>
                   <input className="input flex-1 min-w-[220px]" placeholder="Reason shown to them (optional), e.g. unpaid invoice" maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} />
-                  <button className="btn-outline text-rose-700 border-rose-200" disabled={act.isPending}
+                  <button className="btn-outline text-fit-gap-ink border-fit-gap/30" disabled={act.isPending}
                     onClick={() => window.confirm(`Pause ${c.name}? Nobody in it can sign in or use RevenueForge until you reactivate it. Their data stays as it is.`) && act.mutate({ path: `/platform/companies/${id}/pause`, body: { reason } })}>
                     <PauseCircle className="h-4 w-4" /> Pause company</button>
                 </>
@@ -203,7 +203,7 @@ function CompanyDetail({ id, onClose }: { id: string; onClose: () => void }) {
                     </td>
                     <td className="td text-ink-soft">{p.sso}</td>
                     <td className="td">{when(p.last_active)}</td>
-                    <td className="td">{p.active ? <span className="chip bg-emerald-50 text-emerald-700">Active</span> : <span className="chip bg-rose-50 text-rose-700">Paused</span>}</td>
+                    <td className="td">{p.active ? <span className="chip bg-ok/[.12] text-ok">Active</span> : <span className="chip bg-fit-gap-soft text-fit-gap-ink">Paused</span>}</td>
                     <td className="td text-right whitespace-nowrap">
                       {!p.is_me && (p.active ? (
                         <button className="btn-ghost text-[12.5px] py-1" disabled={act.isPending} onClick={() => window.confirm(`Pause ${p.name}? They are signed out at once and can't sign in until reactivated.`) && act.mutate({ path: `/platform/users/${p.id}/pause` })}><PauseCircle className="h-3.5 w-3.5" /> Pause</button>
@@ -230,13 +230,13 @@ function CompanyDetail({ id, onClose }: { id: string; onClose: () => void }) {
             <Card title="AI by model" sub="Last 30 days">
               {c.ai_models.length ? <table className="w-full text-[12.5px]"><thead><tr><th className="th">Model</th><th className="th text-right">Calls</th><th className="th text-right">Failed</th><th className="th text-right">Tokens</th><th className="th text-right">Avg</th></tr></thead>
                 <tbody>{c.ai_models.map((m: any) => <tr key={m.provider + m.model} className="border-t border-line-soft"><td className="td">{m.provider} · {m.model}</td><td className="td text-right num">{num(m.calls)}</td>
-                  <td className={clsx("td text-right num", m.failures && "text-rose-700")}>{num(m.failures)}</td><td className="td text-right num">{num(m.tokens)}</td><td className="td text-right num">{m.avg_seconds}s</td></tr>)}</tbody></table>
+                  <td className={clsx("td text-right num", m.failures && "text-fit-gap-ink")}>{num(m.failures)}</td><td className="td text-right num">{num(m.tokens)}</td><td className="td text-right num">{m.avg_seconds}s</td></tr>)}</tbody></table>
                 : <div className="text-[13px] text-ink-muted">No AI calls in this period.</div>}
             </Card>
           </div>
           <Card title="Library size" sub="Counts only. The console never shows what is in a company's library or deals.">
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 text-center">
-              {Object.entries(c.library || {}).map(([k, v]) => <div key={k} className="rounded-lg bg-paper py-2"><div className="num font-bold text-[18px]">{v as number}</div><div className="text-[11.5px] text-ink-muted capitalize">{k.replace("_", " ")}</div></div>)}
+              {Object.entries(c.library || {}).map(([k, v]) => <div key={k} className="rounded-lg bg-paper py-2"><div className="num font-bold text-[15.5px]">{v as number}</div><div className="text-[11.5px] text-ink-muted capitalize">{k.replace("_", " ")}</div></div>)}
             </div>
           </Card>
           <Card title="Security events" sub="Latest 100 for this company">
@@ -263,7 +263,7 @@ function Ai() {
         { label: "Server default AI", value: a.server.provider || "off", sub: `${a.server.model || "auto"} · ${a.server.paid ? "paid" : "free"} key · ${a.server.rpm}/min`, tone: "brand" },
       ]} />
       {(a.server.disabled_reason || a.server.last_error) && (
-        <div className="card px-5 py-3 border-rose-200 bg-rose-50/50 text-[13px] text-rose-800 flex gap-2"><AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+        <div className="card px-5 py-3 border-fit-gap/30 bg-fit-gap-soft text-[13px] text-fit-gap-ink flex gap-2"><AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
           <span><b>Server AI:</b> {a.server.disabled_reason || a.server.last_error}</span></div>
       )}
       <Card title="Calls per day" sub="Successful and failed AI calls, all companies and the website chat" right={<Days value={days} onChange={setDays} />}>
@@ -278,13 +278,13 @@ function Ai() {
         <Card title="By provider and model">
           <table className="w-full text-[12.5px]"><thead><tr><th className="th">Model</th><th className="th text-right">Calls</th><th className="th text-right">Failed</th><th className="th text-right">Tokens</th><th className="th text-right">Avg time</th></tr></thead>
             <tbody>{a.models.map((m: any) => <tr key={m.provider + m.model} className="border-t border-line-soft"><td className="td">{m.provider} · {m.model || "—"}</td><td className="td text-right num">{num(m.calls)}</td>
-              <td className={clsx("td text-right num", m.failure_pct > 10 && "text-rose-700 font-semibold")}>{num(m.failures)} ({m.failure_pct}%)</td><td className="td text-right num">{num(m.tokens)}</td><td className="td text-right num">{m.avg_seconds}s</td></tr>)}</tbody></table>
+              <td className={clsx("td text-right num", m.failure_pct > 10 && "text-fit-gap-ink font-semibold")}>{num(m.failures)} ({m.failure_pct}%)</td><td className="td text-right num">{num(m.tokens)}</td><td className="td text-right num">{m.avg_seconds}s</td></tr>)}</tbody></table>
           {!a.models.length && <div className="text-[13px] text-ink-muted mt-2">No AI calls in this period.</div>}
         </Card>
         <Card title="By company" sub="Which AI each company uses and how it's going">
           <table className="w-full text-[12.5px]"><thead><tr><th className="th">Company</th><th className="th">AI</th><th className="th text-right">Calls</th><th className="th text-right">Failed</th></tr></thead>
             <tbody>{a.companies.map((c: any) => <tr key={c.id} className="border-t border-line-soft"><td className="td font-medium">{c.name}</td><td className="td">{c.own_key ? <b>Own</b> : "Server"} · {c.provider}{c.model ? ` · ${c.model}` : ""}</td>
-              <td className="td text-right num">{num(c.calls)}</td><td className={clsx("td text-right num", c.failure_pct > 10 && "text-rose-700 font-semibold")}>{num(c.failures)}</td></tr>)}
+              <td className="td text-right num">{num(c.calls)}</td><td className={clsx("td text-right num", c.failure_pct > 10 && "text-fit-gap-ink font-semibold")}>{num(c.failures)}</td></tr>)}
               <tr className="border-t border-line-soft"><td className="td text-ink-muted">Website chat (Maahi)</td><td className="td">{a.maahi_own_key ? "Maahi's own key" : "Server"}</td>
                 <td className="td text-right num">{num(a.website_chat.calls)}</td><td className="td text-right num">{num(a.website_chat.failures)}</td></tr></tbody></table>
         </Card>
@@ -325,7 +325,7 @@ function Health() {
         <Card title="Tender and award feeds" sub="Refreshed every 12 hours; stale means no success in 36 hours">
           <table className="w-full text-[12.5px]"><thead><tr><th className="th">Feed</th><th className="th">Last success</th><th className="th text-right">Read</th><th className="th">Status</th></tr></thead>
             <tbody>{h.feeds.map((f: any) => <tr key={f.key} className="border-t border-line-soft"><td className="td">{f.key}</td><td className="td">{when(f.last_ok)}</td><td className="td text-right num">{num(f.fetched)}</td>
-              <td className="td">{f.error ? <span className="text-rose-700" title={f.error}>{f.error.slice(0, 60)}</span> : f.stale ? <span className="text-amber-700">Stale</span> : <span className="text-emerald-700">OK</span>}</td></tr>)}</tbody></table>
+              <td className="td">{f.error ? <span className="text-fit-gap-ink" title={f.error}>{f.error.slice(0, 60)}</span> : f.stale ? <span className="text-fit-partial-ink">Stale</span> : <span className="text-ok">OK</span>}</td></tr>)}</tbody></table>
           {!h.feeds.length && <div className="text-[13px] text-ink-muted mt-2">No feed has run yet on this server.</div>}
         </Card>
         <Card title="Storage and sign-in">
@@ -347,10 +347,10 @@ function Health() {
           <div className="max-h-[360px] overflow-auto text-[12.5px] font-mono divide-y divide-line-soft">
             {h.recent_errors.map((e: any, i: number) => (
               <div key={i} className="py-1.5 grid grid-cols-[120px_64px_1fr] gap-3">
-                <span className="text-ink-muted">{when(e.at)}</span><span className={e.level === "ERROR" ? "text-rose-700 font-semibold" : "text-amber-700"}>{e.level}</span><span className="break-words">{e.message}</span>
+                <span className="text-ink-muted">{when(e.at)}</span><span className={e.level === "ERROR" ? "text-fit-gap-ink font-semibold" : "text-fit-partial-ink"}>{e.level}</span><span className="break-words">{e.message}</span>
               </div>))}
           </div>
-        ) : <div className="text-[13px] text-ink-muted flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-emerald-600" /> No warnings since the last restart.</div>}
+        ) : <div className="text-[13px] text-ink-muted flex items-center gap-2"><CheckCircle2 className="h-4 w-4 text-ok" /> No warnings since the last restart.</div>}
       </Card>
     </div>
   );
@@ -368,10 +368,10 @@ function EmailCard({ e }: { e: any }) {
       <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3 text-[13px]">
         {rows.map(([k, v]) => <div key={k} className="rounded-lg bg-paper p-3 min-w-0"><div className="text-ink-muted text-[12px]">{k}</div><div className="font-semibold truncate" title={v}>{v}</div></div>)}
       </div>
-      {!e.configured && <div className="mt-3 text-[13px] text-amber-700">Not set up: no emails are sent. Add SMTP_HOST, SMTP_USER and SMTP_PASSWORD in Azure → Environment variables.</div>}
-      {e.configured && !e.app_url_ok && <div className="mt-3 text-[13px] text-amber-700">APP_URL still points to localhost, so links in emails won't open. Set APP_URL to this site's address in Azure.</div>}
-      {res && (res.ok ? <div className="mt-3 text-[13px] text-emerald-700 flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4" /> Sent to {res.to}. Check the inbox (and spam) in a minute.</div>
-        : <div className="mt-3 text-[13px] text-rose-700 flex items-start gap-1.5"><AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> Not sent. {res.reason}</div>)}
+      {!e.configured && <div className="mt-3 text-[13px] text-fit-partial-ink">Not set up: no emails are sent. Add SMTP_HOST, SMTP_USER and SMTP_PASSWORD in Azure → Environment variables.</div>}
+      {e.configured && !e.app_url_ok && <div className="mt-3 text-[13px] text-fit-partial-ink">APP_URL still points to localhost, so links in emails won't open. Set APP_URL to this site's address in Azure.</div>}
+      {res && (res.ok ? <div className="mt-3 text-[13px] text-ok flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4" /> Sent to {res.to}. Check the inbox (and spam) in a minute.</div>
+        : <div className="mt-3 text-[13px] text-fit-gap-ink flex items-start gap-1.5"><AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" /> Not sent. {res.reason}</div>)}
     </Card>
   );
 }
@@ -382,13 +382,13 @@ function Events({ rows, hideCompany }: { rows: any[]; hideCompany?: boolean }) {
   return (
     <div className="overflow-x-auto max-h-[420px]">
       <table className="w-full min-w-[720px] text-[12.5px]">
-        <thead className="sticky top-0 bg-white"><tr><th className="th">When</th><th className="th">Event</th>{!hideCompany && <th className="th">Company</th>}<th className="th">Who</th><th className="th">Details</th></tr></thead>
+        <thead className="sticky top-0 bg-surface"><tr><th className="th">When</th><th className="th">Event</th>{!hideCompany && <th className="th">Company</th>}<th className="th">Who</th><th className="th">Details</th></tr></thead>
         <tbody>{rows.map((e, i) => {
           const bad = /failed|Locked|deleted|paused|disabled/i.test(e.label);
           return (
             <tr key={i} className="border-t border-line-soft">
               <td className="td whitespace-nowrap text-ink-muted">{utc(e.at).toLocaleString()}</td>
-              <td className={clsx("td font-medium", bad && "text-rose-700")}>{e.label}</td>
+              <td className={clsx("td font-medium", bad && "text-fit-gap-ink")}>{e.label}</td>
               {!hideCompany && <td className="td">{e.company || <span className="text-ink-muted">No company</span>}</td>}
               <td className="td">{e.user}</td>
               <td className="td text-ink-soft">{[e.network && `from ${e.network}`, ...Object.entries(e.detail || {}).map(([k, v]) => `${k}: ${v}`)].filter(Boolean).join(" · ")}</td>
@@ -423,7 +423,7 @@ function Security() {
       </div>
       <Card title={view === "events" ? "Security events" : "Successful sign-ins"} right={
         <div className="flex items-center gap-3"><div className="flex gap-1">
-          {(["events", "signins"] as const).map((v) => <button key={v} onClick={() => setView(v)} className={clsx("chip border px-2 py-1", view === v ? "bg-brand-700 text-white border-brand-700" : "bg-white border-line text-ink-soft")}>{v === "events" ? "Events" : "Sign-ins"}</button>)}
+          {(["events", "signins"] as const).map((v) => <button key={v} onClick={() => setView(v)} className={clsx("chip border px-2 py-1", view === v ? "bg-brand-700 text-white border-brand-700" : "bg-surface border-line text-ink-soft")}>{v === "events" ? "Events" : "Sign-ins"}</button>)}
         </div><Days value={days} onChange={setDays} /></div>}>
         <Events rows={view === "events" ? s.events : s.sign_ins} />
       </Card>
@@ -445,7 +445,7 @@ export default function Platform() {
     <div className="px-4 lg:px-8 py-7 max-w-[1400px] space-y-5">
       <div>
         <div className="eyebrow mb-1.5">Platform console</div>
-        <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Every company, at a glance</h1>
+        <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950">Every company, at a glance</h1>
         <p className="text-ink-muted text-[14px] mt-1">Usage, AI, system health and security across this server. You see companies, their people and counts, never their deals, library or files.</p>
       </div>
       <div className="flex flex-wrap gap-1 border-b border-line" role="tablist">

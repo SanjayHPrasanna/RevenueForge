@@ -63,10 +63,10 @@ function Note({ n, dealId }: { n: any; dealId: string }) {
   });
   const open = n.status === "open";
   return (
-    <li className={clsx("rounded-xl border px-4 py-3", open ? "border-ember-400/40 bg-ember-50/40" : "border-line-soft bg-white opacity-75")}>
+    <li className={clsx("rounded-xl border px-4 py-3", open ? "border-ember-400/40 bg-ember-50/40" : "border-line-soft bg-surface opacity-75")}>
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-ink-muted">
         <span className="font-semibold text-ink">{n.author}</span>
-        {n.author_role && <span className="chip bg-white border border-line">{ROLE_NAME[n.author_role] || n.author_role}</span>}
+        {n.author_role && <span className="chip bg-surface border border-line">{ROLE_NAME[n.author_role] || n.author_role}</span>}
         <span>{ago(n.created_at)}</span>
         {!open && <span className="text-ok font-semibold inline-flex items-center gap-1"><CheckCircle2 className="h-3.5 w-3.5" /> Resolved by {n.resolved_by}</span>}
       </div>

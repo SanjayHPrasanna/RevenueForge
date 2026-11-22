@@ -10,7 +10,7 @@ import { ago } from "../lib/format";
 
 const REGIONS = ["", "Europe", "United Kingdom", "North America", "Latin America & Caribbean", "Middle East & North Africa", "Sub-Saharan Africa",
   "South Asia", "East Asia & Pacific", "Central Asia & Caucasus"];
-const INVITE_STYLE: Record<string, string> = { invited: "bg-brand-50 text-brand-700", accepted: "bg-[#E4F1F7] text-fit-strong-ink", declined: "bg-line-soft text-ink-muted" };
+const INVITE_STYLE: Record<string, string> = { invited: "bg-brand-50 text-brand-700", accepted: "bg-fit-strong-soft text-fit-strong-ink", declined: "bg-line-soft text-ink-muted" };
 
 function NewRequest({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
@@ -56,7 +56,7 @@ export function BuyerRequests() {
       <div className="flex flex-wrap items-end gap-4 mb-6">
         <div className="flex-1 min-w-[280px]">
           <div className="eyebrow mb-1.5">Supplier network</div>
-          <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Your requests</h1>
+          <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950">Your requests</h1>
           <p className="text-ink-muted text-[14px] mt-1">Upload an RFP, see which suppliers have proven they can deliver it, and invite the right ones to bid.</p>
         </div>
         {canEdit
@@ -158,7 +158,7 @@ export function BuyerRequest() {
       <div>
         <Link to="/app/buyer" className="text-[13px] text-ink-muted hover:text-brand-700 inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" /> Requests</Link>
         <div className="flex flex-wrap items-end gap-3 mt-2">
-          <h1 className="flex-1 min-w-[300px] font-display text-[32px] leading-tight text-brand-950">{r.title}</h1>
+          <h1 className="flex-1 min-w-[300px] font-display font-semibold text-[24px] leading-tight text-brand-950">{r.title}</h1>
           {canEdit && <button className="btn-ghost" onClick={() => confirm("Delete this request? Invited suppliers will no longer see it.") && del.mutate()}><Trash2 className="h-4 w-4" /> Delete</button>}
         </div>
         <div className="text-[13px] text-ink-muted mt-1">{[r.filename, r.region || "Any region", r.industry, r.due_date && `Due ${r.due_date}`].filter(Boolean).join(" · ")}</div>
@@ -200,7 +200,7 @@ export function BuyerRequest() {
                 <tr key={v.vendor_id} className={clsx(picked.includes(v.vendor_id) && "bg-brand-50/60")}>
                   <td className="td align-top">{canEdit && !v.invite_status && <input type="checkbox" className="h-4 w-4 mt-1 accent-[#118AC3]" aria-label={`Select ${v.name}`}
                     checked={picked.includes(v.vendor_id)} onChange={() => toggle(v.vendor_id)} />}</td>
-                  <td className="td align-top"><div className="num font-bold text-[18px]">{v.score}%</div>
+                  <td className="td align-top"><div className="num font-bold text-[15.5px]">{v.score}%</div>
                     <div className="text-[11.5px] text-ink-muted">{v.coverage.strong || 0} strong · {v.coverage.partial || 0} partial · {v.coverage.gap || 0} gaps</div></td>
                   <td className="td align-top">
                     <button className="font-semibold text-left hover:text-brand-700" onClick={() => setProfile(v.vendor_id)}>{v.name}</button>
@@ -217,7 +217,7 @@ export function BuyerRequest() {
           </table>
         )}
         {picked.length > 0 && (
-          <div className="sticky bottom-0 border-t border-line bg-white/95 backdrop-blur px-5 py-3 flex flex-wrap items-center gap-3">
+          <div className="sticky bottom-0 border-t border-line bg-surface/95 backdrop-blur px-5 py-3 flex flex-wrap items-center gap-3">
             <span className="text-[13px] font-semibold">{picked.length} selected</span>
             <input className="input h-9 flex-1 min-w-[280px]" placeholder="Message to the suppliers (optional), e.g. clarification deadline" value={msg} onChange={(e) => setMsg(e.target.value)} aria-label="Message to suppliers" />
             <button className="btn-primary" disabled={invite.isPending} onClick={() => invite.mutate()}>{invite.isPending ? <Spinner /> : <Send className="h-4 w-4" />} Invite to bid</button>

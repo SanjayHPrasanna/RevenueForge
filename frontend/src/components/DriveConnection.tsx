@@ -91,7 +91,7 @@ export default function DriveConnection({ onReview }: { onReview: (remove: strin
   const fileCount = (plan?.new.length || 0) + (plan?.changed.length || 0);
   return (
     <>
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line bg-white px-3.5 py-2.5">
+      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line bg-surface px-3.5 py-2.5">
         <img aria-hidden="true" src="/brand/google-drive.png" alt="" className="h-4 w-4 shrink-0" />
         <div className="text-[13px] min-w-0">
           Connected to <b className="font-semibold">{folder.name}</b> in Google Drive

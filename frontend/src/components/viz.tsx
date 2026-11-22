@@ -25,7 +25,7 @@ export function TipProvider({ children }: { children: ReactNode }) {
     <TipCtx.Provider value={{ show, hide }}>
       {children}
       {tip && (
-        <div role="tooltip" className="fixed z-[70] pointer-events-none w-[320px] rounded-md bg-brand-950 text-white shadow-lift px-3 py-2.5 text-[12.5px] leading-snug"
+        <div role="tooltip" className="fixed z-[70] pointer-events-none w-[320px] rounded-[14px] glass text-ink px-3.5 py-3 text-[12.5px] leading-snug"
           style={{ left, top }}>
           {tip.content}
         </div>
@@ -58,7 +58,7 @@ export function FitLegend({ counts, className, onPick, active }: { counts?: Reco
 
 export function Swatch({ k, size = 10 }: { k: string; size?: number }) {
   const f = FIT.find((x) => x.key === k) || FIT[3];
-  return <span aria-hidden className="inline-block rounded-[3px] shrink-0" style={{ width: size, height: size, background: "hollow" in f ? "white" : f.fill, boxShadow: "hollow" in f ? `inset 0 0 0 1.5px ${f.fill}` : undefined }} />;
+  return <span aria-hidden className="inline-block rounded-[3px] shrink-0" style={{ width: size, height: size, background: "hollow" in f ? "transparent" : f.fill, boxShadow: "hollow" in f ? `inset 0 0 0 1.5px ${f.fill}` : undefined }} />;
 }
 
 // ---------------------------------------------------------------- coverage map (the signature view)
@@ -101,7 +101,7 @@ export function CoverageMap({ reqs, onPick, selected, compact = false, maxSectio
                   style={{ width: cell, height: cell }}>
                   {/* desirable requirements are drawn smaller: same colour, less weight */}
                   <span className="block rounded-[3px]" style={{ width: r.priority === "Desirable" ? cell * 0.62 : cell, height: r.priority === "Desirable" ? cell * 0.62 : cell,
-                    background: hollow ? "white" : f.fill, boxShadow: hollow ? `inset 0 0 0 1.5px ${f.fill}` : undefined }} />
+                    background: hollow ? "transparent" : f.fill, boxShadow: hollow ? `inset 0 0 0 1.5px ${f.fill}` : undefined }} />
                 </button>
               );
             })}
@@ -133,7 +133,7 @@ export function StatusRows({ rows, onPick }: { rows: { label: string; counts: Re
                   <button key={f.key} aria-label={`${r.label}, ${f.label}: ${n}`} onClick={() => onPick?.(r.label, f.key)}
                     onMouseMove={(e) => show(e, <div><b>{r.label}</b><div>{f.label}: <span className="num font-semibold">{n}</span> of {total} ({Math.round((n / total) * 100)}%)</div></div>)} onMouseLeave={hide}
                     className="h-full first:rounded-l last:rounded-r min-w-[3px]"
-                    style={{ flex: n, background: hollow ? "white" : f.fill, boxShadow: hollow ? `inset 0 0 0 1.5px ${f.fill}` : undefined }} />
+                    style={{ flex: n, background: hollow ? "transparent" : f.fill, boxShadow: hollow ? `inset 0 0 0 1.5px ${f.fill}` : undefined }} />
                 );
               })}
             </div>
@@ -157,9 +157,9 @@ export function ReadinessScale({ today, mitigated }: { today: number; mitigated:
     <div>
       <div className="relative h-[54px]">
         <div className="absolute inset-x-0 top-[22px] h-[10px] flex gap-[2px]">
-          {zones.map((z, i) => <div key={i} className="h-full first:rounded-l last:rounded-r" style={{ flex: z.to - z.from, background: ["#F1F4F6", "#E7EDF1", "#DCE5EB"][i] }} />)}
+          {zones.map((z, i) => <div key={i} className="h-full first:rounded-l last:rounded-r" style={{ flex: z.to - z.from, background: ["rgb(var(--line) / .06)", "rgb(var(--line) / .1)", "rgb(var(--line) / .15)"][i] }} />)}
         </div>
-        <div className="absolute top-[26px] h-[2px] bg-brand-950" style={{ left: `${today}%`, width: `${Math.max(0, mitigated - today)}%` }} />
+        <div className="absolute top-[26px] h-[2px] bg-brand-500" style={{ left: `${today}%`, width: `${Math.max(0, mitigated - today)}%` }} />
         <Marker at={today} label={`${today}%`} sub="Today" />
         <Marker at={mitigated} label={`${mitigated}%`} sub="With mitigations" strong />
       </div>
@@ -173,14 +173,14 @@ function Marker({ at, label, sub, strong }: { at: number; label: string; sub: st
   return (
     <div className="absolute top-0 -translate-x-1/2 flex flex-col items-center" style={{ left: `${at}%` }}>
       <div className={clsx("num text-[12px] font-bold leading-none whitespace-nowrap", strong ? "text-brand-950" : "text-ink-muted")}>{label}</div>
-      <div className={clsx("mt-[6px] h-[14px] w-[14px] rounded-full border-2 border-white", strong ? "bg-brand-950" : "bg-ink-faint")} />
+      <div className={clsx("mt-[6px] h-[14px] w-[14px] rounded-full border-2 border-white", strong ? "bg-brand-500" : "bg-ink-faint")} />
       <div className="sr-only">{sub}</div>
     </div>
   );
 }
 
 // ---------------------------------------------------------------- simple horizontal bars (one series, one colour)
-export function Bars({ rows, unit = "", color = "#1A82AE", format, onPick, highlight }: {
+export function Bars({ rows, unit = "", color = "rgb(var(--fit-strong))", format, onPick, highlight }: {
   rows: { label: string; value: number; sub?: string; tip?: ReactNode }[]; unit?: string; color?: string; format?: (v: number) => string;
   onPick?: (label: string) => void; highlight?: string;
 }) {
@@ -195,7 +195,7 @@ export function Bars({ rows, unit = "", color = "#1A82AE", format, onPick, highl
           <div className={clsx("text-[13px] truncate", highlight === r.label ? "font-semibold text-ink" : "text-ink-soft")}>{r.label}{r.sub && <span className="text-ink-faint"> {r.sub}</span>}</div>
           <div className="num text-[12.5px] font-semibold text-right">{fmt(r.value)}</div>
           <div className="col-span-2 h-[6px] rounded-full bg-line-soft mt-1">
-            <div className="h-full rounded-full" style={{ width: `${Math.max(1.5, (r.value / max) * 100)}%`, background: highlight && highlight !== r.label ? "#9FC6D9" : color }} />
+            <div className="h-full rounded-full" style={{ width: `${Math.max(1.5, (r.value / max) * 100)}%`, background: highlight && highlight !== r.label ? "rgb(var(--b400) / .45)" : color }} />
           </div>
         </div>
       ))}
@@ -218,8 +218,8 @@ export function PriceLadder({ cost, floorMargin, scenarios, selected, list, fmt,
     <div className="pt-1">
       <div className="relative h-[118px]">
         {/* below-floor zone */}
-        <div className="absolute top-[58px] h-[14px] rounded-l bg-[#FBE7E5]" style={{ left: 0, width: `${X(floor)}%` }} />
-        <div className="absolute top-[58px] h-[14px] rounded-r bg-[#EEF3F6]" style={{ left: `${X(floor)}%`, right: 0 }} />
+        <div className="absolute top-[58px] h-[14px] rounded-l bg-fit-gap-soft" style={{ left: 0, width: `${X(floor)}%` }} />
+        <div className="absolute top-[58px] h-[14px] rounded-r bg-paper" style={{ left: `${X(floor)}%`, right: 0 }} />
         {/* cost line */}
         <div className="absolute top-[44px] bottom-[18px] w-[2px] bg-ink" style={{ left: `${X(cost)}%` }} />
         <div className="absolute bottom-0 -translate-x-1/2 text-[11.5px] text-ink whitespace-nowrap" style={{ left: `${X(cost)}%` }}>Cost <span className="num font-semibold">{fmt(cost)}</span></div>
@@ -237,7 +237,7 @@ export function PriceLadder({ cost, floorMargin, scenarios, selected, list, fmt,
               <span className={clsx("text-[12px] whitespace-nowrap leading-tight", active ? "font-bold text-brand-950" : "text-ink-soft group-hover:text-ink")}>{s.name}</span>
               <span className={clsx("num text-[11.5px] whitespace-nowrap leading-tight", active ? "text-ember-600 font-semibold" : "text-ink-muted")}>{fmt(s.price)}</span>
               <span className="w-px bg-line" style={{ height: above ? 30 : 0 }} />
-              <span className={clsx("rounded-full border-2 border-white shadow", active ? "h-[18px] w-[18px] bg-ember-500" : "h-[13px] w-[13px] bg-brand-800")} style={{ marginTop: above ? 0 : 2 }} />
+              <span className={clsx("rounded-full border-2 border-white shadow", active ? "h-[18px] w-[18px] bg-ember-500" : "h-[13px] w-[13px] bg-brand-500")} style={{ marginTop: above ? 0 : 2 }} />
             </button>
           );
         })}
@@ -260,19 +260,19 @@ export function Waterfall({ steps, fmt }: { steps: { label: string; value: numbe
   const max = Math.max(...bars.map((b) => b.end)) * 1.08;
   const bw = (W - padL * 2) / steps.length;
   const Y = (v: number) => padT + (1 - v / max) * (H - padT - padB);
-  const fill = (k: string) => (k === "total" ? "#0C3D55" : k === "margin" ? "#F5833A" : "#7FB8D4");
+  const fill = (k: string) => (k === "total" ? "rgb(var(--b500))" : k === "margin" ? "rgb(var(--e500))" : "rgb(var(--b400) / .6)");
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label={steps.map((s) => `${s.label} ${fmt(s.value)}`).join(", ")}>
-      <line x1={padL} x2={W - padL} y1={H - padB} y2={H - padB} stroke="#DCE3E8" />
+      <line x1={padL} x2={W - padL} y1={H - padB} y2={H - padB} style={{ stroke: "rgb(var(--line) / .16)" }} />
       {bars.map((b, i) => {
         const x = padL + i * bw + bw * 0.18, w = bw * 0.64;
         const y0 = Y(Math.max(b.start, b.end)), y1 = Y(Math.min(b.start, b.end));
         return (
           <g key={b.label} onMouseMove={(e) => show(e, <div><b>{b.label}</b><div className="num">{fmt(b.value)}</div></div>)} onMouseLeave={hide}>
-            {i > 0 && <line x1={padL + (i - 1) * bw + bw * 0.82} x2={x} y1={Y(bars[i - 1].end)} y2={Y(bars[i - 1].end)} stroke="#B7C4CD" strokeWidth={1} />}
+            {i > 0 && <line x1={padL + (i - 1) * bw + bw * 0.82} x2={x} y1={Y(bars[i - 1].end)} y2={Y(bars[i - 1].end)} strokeWidth={1} style={{ stroke: "rgb(var(--line) / .3)" }} />}
             <rect x={x} y={y0} width={w} height={Math.max(2, y1 - y0)} rx={3} fill={fill(b.kind)} />
-            <text x={x + w / 2} y={y0 - 6} textAnchor="middle" fontSize={11.5} fontWeight={600} fill="#10222E" className="num">{fmt(b.value)}</text>
-            <text x={x + w / 2} y={H - padB + 16} textAnchor="middle" fontSize={11.5} fill="#5F707B">{b.label}</text>
+            <text x={x + w / 2} y={y0 - 6} textAnchor="middle" fontSize={11.5} fontWeight={600} className="num" style={{ fill: "rgb(var(--ink))" }}>{fmt(b.value)}</text>
+            <text x={x + w / 2} y={H - padB + 16} textAnchor="middle" fontSize={11.5} style={{ fill: "rgb(var(--muted))" }}>{b.label}</text>
           </g>
         );
       })}
@@ -333,7 +333,7 @@ export function TeamBars({ team }: { team: { role: string; fte: number; location
   return (
     <div>
       <div className="flex gap-4 text-[12px] text-ink-soft mb-3">
-        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] bg-brand-800" />Onsite</span>
+        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] bg-brand-500" />Onsite</span>
         <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-[3px] bg-brand-200" />Offshore</span>
       </div>
       <div className="space-y-2">
@@ -342,7 +342,7 @@ export function TeamBars({ team }: { team: { role: string; fte: number; location
             onMouseMove={(e) => show(e, <div><b>{role}</b><div className="num">{r.on + r.off} FTE: {r.on} onsite, {r.off} offshore</div>{r.open > 0 && <div>{r.open} still to hire</div>}</div>)} onMouseLeave={hide}>
             <div className="text-[13px] text-ink-soft truncate">{role}</div>
             <div className="flex gap-[2px] h-[12px]" style={{ width: `${((r.on + r.off) / max) * 100}%` }}>
-              {r.on > 0 && <div className="h-full rounded-l bg-brand-800 last:rounded-r" style={{ flex: r.on }} />}
+              {r.on > 0 && <div className="h-full rounded-l bg-brand-500 last:rounded-r" style={{ flex: r.on }} />}
               {r.off > 0 && <div className="h-full rounded-r bg-brand-200 first:rounded-l" style={{ flex: r.off }} />}
             </div>
             <div className="num text-[12.5px] font-semibold text-right">{r.on + r.off}</div>
@@ -357,7 +357,7 @@ export function TeamBars({ team }: { team: { role: string; fte: number; location
 export function WeightBar({ items }: { items: { label: string; weight: number }[] }) {
   const { show, hide } = useTip();
   const total = items.reduce((s, i) => s + i.weight, 0) || 1;
-  const shades = ["#0C3D55", "#125C7E", "#1A82AE", "#5BA6CC", "#9FC6D9", "#C9DEE9"];
+  const shades = ["rgb(var(--b500))", "rgb(var(--b500) / .8)", "rgb(var(--fit-strong))", "rgb(var(--b400) / .7)", "rgb(var(--b400) / .45)", "rgb(var(--b400) / .25)"];
   return (
     <div>
       <div className="flex gap-[2px] h-[14px]">

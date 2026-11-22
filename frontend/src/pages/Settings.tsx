@@ -41,7 +41,7 @@ export default function SettingsPage() {
   const isAdmin = user?.role === "admin";
   return (
     <div className="px-4 lg:px-8 py-6 max-w-[1100px] space-y-4">
-      <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Settings</h1>
+      <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950">Settings</h1>
       <MyEmails />
       {user?.tenant.kind !== "buyer" && <NetworkListing isAdmin={isAdmin} />}
       {user?.tenant.kind !== "buyer" && <section className="card p-5">
@@ -171,7 +171,7 @@ function NetworkListing({ isAdmin }: { isAdmin: boolean }) {
           <div className="font-bold">Supplier network</div>
           <div className="text-[13px] text-ink-muted mt-0.5">Let buyers who upload an RFP find you when your proven work matches it, and invite you to bid. Buyers see your capabilities, company certificates, case-study summaries without client names, and how many people have each skill. Never people's names, rates, deals or clients.</div>
         </div>
-        <span className={`chip ${data.settings.listed ? "bg-[#E4F1F7] text-fit-strong-ink" : "bg-line-soft text-ink-muted"}`}>{data.settings.listed ? "Listed" : "Not listed"}</span>
+        <span className={`chip ${data.settings.listed ? "bg-fit-strong-soft text-fit-strong-ink" : "bg-line-soft text-ink-muted"}`}>{data.settings.listed ? "Listed" : "Not listed"}</span>
       </div>
       <div className="grid md:grid-cols-2 gap-4 mt-4 text-[13px]">
         <div>
@@ -180,7 +180,7 @@ function NetworkListing({ isAdmin }: { isAdmin: boolean }) {
             {data.regions.map((r: string) => {
               const on = (f.regions || []).includes(r);
               return <button key={r} type="button" disabled={!isAdmin} onClick={() => setF({ ...f, regions: on ? f.regions.filter((x: string) => x !== r) : [...(f.regions || []), r] })}
-                className={`chip border ${on ? "bg-brand-50 border-brand-300 text-brand-800" : "bg-white border-line text-ink-soft"}`} aria-pressed={on}>{r}</button>;
+                className={`chip border ${on ? "bg-brand-50 border-brand-300 text-brand-800" : "bg-surface border-line text-ink-soft"}`} aria-pressed={on}>{r}</button>;
             })}
           </div>
         </div>

@@ -18,7 +18,7 @@ const TYPES: { key: string; label: string; color: string }[] = [
   { key: "Cost", label: "Cost", color: "#e34948" },
   { key: "Accelerator", label: "Accelerator", color: "#8A99A3" },
   { key: "Certification", label: "Certification", color: "#8A99A3" },
-  { key: "Deal", label: "Deal", color: "#10222E" },
+  { key: "Deal", label: "Deal", color: "#4f7bff" },
 ];
 const COLOR = Object.fromEntries(TYPES.map((t) => [t.key, t.color]));
 
@@ -53,13 +53,19 @@ function drawLabels(ctx: CanvasRenderingContext2D, scale: number, nodes: any[], 
     const x = n.x - w / 2 - pad, y = n.y + (n.type === "Deal" ? 14 : 7) / scale, h = fs + pad * 2;
     if (boxes.some(([bx, by, bw, bh]) => x < bx + bw && x + w + pad * 2 > bx && y < by + bh && y + h > by)) continue;
     boxes.push([x, y, w + pad * 2, h]);
-    ctx.fillStyle = "rgba(251,252,253,0.85)";
+    ctx.fillStyle = CANVAS().label;
     ctx.fillRect(x, y, w + pad * 2, h);
-    ctx.fillStyle = n.id === sel ? "#10222E" : "#3D4F5B";
+    ctx.fillStyle = n.id === sel ? CANVAS().ink : CANVAS().ink2;
     ctx.fillText(label, n.x, y + pad);
     drawn++;
   }
 }
+
+// the canvas can't read CSS variables, so it gets the current theme's colours
+const dark = () => document.documentElement.getAttribute("data-theme") !== "light";
+const CANVAS = () => dark()
+  ? { bg: "rgba(0,0,0,0)", label: "rgba(11,19,42,0.8)", ink: "#eef3ff", ink2: "#cdd6ec", link: "rgba(170,190,255,0.22)", hot: "#6a93ff" }
+  : { bg: "rgba(0,0,0,0)", label: "rgba(250,252,255,0.85)", ink: "#0d1630", ink2: "#29344f", link: "rgba(20,40,90,0.2)", hot: "#2f5cf0" };
 
 export default function GraphPage() {
   const { data: deals } = useQuery({ queryKey: ["deals"], queryFn: () => api.get("/deals") });
@@ -111,7 +117,7 @@ export default function GraphPage() {
     <div className="px-4 lg:px-8 py-6 max-w-[1500px]">
       <div className="flex flex-wrap items-end gap-3 mb-4">
         <div>
-          <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Knowledge graph</h1>
+          <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950">Knowledge graph</h1>
           <p className="text-ink-muted text-sm mt-0.5">How your requirements, capabilities, technologies, skills, references, architecture, people and costs connect. It grows with every deal.</p>
         </div>
         <div className="flex-1" />
@@ -126,14 +132,14 @@ export default function GraphPage() {
           const off = hidden.has(t.key);
           return (
             <button key={t.key} disabled={!n} onClick={() => { const s = new Set(hidden); off ? s.delete(t.key) : s.add(t.key); setHidden(s); }}
-              className={clsx("chip border h-7 px-2.5 text-[12px]", off || !n ? "bg-white border-line text-ink-faint" : "bg-white border-line text-ink")}>
-              <span className="h-2.5 w-2.5 rounded-full" style={{ background: off || !n ? "#DCE3E8" : t.color }} />{t.label} <span className="num text-ink-muted">{n}</span>
+              className={clsx("chip border h-7 px-2.5 text-[12px]", off || !n ? "bg-surface border-line text-ink-faint" : "bg-surface border-line text-ink")}>
+              <span className="h-2.5 w-2.5 rounded-full" style={{ background: off || !n ? "rgb(var(--line) / .2)" : t.color }} />{t.label} <span className="num text-ink-muted">{n}</span>
             </button>
           );
         })}
       </div>
       <div className="grid lg:grid-cols-[minmax(0,1fr)_320px] gap-4">
-        <div ref={wrap} className="card overflow-hidden h-[calc(100vh-240px)] min-h-[480px] bg-[#FBFCFD]">
+        <div ref={wrap} className="card overflow-hidden h-[calc(100vh-240px)] min-h-[480px] bg-paper">
           {isLoading ? <PageLoader /> : gd.nodes.length === 0 ? (
             <Empty icon={<Network className="h-8 w-8" />} title="The graph is empty">Import your company pack in the Knowledge library to build it.</Empty>
           ) : (
@@ -143,11 +149,11 @@ export default function GraphPage() {
               onEngineStop={() => fg.current?.zoomToFit(400, 40)}
               width={size.w}
               height={size.h}
-              backgroundColor="#FBFCFD"
+              backgroundColor={CANVAS().bg}
               nodeRelSize={4}
               nodeVal={(n: any) => (n.type === "Deal" ? 10 : 1 + Math.min(6, n.degree / 3))}
               nodeColor={(n: any) => (sel && n.id !== sel ? COLOR[n.type] + "55" : COLOR[n.type])}
-              linkColor={(l: any) => (sel && (l.source.id === sel || l.target.id === sel) ? "#118AC3" : "#C9D3DA")}
+              linkColor={(l: any) => (sel && (l.source.id === sel || l.target.id === sel) ? CANVAS().hot : CANVAS().link)}
               linkWidth={(l: any) => (sel && (l.source.id === sel || l.target.id === sel) ? 1.6 : 0.6)}
               cooldownTicks={120}
               onNodeClick={(n: any) => setSel(n.id)}
@@ -160,7 +166,7 @@ export default function GraphPage() {
         <aside className="card p-5 h-fit">
           {!sel || !detail ? (
             <div className="text-sm text-ink-muted">
-              <div className="font-bold text-ink text-[15px] mb-2">Explore</div>
+              <div className="font-bold text-ink text-[14px] mb-2">Explore</div>
               Click any node to see what it connects to. Focus on a deal to see the path from its requirements to your capabilities, people and costs.
               <div className="mt-4 num text-[13px] text-ink-soft">{data?.totals?.nodes ?? 0} nodes · {data?.totals?.edges ?? 0} connections in total</div>
             </div>

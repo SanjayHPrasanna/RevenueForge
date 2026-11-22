@@ -8,7 +8,7 @@ import { api } from "../lib/api";
 import { money } from "../lib/format";
 
 function shade(n: number, max: number) {
-  if (!n) return "bg-white text-ink-faint";
+  if (!n) return "bg-surface text-ink-faint";
   const r = n / Math.max(1, max);
   return r > 0.66 ? "bg-brand-700 text-white" : r > 0.33 ? "bg-brand-400 text-white" : r > 0.1 ? "bg-brand-200 text-brand-950" : "bg-brand-50 text-brand-900";
 }
@@ -42,7 +42,7 @@ export default function Market() {
     <div className="px-4 lg:px-8 py-7 max-w-[1400px] space-y-5">
       <div className="stagger">
         <div className="eyebrow mb-1.5">Market insights</div>
-        <h1 className="font-display text-[34px] md:text-[40px] leading-[1.05] tracking-[-0.025em] text-brand-950">Where your offerings are in demand</h1>
+        <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950">Where your offerings are in demand</h1>
         <p className="text-ink-muted text-[14px] mt-1">Counted from the {data.tenders_read.toLocaleString()} public tenders the radar read in the last {data.window_days} days, matched to your own capabilities and products.</p>
       </div>
       <div className="card px-5 py-3 text-[12.5px] text-ink-soft flex gap-2">
@@ -80,7 +80,7 @@ export default function Market() {
           {current && (
             <section className="card p-5">
               <div className="flex flex-wrap items-baseline gap-2 mb-4">
-                <div className="font-bold text-[16px]">{current.name}</div>
+                <div className="font-bold text-[14px]">{current.name}</div>
                 <span className="text-[12px] text-ink-muted">{current.kind} · {current.total} matching tenders, {current.open} still open</span>
                 {Object.keys(current.value_by_currency).length > 0 && <span className="text-[12px] text-ink-muted">· stated value {Object.entries(current.value_by_currency).map(([c, v]) => money(v as number, c)).join(" + ")}</span>}
               </div>
