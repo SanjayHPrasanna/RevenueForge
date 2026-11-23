@@ -71,7 +71,8 @@ function Private({ children }: { children: React.ReactNode }) {
 function Public({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   if (loading) return <PageLoader />;
-  if (user) return <Navigate to="/app" replace />;
+  // signed in already (or just now, on sign-up): a brand-new vendor workspace goes to setup, not to an empty workspace
+  if (user) return <Navigate to={user.tenant?.kind === "buyer" ? "/app/buyer" : Object.keys(user.tenant?.onboarding || {}).length ? "/app" : "/onboarding"} replace />;
   return <>{children}</>;
 }
 
