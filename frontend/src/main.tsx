@@ -23,6 +23,7 @@ const Learning = React.lazy(() => PAGES.learning());
 const Library = React.lazy(() => PAGES.library());
 const Onboarding = React.lazy(() => PAGES.onboarding());
 const SettingsPage = React.lazy(() => PAGES.settings());
+const Connect = React.lazy(() => import("./pages/Connect"));
 const WinLoss = React.lazy(() => PAGES.winloss());
 const RadarPage = React.lazy(() => PAGES.radar());
 const Market = React.lazy(() => PAGES.market());
@@ -64,13 +65,17 @@ function Private({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const loc = useLocation();
   if (loading) return <PageLoader />;
-  if (!user) return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname)}`} replace />;
+  if (!user) return <Navigate to={`/login?next=${encodeURIComponent(loc.pathname + loc.search)}`} replace />;
   return <>{children}</>;
 }
 
 function Public({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
+  const loc = useLocation();
   if (loading) return <PageLoader />;
+  // signed in from a link that asked for a page (e.g. connecting Claude): go back there, never to another site
+  const next = new URLSearchParams(loc.search).get("next") || "";
+  if (user && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\")) return <Navigate to={next} replace />;
   // signed in already (or just now, on sign-up): a brand-new vendor workspace goes to setup, not to an empty workspace
   if (user) return <Navigate to={user.tenant?.kind === "buyer" ? "/app/buyer" : Object.keys(user.tenant?.onboarding || {}).length ? "/app" : "/onboarding"} replace />;
   return <>{children}</>;
@@ -93,6 +98,7 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
               <Route path="/login" element={<Public><Login /></Public>} />
               <Route path="/signup" element={<Public><Signup /></Public>} />
               <Route path="/onboarding" element={<Private><Onboarding /></Private>} />
+              <Route path="/connect" element={<Private><Connect /></Private>} />
               <Route path="/app" element={<Private><Shell /></Private>}>
                 <Route index element={<Dashboard />} />
                 <Route path="deals" element={<Deals />} />

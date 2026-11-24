@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cpu, Download, ShieldCheck, Trash2, UserPlus } from "lucide-react";
 import { useEffect, useState } from "react";
+import AiAssistants from "../components/AiAssistants";
 import { Modal, PageLoader, Spinner, useToast } from "../components/ui";
 import { api, download } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -43,6 +44,7 @@ export default function SettingsPage() {
     <div className="px-4 lg:px-8 py-6 max-w-[1100px] space-y-4">
       <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950">Settings</h1>
       <MyEmails />
+      <AiAssistants />
       {user?.tenant.kind !== "buyer" && <NetworkListing isAdmin={isAdmin} />}
       {user?.tenant.kind !== "buyer" && <section className="card p-5">
         <div className="font-bold">Commercial policy</div>

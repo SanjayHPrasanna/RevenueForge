@@ -531,3 +531,47 @@ class NetworkInvite(Base):
     deal_id: Mapped[str] = mapped_column(String(32), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# --------------------------------------------------------------------------- AI assistants (MCP): Claude, Glean and others
+class OAuthClient(Base):
+    """An AI assistant registered itself (OAuth dynamic client registration) so its users can connect their workspace."""
+    __tablename__ = "oauth_clients"
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)  # the client_id
+    name: Mapped[str] = mapped_column(String(200), default="")
+    redirect_uris: Mapped[list] = mapped_column(JSON, default=list)
+    secret_hash: Mapped[str] = mapped_column(String(128), default="")  # empty: public client (PKCE only)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class OAuthCode(Base):
+    """A one-time code handed to the assistant after the person pressed Allow. Lives a few minutes."""
+    __tablename__ = "oauth_codes"
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)  # sha256 of the code
+    client_id: Mapped[str] = mapped_column(String(64), index=True)
+    user_id: Mapped[str] = mapped_column(String(32))
+    tenant_id: Mapped[str] = mapped_column(String(32))
+    redirect_uri: Mapped[str] = mapped_column(String(500))
+    code_challenge: Mapped[str] = mapped_column(String(200))
+    scope: Mapped[str] = mapped_column(String(200), default="")
+    resource: Mapped[str] = mapped_column(String(500), default="")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class McpToken(Base):
+    """Access to the workspace from an AI assistant: OAuth access/refresh tokens, or a personal API key.
+    Only a hash is stored; the token itself is shown once."""
+    __tablename__ = "mcp_tokens"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # access, refresh, api_key
+    user_id: Mapped[str] = mapped_column(String(32), index=True)
+    tenant_id: Mapped[str] = mapped_column(String(32), index=True)
+    client_id: Mapped[str] = mapped_column(String(64), default="")
+    client_name: Mapped[str] = mapped_column(String(200), default="")  # "Claude", "Glean", or the key's label
+    grant_id: Mapped[str] = mapped_column(String(32), default="", index=True)  # one connection = one grant (access + refresh tokens)
+    hint: Mapped[str] = mapped_column(String(16), default="")  # last characters, so a person can tell keys apart
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
