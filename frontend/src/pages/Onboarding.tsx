@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowRight, Check, FolderUp } from "lucide-react";
+import { ArrowRight, Check, FileUp, FolderUp } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import FolderImport from "../components/FolderImport";
+import GoogleDriveImport from "../components/GoogleDriveImport";
 import UploadReview, { KIND_INFO, TemplateUpload } from "../components/UploadReview";
 import { PageLoader, ProductMark, Spinner, useToast } from "../components/ui";
 import { api } from "../lib/api";
@@ -56,6 +57,8 @@ export default function Onboarding() {
   const nav = useNavigate();
   const { data: company, isLoading } = useQuery({ queryKey: ["company"], queryFn: () => api.get("/company") });
   const [step, setStep] = useState<string | null>(null);
+  const [drive, setDrive] = useState(false);
+  const [folderKey, setFolderKey] = useState(0);  // remount the folder review after a Drive import so it picks up that batch
   useEffect(() => {
     if (company && step === null) {
       const st = company.onboarding.steps;
@@ -133,14 +136,28 @@ export default function Onboarding() {
         </aside>
         {step === "folder" ? (
           <section className="card p-6 md:p-8 min-w-0">
-            <div className="text-[12.5px] text-ink-muted">Fastest way to set up</div>
-            <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950 mt-1 mb-2">Bring in everything at once</h1>
-            <p className="text-ink-soft text-[13.5px] mb-5">No need to upload files one by one. Point RevenueForge at the folder where your company knowledge lives, check what it found, and import it all in one go. You can still fix or add single files afterwards.</p>
-            <FolderImport onDone={firstOpen} />
-            <div className="mt-6 pt-5 border-t border-line-soft flex items-center">
-              <div className="flex-1" />
-              <button className="btn-outline" onClick={() => setStep("profile")}>Set up step by step instead <ArrowRight className="h-4 w-4" /></button>
+            <div className="text-[12.5px] text-ink-muted">Welcome to {company.name}</div>
+            <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950 mt-1 mb-2">Build your knowledge library</h1>
+            <p className="text-ink-soft text-[13.5px] mb-5">Your workspace is empty. Bids are only judged against what you bring in here, so pick how you want to add your company knowledge: skills, capabilities, certifications, rates, case studies and accelerators.</p>
+            <div className="grid sm:grid-cols-3 gap-3 mb-6">
+              <div className="rounded-xl border border-brand-200 bg-brand-50/60 p-4">
+                <FolderUp className="h-5 w-5 text-brand-600" />
+                <div className="font-semibold text-[14px] mt-2">Import a folder</div>
+                <div className="text-[12.5px] text-ink-muted mt-0.5">Every file at once. Use the box below.</div>
+              </div>
+              <button className="rounded-xl border border-line p-4 text-left hover:border-brand-200 hover:bg-surface transition-colors" onClick={() => setDrive(true)}>
+                <img aria-hidden="true" src="/brand/google-drive.png" alt="" className="h-5 w-5" />
+                <div className="font-semibold text-[14px] mt-2">Connect Google Drive</div>
+                <div className="text-[12.5px] text-ink-muted mt-0.5">Pick a Drive folder; refresh it later.</div>
+              </button>
+              <button className="rounded-xl border border-line p-4 text-left hover:border-brand-200 hover:bg-surface transition-colors" onClick={() => setStep("profile")}>
+                <FileUp className="h-5 w-5 text-brand-600" />
+                <div className="font-semibold text-[14px] mt-2">Upload one by one</div>
+                <div className="text-[12.5px] text-ink-muted mt-0.5">A guided step for each type of file.</div>
+              </button>
             </div>
+            <FolderImport key={folderKey} onDone={firstOpen} />
+            {drive && <GoogleDriveImport onClose={() => setDrive(false)} onImported={() => { setDrive(false); setFolderKey((k) => k + 1); }} />}
           </section>
         ) : (
         <section className="card p-6 md:p-8 min-w-0">
