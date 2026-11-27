@@ -1,8 +1,7 @@
 import clsx from "clsx";
-import { NoticeBar } from "./GoogleButton";
-import { BookOpen, Brain, Briefcase, CalendarDays, ChevronDown, FileSearch, LayoutDashboard, LogOut, Menu, Moon, Network, PanelLeftClose, PanelLeftOpen, Radar, Settings, ShieldCheck, Sparkles, Sun, TrendingUp, Trophy, Users, X } from "lucide-react";
+import { BookOpen, Brain, Briefcase, CalendarDays, ChevronDown, FolderKanban, LayoutDashboard, LogOut, Menu, Moon, Network, PanelLeftClose, PanelLeftOpen, Radar, Settings, ShieldCheck, Sparkles, Sun, TrendingUp, Trophy, Users, X } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
-import { Navigate, NavLink, Outlet, useLocation } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -17,12 +16,15 @@ const GROUPS: { label: string; items: Item[] }[] = [
     { to: "/app", label: "Home", icon: LayoutDashboard, end: true },
     { to: "/app/opportunities", label: "Opportunities", icon: Radar },
     { to: "/app/market", label: "Market insights", icon: TrendingUp },
-    { to: "/app/customers", label: "Find customers", icon: Users },
   ] },
   { label: "Bids", items: [
     { to: "/app/deals", label: "Deals", icon: Briefcase },
     { to: "/app/calendar", label: "Calendar", icon: CalendarDays },
     { to: "/app/winloss", label: "Win/loss", icon: Trophy },
+  ] },
+  { label: "Delivery", items: [
+    { to: "/app/projects", label: "Projects", icon: FolderKanban },
+    { to: "/app/clients", label: "Client 360", icon: Users },
   ] },
   { label: "Knowledge", items: [
     { to: "/app/library", label: "Knowledge library", icon: BookOpen },
@@ -31,12 +33,9 @@ const GROUPS: { label: string; items: Item[] }[] = [
   ] },
   { label: "Workspace", items: [{ to: "/app/settings", label: "Settings", icon: Settings }] },
 ];
-// Buyer workspaces (organisations that issue RFPs) see only their requests and settings.
-const BUYER_GROUPS = [{ label: "Workspace", items: [{ to: "/app/buyer", label: "Requests", icon: FileSearch, end: false }, { to: "/app/settings", label: "Settings", icon: Settings }] }];
-const BUYER_PATHS = ["/app/buyer", "/app/settings", "/app/platform"];
-const TITLES: [string, string][] = [["/app/opportunities", "Opportunities"], ["/app/market", "Market insights"], ["/app/customers", "Find customers"],
+const TITLES: [string, string][] = [["/app/opportunities", "Opportunities"], ["/app/market", "Market insights"], ["/app/projects", "Projects"], ["/app/clients", "Client 360"],
   ["/app/deals", "Deals"], ["/app/calendar", "Calendar"], ["/app/winloss", "Win/loss"], ["/app/library", "Knowledge library"], ["/app/graph", "Knowledge graph"],
-  ["/app/learning", "AI learning"], ["/app/settings", "Settings"], ["/app/platform", "Platform console"], ["/app/buyer", "Requests"]];
+  ["/app/learning", "AI learning"], ["/app/settings", "Settings"], ["/app/platform", "Platform console"]];
 
 function useStored(key: string, initial: string): [string, (v: string) => void] {
   const [v, setV] = useState(() => {
@@ -76,13 +75,12 @@ export default function Shell() {
   const [theme, toggleTheme] = useTheme();
   const loc = useLocation();
   const { data: company } = useQuery({ queryKey: ["company"], queryFn: () => api.get("/company") });
-  const isBuyer = user?.tenant.kind === "buyer";
-  const ob = isBuyer ? null : company?.onboarding;
+  const ob = company?.onboarding;
   const qc = useQueryClient();
-  useEffect(() => { if (user) warmPages({ buyer: isBuyer, platformAdmin: !!user.platform_admin }); }, [user?.id]);
-  const { data: due } = useQuery({ queryKey: ["reminders"], queryFn: () => api.get<any>("/calendar/reminders"), enabled: !!user && !isBuyer, refetchInterval: 300000 });
+  useEffect(() => { if (user) warmPages({ platformAdmin: !!user.platform_admin }); }, [user?.id]);
+  const { data: due } = useQuery({ queryKey: ["reminders"], queryFn: () => api.get<any>("/calendar/reminders"), enabled: !!user, refetchInterval: 300000 });
   const badge: Record<string, { n: number; hot: boolean } | undefined> = { "/app/calendar": due?.count ? { n: due.count, hot: due.overdue > 0 } : undefined };
-  const groups = [...(isBuyer ? BUYER_GROUPS : GROUPS)];
+  const groups = [...GROUPS];
   if (user?.platform_admin) groups[groups.length - 1] = { ...groups[groups.length - 1], items: [...groups[groups.length - 1].items, { to: "/app/platform", label: "Platform console", icon: ShieldCheck, end: false }] };
   const title = TITLES.find(([p]) => loc.pathname.startsWith(p))?.[1] || "Home";
   const initials = (user?.name || "").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
@@ -200,10 +198,10 @@ export default function Shell() {
             {company?.llm && (
               <span
                 className={clsx("hidden md:inline-flex chip", company.llm.enabled ? "bg-ok/[.14] text-ok" : "bg-ink/[.07] text-ink-muted")}
-                title={company.llm.enabled ? `AI engine: ${company.llm.provider} ${company.llm.model}${company.llm.paid ? "" : " (free tier)"}` : company.llm.disabled_reason || "AI is off. Add GEMINI_API_KEY to backend/.env and restart."}
+                title={company.llm.enabled ? `AI engine: ${company.llm.provider} ${company.llm.model}` : company.llm.disabled_reason || "AI is off. Add GEMINI_API_KEY to backend/.env and restart."}
               >
                 <span className={clsx("h-1.5 w-1.5 rounded-full", company.llm.enabled ? "bg-ok" : "bg-ink-faint")} />
-                {company.llm.enabled ? `AI · ${company.llm.provider}${company.llm.paid ? "" : " · free tier"}` : company.llm.disabled_reason ? "AI key problem" : "AI off · rules engine"}
+                {company.llm.enabled ? `AI · ${company.llm.provider}` : company.llm.disabled_reason ? "AI key problem" : "AI off · rules engine"}
               </span>
             )}
             <button onClick={toggleTheme} className="h-9 w-9 grid place-items-center rounded-[12px] text-ink-soft hover:text-ink hover:bg-ink/[.06] shadow-[inset_0_0_0_1px_rgb(var(--line)/.12)]"
@@ -232,17 +230,15 @@ export default function Shell() {
               )}
             </div>
           </div>
-          <NoticeBar className="max-w-[1480px] mx-auto mt-2" text={company ? company.notice || "" : undefined} />
         </header>
         {/* The loading boundary sits outside the per-page <main>, so while the next page gets ready the current one
             stays on screen (navigation runs as a transition) instead of flashing a loading screen. */}
         <Suspense fallback={<PageLoader />}>
           <main key={loc.pathname.split("/").slice(0, 3).join("/")} className="flex-1 min-w-0 w-full max-w-[1480px] mx-auto page-enter pb-20 lg:pr-1">
-            {isBuyer && !BUYER_PATHS.some((p) => loc.pathname.startsWith(p)) ? <Navigate to="/app/buyer" replace />
-              : !isBuyer && loc.pathname.startsWith("/app/buyer") ? <Navigate to="/app" replace /> : <Outlet />}
+            <Outlet />
           </main>
         </Suspense>
-        {!isBuyer && <LandingAssistant mode="workspace" company={company?.name} />}
+        {<LandingAssistant mode="workspace" company={company?.name} />}
       </div>
     </div>
   );

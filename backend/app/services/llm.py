@@ -207,13 +207,7 @@ def notice() -> str:
     n = settings.public_notice
     if n.lower() in ("off", "none", "false", "0"):
         return ""
-    if n:
-        return n
-    p = current_profile()
-    if _usable(p) == "gemini" and not p.paid:
-        return ("Test version: use sample or dummy documents only. The AI runs on a free Google key, "
-                "so please don't upload confidential client RFPs or company data.")
-    return ""
+    return n  # no automatic "test version" banner; a server admin can still set one with PUBLIC_NOTICE
 
 
 def reset_state(all_keys: bool = True) -> None:

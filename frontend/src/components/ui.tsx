@@ -136,12 +136,14 @@ export function Modal({ open, onClose, title, children, wide, xl }: { open: bool
 export function Dropzone({
   accept,
   onFile,
+  onFiles,
   busy,
   hint,
   label = "Drop a file here or browse",
 }: {
   accept: string;
-  onFile: (f: File) => void;
+  onFile?: (f: File) => void;
+  onFiles?: (f: File[]) => void;  // set this to take several files at once
   busy?: boolean;
   hint?: string;
   label?: string;
@@ -158,8 +160,9 @@ export function Dropzone({
       onDrop={(e) => {
         e.preventDefault();
         setOver(false);
-        const f = e.dataTransfer.files?.[0];
-        if (f && !busy) onFile(f);
+        const all = Array.from(e.dataTransfer.files || []);
+        if (!all.length || busy) return;
+        if (onFiles) onFiles(all); else onFile?.(all[0]);
       }}
       onClick={() => !busy && ref.current?.click()}
       onKeyDown={(e) => e.key === "Enter" && ref.current?.click()}
@@ -170,7 +173,11 @@ export function Dropzone({
         over ? "border-brand-500 bg-brand-500/[.08] scale-[1.01]" : "border-ink/20 bg-ink/[.02] hover:border-brand-400 hover:bg-brand-500/[.04]",
       )}
     >
-      <input ref={ref} type="file" accept={accept} hidden onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+      <input ref={ref} type="file" accept={accept} hidden multiple={!!onFiles} onChange={(e) => {
+        const all = Array.from(e.target.files || []);
+        if (all.length) { if (onFiles) onFiles(all); else onFile?.(all[0]); }
+        e.target.value = "";
+      }} />
       <div className="flex flex-col items-center gap-2 text-sm">
         <span className="h-11 w-11 rounded-[14px] grid place-items-center bg-brand-500/[.12] text-brand-600">
           {busy ? <Spinner className="h-5 w-5" /> : <FileUp className="h-5 w-5" />}

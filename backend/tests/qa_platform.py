@@ -108,7 +108,7 @@ with TestClient(app) as c:
     ok("no password hashes or keys in the console", "pbkdf2" not in blob and "abcd1234efgh5678" not in blob)
 
     # ---------------------------------------------------------------- numbers
-    ok("overview: 3 companies (2 sellers, 1 buyer)", ov["companies"]["total"] == 3 and ov["companies"]["buyers"] == 1, str(ov["companies"]))
+    ok("overview: 3 companies, all bidders (the buyer side was retired)", ov["companies"]["total"] == 3 and ov["companies"]["buyers"] == 0, str(ov["companies"]))
     ok("overview: 5 people", ov["people"]["total"] == 5, str(ov["people"]))
     ok("overview: 1 deal", ov["deals"]["total"] == 1)
     ok("overview: AI calls and failures counted", ov["ai"]["calls"] == 3 and ov["ai"]["failures"] == 2, str(ov["ai"]))

@@ -680,3 +680,65 @@ async def create_deal(s: Session, a: dict):
         raise
     return {"deal_id": d["id"], "name": d["name"], "status": d["status"], "app_url": s.link(f"/app/deals/{d['id']}"),
             "next": "Analysis is running. Call get_deal with this deal_id in a minute or two for the verdict."}
+
+
+@tool("list_projects", "List delivery projects",
+      "Projects being delivered after a win: status, health (with the reasons), milestones done and late, contract value, "
+      "invoiced, paid and overdue amounts, and the next milestone.",
+      {"status": {"type": "string", "enum": ["planning", "active", "on_hold", "completed", "cancelled"]},
+       "health": {"type": "string", "enum": ["green", "amber", "red", "closed"]}})
+async def list_projects(s: Session, a: dict):
+    r = await s.api("GET", "/api/projects")
+    rows = r.get("projects", [])
+    if a.get("status"):
+        rows = [p for p in rows if p["status"] == a["status"]]
+    if a.get("health"):
+        rows = [p for p in rows if p["summary"]["health"] == a["health"]]
+    out = [{"project_id": p["id"], "name": p["name"], "client": p["client"], "status": p["status"], "health": p["summary"]["health"],
+            "health_reasons": p["summary"]["health_reasons"], "milestones": p["summary"]["milestones"], "next_milestone": p["summary"]["next_milestone"],
+            "currency": p["currency"], **{k: p["summary"][k] for k in ("value_total", "invoiced", "paid", "outstanding", "overdue", "burn_pct")},
+            "app_url": s.link(f"/app/projects/{p['id']}")} for p in rows]
+    return {"total": len(out), "projects": out,
+            "won_deals_not_started": [{"deal_id": x["deal_id"], "name": x["name"], "client": x["client"]} for x in r.get("ready", [])]}
+
+
+@tool("get_project", "Get a delivery project",
+      "Everything about one project: health and why, milestones, team, invoices, costs, change requests, risks, issues, SLA months "
+      "and the latest status reports, plus what the bid promised.",
+      {"project_id": {"type": "string", "description": "From list_projects."}}, ["project_id"])
+async def get_project(s: Session, a: dict):
+    pid = str(a.get("project_id", ""))
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", pid):
+        raise ToolError("Give a project_id from list_projects.")
+    p = await s.api("GET", f"/api/projects/{pid}")
+    groups: dict[str, list] = {}
+    for i in p.get("items", []):
+        row = {k: i[k] for k in ("title", "status", "owner", "due_date", "done_date", "amount", "late") if i.get(k) not in (None, "", 0, False)}
+        row.update({k: v for k, v in (i.get("data") or {}).items() if v not in (None, "")})
+        groups.setdefault(i["kind"], []).append(row)
+    updates = sorted(groups.pop("update", []), key=lambda u: u.get("due_date", ""), reverse=True)
+    return {"name": p["name"], "client": p["client"], "status": p["status"], "currency": p["currency"], "start": p["start_date"], "end": p["end_date"],
+            "manager": (p.get("manager") or {}).get("name"), "summary": p["summary"], "from_the_bid": p.get("bid"),
+            "milestones": groups.get("milestone", []), "team": groups.get("member", [])[:40], "invoices": groups.get("invoice", []),
+            "costs": groups.get("cost", [])[:40], "change_requests": groups.get("change", []), "risks": groups.get("risk", []),
+            "issues": groups.get("issue", []), "sla_months": groups.get("sla", [])[-12:], "status_reports": updates[:5],
+            "app_url": s.link(f"/app/projects/{pid}")}
+
+
+@tool("client_360", "Client 360",
+      "One client across bids and delivery: bids won, lost and open, win rate, projects and their health, contracted, paid, "
+      "outstanding and overdue amounts, and a timeline. Without a client, lists every client with the headline numbers.",
+      {"client": {"type": "string", "description": "Client name (or alias, for confidential deals). Leave out to list all clients."}})
+async def client_360(s: Session, a: dict):
+    rows = await s.api("GET", "/api/clients")
+    q = str(a.get("client") or "").strip().lower()
+    if not q:
+        return {"clients": [{k: c[k] for k in ("name", "deals", "win_rate", "projects", "contracted", "outstanding", "overdue", "health")} for c in rows]}
+    hit = next((c for c in rows if c["name"].lower() == q), None) or next((c for c in rows if q in c["name"].lower()), None)
+    if not hit:
+        raise ToolError("No client by that name. Call client_360 without a client to see the list.")
+    c = await s.api("GET", f"/api/clients/{hit['key']}")
+    c.pop("key", None)
+    c["timeline"] = [{"at": e["at"], "what": e["text"]} for e in c.get("timeline", [])[:25]]
+    c["app_url"] = s.link(f"/app/clients/{hit['key']}")
+    return c

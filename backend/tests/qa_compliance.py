@@ -82,10 +82,7 @@ with TestClient(app, raise_server_exceptions=False) as c:
     # ------------------------------------------------------------------ free-tier confirmation
     real_ft = llm.free_tier
     llm.free_tier = lambda: True
-    r = c.post("/api/deals", files={"file": ("rfp.docx", open(RFP, "rb"))}, data={"name": "No ack"}, headers=AP)
-    ok("free tier: RFP refused without confirmation (428)", r.status_code == 428 and "free Google Gemini key" in r.json()["detail"], str(r.status_code))
-    ok("free tier: nothing was stored", not any(d["name"] == "No ack" for d in (c.get("/api/deals", headers=A).json().get("items", c.get("/api/deals", headers=A).json())
-                                                                               if isinstance(c.get("/api/deals", headers=A).json(), dict) else c.get("/api/deals", headers=A).json())))
+    ok("no 'test version' banner by default", not c.get("/api/auth/config", headers=A).json().get("notice"))
     llm.free_tier = real_ft  # keep the run itself off the AI
     llm_ack = True
     llm.free_tier = lambda: True
@@ -99,24 +96,6 @@ with TestClient(app, raise_server_exceptions=False) as c:
     ok("paid/no AI: no confirmation needed", r.status_code == 200)
     llm.free_tier = real_ft
     wait(r.json()["id"], A)
-    # invitation accept
-    C = reg("QA Buyer Authority", "admin@comp-c.example", "buyer")
-    c.put("/api/network/profile", json={"listed": True}, headers=A)
-    c.put("/api/network/profile", json={"listed": True}, headers=B)
-    rq = c.post("/api/buyer/requests", files={"file": ("rfp.docx", open(RFP, "rb"))}, headers=C).json()
-    sl = c.get(f"/api/buyer/requests/{rq['id']}/shortlist", headers=C).json()["vendors"]
-    ids = [v["vendor_id"] for v in sl if v["name"] in ("Meridian Integration Labs", "Cobalt Ridge Technologies")]
-    c.post(f"/api/buyer/requests/{rq['id']}/invite", json={"vendor_ids": ids}, headers=C)
-    inv_a = c.get("/api/network/invitations", headers=A).json()[0]["id"]
-    inv_b = c.get("/api/network/invitations", headers=B).json()[0]["id"]
-    llm.free_tier = lambda: True
-    ok("free tier: accepting an invitation needs confirmation", c.post(f"/api/network/invitations/{inv_b}/accept", json={}, headers=B).status_code == 428)
-    r = c.post(f"/api/network/invitations/{inv_b}/accept", json={"ai_ack": True}, headers=B)
-    ok("free tier: accepted with confirmation", r.status_code == 200, r.text[:100])
-    llm.free_tier = real_ft
-    deal_b_from_c = r.json()["deal_id"]
-    wait(deal_b_from_c, B)
-
     # ------------------------------------------------------------------ export
     with SessionLocal() as db:
         ta = db.scalar(__import__("sqlalchemy").select(Tenant).where(Tenant.name == "Meridian Integration Labs"))
@@ -142,7 +121,6 @@ with TestClient(app, raise_server_exceptions=False) as c:
     ok("wrong name refused", c.post("/api/company/delete", json={"confirm_name": "meridian", "password": PW}, headers=A).status_code == 400)
     ok("wrong password refused", c.post("/api/company/delete", json={"confirm_name": "Meridian Integration Labs", "password": "wrong-password"}, headers=A).status_code == 403)
     ok("company still there after refusals", c.get("/api/auth/me", headers=A).status_code == 200)
-    c.post(f"/api/network/invitations/{inv_a}/decline", headers=A)
     r = c.post("/api/company/delete", json={"confirm_name": "Meridian Integration Labs", "password": PW}, headers=A)
     ok("admin deletes the company", r.status_code == 200 and r.json()["deleted"], r.text[:200])
     ok("admin's token stops working", c.get("/api/auth/me", headers=A).status_code == 401)
@@ -165,12 +143,6 @@ with TestClient(app, raise_server_exceptions=False) as c:
     ok("uploaded files deleted", not (UPLOAD_DIR / tid_a).exists())
     ok("generated files deleted", not (OUTPUT_DIR / tid_a).exists())
     ok("other company untouched", c.get("/api/library/capabilities", headers=B).status_code == 200 and len(c.get("/api/library/capabilities", headers=B).json()) > 0)
-    ok("deleted vendor gone from the buyer's shortlist", not any(v["name"] == "Meridian Integration Labs" for v in c.get(f"/api/buyer/requests/{rq['id']}/shortlist", headers=C).json()["vendors"]))
-    # buyer deletes: the supplier keeps the deal it accepted
-    r = c.post("/api/company/delete", json={"confirm_name": "QA Buyer Authority", "password": PW}, headers=C)
-    ok("buyer deletes its company", r.status_code == 200, r.text[:150])
-    ok("supplier keeps the deal it already accepted", c.get(f"/api/deals/{deal_b_from_c}", headers=B).status_code == 200)
-    ok("supplier's invitation list no longer shows the deleted buyer", c.get("/api/network/invitations", headers=B).json() == [])
 
 print(f"\n{PASSES} passed, {len(FAILS)} failed")
 for f in FAILS:

@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
-import { GoogleButton, MicrosoftButton, NoticeBar, OrDivider } from "../components/GoogleButton";
+import { GoogleButton, MicrosoftButton, OrDivider } from "../components/GoogleButton";
 import clsx from "clsx";
 import { ProductMark, Spinner } from "../components/ui";
 import { useTilt } from "../components/motion";
@@ -52,7 +52,6 @@ function Frame({ title, sub, children }: { title: string; sub: ReactNode; childr
           <div className="lg:hidden mb-8">
             <ProductMark />
           </div>
-          <NoticeBar className="rounded-lg border mb-6 text-left" />
           <h1 className="font-display font-semibold text-[28px] leading-[1.05] tracking-[-0.025em] text-brand-950">{title}</h1>
           <div className="text-ink-muted text-sm mt-1 mb-7">{sub}</div>
           {children}
@@ -129,11 +128,11 @@ export function Signup() {
   const nav = useNavigate();
   const loc = useLocation();
   const [g, setG] = useState<{ credential: string; email: string; name: string; provider?: "google" | "microsoft"; nonce?: string } | null>((loc.state as any)?.google || null);
-  const [f, setF] = useState({ company_name: "", industry: "", headquarters: "", name: "", email: "", password: "", kind: new URLSearchParams(loc.search).get("as") === "buyer" ? "buyer" : "vendor" });
+  const [f, setF] = useState({ company_name: "", industry: "", headquarters: "", name: "", email: "", password: "", kind: "vendor" });
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.value });
-  const after = (u?: any) => nav(f.kind === "buyer" || u?.tenant?.kind === "buyer" ? "/app/buyer" : u && Object.keys(u.tenant.onboarding || {}).length ? "/app" : "/onboarding");
+  const after = (u?: any) => nav(u && Object.keys(u.tenant.onboarding || {}).length ? "/app" : "/onboarding");
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -184,19 +183,8 @@ export function Signup() {
         </div>
       )}
       <form onSubmit={submit} className="space-y-4">
-        <fieldset>
-          <legend className="label">This workspace is for</legend>
-          <div className="grid grid-cols-2 gap-2">
-            {[["vendor", "Winning work", "We bid on RFPs and tenders"], ["buyer", "Buying", "We issue RFPs and find suppliers"]].map(([k, l, d]) => (
-              <label key={k} className={`cursor-pointer rounded-lg border px-3 py-2.5 transition-colors ${f.kind === k ? "border-brand-500 bg-brand-50" : "border-line hover:border-brand-200"}`}>
-                <input type="radio" name="kind" value={k} checked={f.kind === k} onChange={() => setF({ ...f, kind: k })} className="sr-only" />
-                <span className="block font-semibold text-[13.5px]">{l}</span><span className="block text-[12px] text-ink-muted">{d}</span>
-              </label>
-            ))}
-          </div>
-        </fieldset>
         <div>
-          <label className="label" htmlFor="cn">{f.kind === "buyer" ? "Organisation name" : "Company name"}</label>
+          <label className="label" htmlFor="cn">Company name</label>
           <input id="cn" className="input" required value={f.company_name} onChange={set("company_name")} />
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -227,7 +215,7 @@ export function Signup() {
         </>}
         {err && <div className="text-sm text-fit-gap-ink">{err}</div>}
         <button className="btn-primary w-full h-10" disabled={busy}>{busy && <Spinner />} Create workspace</button>
-        <p className="text-[12px] text-ink-muted">You'll be the admin of this workspace. {f.kind === "buyer" ? "Next, you'll upload an RFP and see which suppliers can deliver it." : "Next, you'll upload your company pack."}{" "}
+        <p className="text-[12px] text-ink-muted">You'll be the admin of this workspace. Next, you'll set up your knowledge library.{" "}
           By creating a workspace you agree to the <a className="underline" href="/terms" target="_blank" rel="noreferrer">Terms</a> and{" "}
           <a className="underline" href="/privacy" target="_blank" rel="noreferrer">Privacy policy</a>.</p>
       </form>

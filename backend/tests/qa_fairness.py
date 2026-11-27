@@ -168,26 +168,6 @@ with TestClient(app, raise_server_exceptions=False) as c:
                                                "technologies": every}, headers=ST)
     for i in range(40):
         c.post("/api/library/skills", json={"code": f"S{i}", "role": "Engineer", "skills": [{"name": t, "level": 5} for t in every]}, headers=ST)
-    for h in (M1, M2, ST):
-        c.put("/api/network/profile", json={"listed": True, "regions": ["Australia"], "industries": ["Transportation"]}, headers=h)
-    B = register("QA Transit Buyer", "buyer@x.example", "buyer")
-    rq = c.post("/api/buyer/requests", files={"file": ("rfp.docx", open(S + "/sample-rfps/harborline-integration-platform-rfp.docx", "rb"))},
-                data={"region": "Australia", "industry": "Transportation"}, headers=B).json()
-    sl = c.get(f"/api/buyer/requests/{rq['id']}/shortlist", headers=B).json()["vendors"]
-    by = {v["name"]: v for v in sl}
-    m1, m2, st = by["Meridian Integration Labs"], by["AAA Microsoft Azure Gold Partner #1 Best Vendor"], by["Stuffer Consulting"]
-    print(f"   shortlist: Meridian {m1['score']}, renamed clone {m2['score']}, stuffer {st['score']} {st['coverage']}")
-    for v in sl[:6]:
-        print(f"      {v['score']:>3} {'(demo)' if v['demo'] else '      '} {v['name']}")
-    ok("same library, different name -> same score", m1["score"] == m2["score"] and m1["coverage"] == m2["coverage"])
-    ok("a buzzword name isn't ranked above its identical twin by name", True)
-    idx = [v["name"] for v in sl]
-    ok("tie order doesn't follow the alphabet", True, "")
-    ok("keyword-stuffed vendor with no case studies doesn't beat the real specialist", st["score"] < m1["score"], f"{st['score']} vs {m1['score']}")
-    demo_scores = [v for v in sl if v["demo"]]
-    ok("demo vendors are flagged", len(demo_scores) >= 20)
-    sl2 = c.get(f"/api/buyer/requests/{rq['id']}/shortlist", headers=B).json()["vendors"]
-    ok("shortlist is deterministic", [(v["vendor_id"], v["score"]) for v in sl] == [(v["vendor_id"], v["score"]) for v in sl2])
     # radar via API: a stuffed tender doesn't top the list
     from app.db import SessionLocal
     from app.models import Tender

@@ -101,7 +101,7 @@ def create_tenant(db: Session, data: RegisterIn) -> tuple[Tenant, User]:
         raise HTTPException(409, "An account with this email already exists. Sign in instead.")
     t = Tenant(name=data.company_name.strip(), slug=_slug(db, data.company_name), industry=data.industry, website=data.website,
                headquarters=data.headquarters, settings=dict(DEFAULT_SETTINGS), onboarding={},
-               kind="buyer" if data.kind == "buyer" else "vendor")
+               kind="vendor")  # every workspace is a bidding company (the buyer side was retired)
     db.add(t)
     db.flush()
     u = User(tenant_id=t.id, email=data.email.lower(), name=data.name.strip(), role="admin", password_hash=hash_password(data.password))
