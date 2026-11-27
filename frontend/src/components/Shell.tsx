@@ -6,7 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { prefetchRoute, warmPages } from "../lib/prefetch";
-import { PageLoader } from "./ui";
+import { ErrorBoundary, PageLoader } from "./ui";
 import LandingAssistant from "./LandingAssistant";
 
 type Item = { to: string; label: string; icon: any; end?: boolean };
@@ -24,7 +24,7 @@ const GROUPS: { label: string; items: Item[] }[] = [
   ] },
   { label: "Delivery", items: [
     { to: "/app/projects", label: "Projects", icon: FolderKanban },
-    { to: "/app/clients", label: "Client 360", icon: Users },
+    { to: "/app/clients", label: "Customer 360", icon: Users },
   ] },
   { label: "Knowledge", items: [
     { to: "/app/library", label: "Knowledge library", icon: BookOpen },
@@ -33,7 +33,7 @@ const GROUPS: { label: string; items: Item[] }[] = [
   ] },
   { label: "Workspace", items: [{ to: "/app/settings", label: "Settings", icon: Settings }] },
 ];
-const TITLES: [string, string][] = [["/app/opportunities", "Opportunities"], ["/app/market", "Market insights"], ["/app/projects", "Projects"], ["/app/clients", "Client 360"],
+const TITLES: [string, string][] = [["/app/opportunities", "Opportunities"], ["/app/market", "Market insights"], ["/app/projects", "Projects"], ["/app/clients", "Customer 360"],
   ["/app/deals", "Deals"], ["/app/calendar", "Calendar"], ["/app/winloss", "Win/loss"], ["/app/library", "Knowledge library"], ["/app/graph", "Knowledge graph"],
   ["/app/learning", "AI learning"], ["/app/settings", "Settings"], ["/app/platform", "Platform console"]];
 
@@ -235,7 +235,7 @@ export default function Shell() {
             stays on screen (navigation runs as a transition) instead of flashing a loading screen. */}
         <Suspense fallback={<PageLoader />}>
           <main key={loc.pathname.split("/").slice(0, 3).join("/")} className="flex-1 min-w-0 w-full max-w-[1480px] mx-auto page-enter pb-20 lg:pr-1">
-            <Outlet />
+            <ErrorBoundary resetKey={loc.pathname}><Outlet /></ErrorBoundary>
           </main>
         </Suspense>
         {<LandingAssistant mode="workspace" company={company?.name} />}
