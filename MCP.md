@@ -29,6 +29,9 @@ People can see and disconnect their connections, and make or revoke API keys, in
 | `find_opportunities` | Lists tenders from the opportunity radar, scored for fit. | no |
 | `ask_workspace` | Asks Maahi, which answers from this company's data only. | no |
 | `create_deal` | Starts a deal from RFP text or a base64-encoded file. Needs the Presales or Admin role. | yes |
+| `list_projects` | Lists delivery projects with health (and why), milestones, value, invoiced, paid and overdue. | no |
+| `get_project` | Shows one project: milestones, team, invoices, costs, changes, risks, issues, SLA months and status reports. | no |
+| `client_360` | Shows one client across bids and delivery, or lists every client with headline numbers. | no |
 
 ## Security
 

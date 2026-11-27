@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import clsx from "clsx";
-import { ArrowLeft, Check, ChevronDown, Download, EyeOff, Info, LayoutGrid, Mail, RefreshCw, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, ChevronDown, Download, EyeOff, Info, LayoutGrid, Mail, RefreshCw, Rocket, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Modal, PageLoader, Spinner, StageStatus, useToast } from "../components/ui";
@@ -255,6 +255,19 @@ export default function DealWorkspace() {
   return <Workspace deal={deal} stage={stage} />;
 }
 
+/** A won deal moves to delivery: opens its project, creating it from the bid (plan, team, value, risks) the first time. */
+function StartDelivery({ dealId }: { dealId: string }) {
+  const nav = useNavigate();
+  const toast = useToast();
+  const qc = useQueryClient();
+  const go = useMutation({
+    mutationFn: () => api.post<any>("/projects", { deal_id: dealId }),
+    onSuccess: (p) => { qc.invalidateQueries({ queryKey: ["projects"] }); nav(`/app/projects/${p.id}`); },
+    onError: (e: any) => toast("error", e.message),
+  });
+  return <button className="btn-primary" disabled={go.isPending} onClick={() => go.mutate()}>{go.isPending ? <Spinner /> : <Rocket className="h-4 w-4" />} Delivery project</button>;
+}
+
 function Workspace({ deal, stage }: { deal: any; stage: string }) {
   const id = deal.id;
   const nav = useNavigate();
@@ -335,6 +348,7 @@ function Workspace({ deal, stage }: { deal: any; stage: string }) {
           </div>
         </div>
         <div className="flex items-center gap-2 relative">
+          {deal.status === "won" && <StartDelivery dealId={id} />}
           <OwnerPicker deal={deal} compact />
           <button className="btn-outline" onClick={() => setMenu(menu === "dl" ? null : "dl")} disabled={processing}><Download className="h-4 w-4" /> Download <ChevronDown className="h-3.5 w-3.5" /></button>
           <button className="btn-outline" aria-haspopup="menu" aria-expanded={menu === "outcome"} onClick={() => setMenu(menu === "outcome" ? null : "outcome")}>Outcome <ChevronDown className="h-3.5 w-3.5" /></button>

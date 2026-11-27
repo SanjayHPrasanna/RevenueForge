@@ -13,7 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, os.path.join(ROOT, "backend"))
 from fastapi.testclient import TestClient
 from app.main import app
-from app.routers import assistant, auth, company_data, deals, insights, learning, library, network, radar, trust
+from app.routers import assistant, auth, company_data, deals, insights, learning, library, projects, radar, trust
 
 PW = os.environ.get("QA_PASSWORD") or __import__("secrets").token_urlsafe(18)  # throwaway test accounts
 S = os.path.join(ROOT, "sample-data")
@@ -101,19 +101,15 @@ with TestClient(app, raise_server_exceptions=False) as c:
                    buyer="QA Port", country="Netherlands", region="Europe & Central Asia", language="en", url="https://example.invalid/qa",
                    deadline=datetime.now(timezone.utc) + timedelta(days=20), categories=[], fetched_at=datetime.now(timezone.utc))
         db.add(t); db.commit(); tender_id = t.id
-    # buyer request
-    rq = c.post("/api/buyer/requests", files={"file": ("rfp.docx", open(rfp, "rb"))}, data={"region": "Europe & Central Asia"}, headers=C["admin"])
-    ok("buyer request", rq.status_code == 200, rq.text[:200])
-    breq = rq.json()["id"]
-    c.put("/api/network/profile", json={"listed": True}, headers=A["admin"])
-    sl = c.get(f"/api/buyer/requests/{breq}/shortlist", headers=C["admin"]).json()
-    vid = next(v["vendor_id"] for v in sl["vendors"] if v["name"] == "Meridian Integration Labs")
-    inv = c.post(f"/api/buyer/requests/{breq}/invite", json={"vendor_ids": [vid]}, headers=C["admin"])
-    inbox = c.get("/api/network/invitations", headers=A["admin"]).json()
-    inv_id = inbox[0]["id"] if inbox else "x"
+    # a delivery project for company A
+    pj = c.post("/api/projects", json={"name": "QA delivery", "client_name": "QA Client", "currency": "EUR", "contract_value": 100000}, headers=A["delivery"])
+    ok("delivery creates a project", pj.status_code == 200, pj.text[:200])
+    pid = pj.json()["id"]
+    iid = c.post(f"/api/projects/{pid}/items", json={"kind": "risk", "title": "QA risk"}, headers=A["delivery"]).json()["id"]
+    breq, vid, inv_id = "nope", "nope", "nope"
 
     IDS = {"deal_id": did, "req_id": rid, "comment_id": cid, "stage": "matching", "what": "matrix", "kind": "capabilities", "item_id": cap_id,
-           "doc_id": doc_id, "batch": bt, "eid": eid, "uid": uid, "tender_id": tender_id, "rid": breq, "vid": vid, "inv_id": inv_id}
+           "doc_id": doc_id, "batch": bt, "eid": eid, "uid": uid, "tender_id": tender_id, "rid": breq, "vid": vid, "inv_id": inv_id, "pid": pid, "iid": iid, "key": "qa-client"}
 
     # ---- the matrix
     def roles_of(route):
@@ -139,7 +135,7 @@ with TestClient(app, raise_server_exceptions=False) as c:
                    ("POST", "/api/library/uploads/{doc_id}/import"), ("POST", "/api/library/uploads/{doc_id}/remap"), ("DELETE", "/api/learning/answers/{eid}"),
                    ("DELETE", "/api/deals/{deal_id}/comments/{comment_id}"), ("POST", "/api/learning/retrain"), ("DELETE", "/api/auth/ai-config"),
                    ("PUT", "/api/auth/ai-config"), ("POST", "/api/auth/ai-config/test"), ("PUT", "/api/company/ai"), ("POST", "/api/company/ai/test"),
-                   ("POST", "/api/library/folder/{batch}/import"), ("POST", "/api/deals/{deal_id}/clarifications"), ("POST", "/api/company/delete"), ("DELETE", "/api/library/drive")}
+                   ("POST", "/api/library/folder/{batch}/import"), ("POST", "/api/deals/{deal_id}/clarifications"), ("POST", "/api/company/delete"), ("DELETE", "/api/library/drive"), ("DELETE", "/api/projects/{pid}"), ("DELETE", "/api/projects/{pid}/items/{iid}")}
     PUBLIC = {"/api/trust", "/api/auth/register", "/api/auth/login", "/api/auth/config", "/api/auth/microsoft", "/api/auth/google", "/api/assistant/chat"}
 
     def call(method, path, h):
@@ -152,7 +148,7 @@ with TestClient(app, raise_server_exceptions=False) as c:
         return c.request(method, url, headers=h or {}, **kw)
 
     n_routes = 0
-    for m in (assistant, auth, company_data, deals, insights, learning, library, network, radar, trust):
+    for m in (assistant, auth, company_data, deals, insights, learning, library, projects, radar, trust):
         for r in m.router.routes:
             for method in r.methods:
                 n_routes += 1
@@ -216,10 +212,11 @@ with TestClient(app, raise_server_exceptions=False) as c:
     ok("B cannot promote A user", r.status_code in (403, 404), str(r.status_code))
     r = c.delete(f"/api/deals/{did}", headers=Bh)
     ok("B cannot delete A deal", r.status_code in (403, 404), str(r.status_code))
-    r = c.post(f"/api/network/invitations/{inv_id}/accept", headers=B["presales"])
-    ok("B cannot accept A's invitation", r.status_code in (403, 404), str(r.status_code))
-    r = c.get(f"/api/buyer/requests/{breq}", headers=register("Other Buyer Co", "admin@d.example", "buyer"))
-    ok("buyer D cannot see buyer C's request", r.status_code in (403, 404), str(r.status_code))
+    for path in [f"/api/projects/{pid}", "/api/clients/qa-client"]:
+        r = c.get(path, headers=Bh)
+        ok(f"B cannot read A {path}", r.status_code in (403, 404), str(r.status_code))
+    r = c.patch(f"/api/projects/{pid}/items/{iid}", json={"title": "hijacked"}, headers=Bh)
+    ok("B cannot edit A project item", r.status_code in (403, 404), str(r.status_code))
     # lists don't leak
     lst = json.dumps(c.get("/api/deals", headers=Bh).json())
     ok("B deal list has no A deal", did not in lst)
@@ -229,7 +226,7 @@ with TestClient(app, raise_server_exceptions=False) as c:
     ok("B dashboard has no A deal", "Harborline QA" not in json.dumps(c.get("/api/dashboard", headers=Bh).json()))
     ok("B graph has no A deal", "Harborline QA" not in json.dumps(c.get("/api/graph", headers=Bh).json()))
     ok("B learning has no A answers", "QA answer." not in json.dumps(c.get("/api/learning", headers=Bh).json()))
-    ok("B invitations empty", c.get("/api/network/invitations", headers=Bh).json() == [])
+    ok("B project list has no A project", pid not in json.dumps(c.get("/api/projects", headers=Bh).json()))
     # a comment by presales can't be deleted by architect
     r = c.delete(f"/api/deals/{did}/comments/{cid}", headers=A["architect"])
     ok("architect can't delete presales' comment", r.status_code == 403, str(r.status_code))

@@ -14,11 +14,10 @@ export const PAGES = {
   winloss: () => import("../pages/WinLoss"),
   radar: () => import("../pages/Radar"),
   market: () => import("../pages/Market"),
-  customers: () => import("../pages/Customers"),
   platform: () => import("../pages/Platform"),
   calendar: () => import("../pages/Calendar"),
   trust: () => import("../pages/Trust"),
-  buyer: () => import("../pages/Buyer"),
+  projects: () => import("../pages/Projects"),
 };
 
 /** Which page code and which data a sidebar link needs, so hovering it can fetch both before the click. */
@@ -30,19 +29,19 @@ const ROUTES: Record<string, { page: keyof typeof PAGES; data?: [unknown[], stri
   "/app/graph": { page: "graph" },
   "/app/opportunities": { page: "radar" },
   "/app/market": { page: "market" },
-  "/app/customers": { page: "customers" },
   "/app/winloss": { page: "winloss" },
   "/app/learning": { page: "learning" },
   "/app/settings": { page: "settings" },
   "/app/platform": { page: "platform" },
-  "/app/buyer": { page: "buyer" },
+  "/app/projects": { page: "projects", data: [["projects"], "/projects"] },
+  "/app/clients": { page: "projects", data: [["clients"], "/clients"] },
 };
 
 const idle = (fn: () => void) => ((window as any).requestIdleCallback ? (window as any).requestIdleCallback(fn, { timeout: 4000 }) : setTimeout(fn, 1500));
 
 /** Once the workspace has drawn, quietly download the other pages' code, so the first visit to each has no loading spinner. */
-export function warmPages(opts: { buyer: boolean; platformAdmin: boolean }) {
-  const keys = (opts.buyer ? ["buyer", "settings", "trust"] : Object.keys(PAGES).filter((k) => k !== "buyer")) as (keyof typeof PAGES)[];
+export function warmPages(opts: { platformAdmin: boolean }) {
+  const keys = Object.keys(PAGES) as (keyof typeof PAGES)[];
   const list = keys.filter((k) => k !== "platform" || opts.platformAdmin);
   idle(() => {
     let i = 0;

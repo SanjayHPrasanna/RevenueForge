@@ -575,3 +575,49 @@ class McpToken(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+# --------------------------------------------------------------------------- Delivery: a won deal becomes a project, run to the end
+class Project(Base):
+    """A piece of work being delivered for a client, usually started from a won deal (which seeds its plan, team, value and risks)."""
+    __tablename__ = "projects"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    deal_id: Mapped[str] = mapped_column(String(32), default="", index=True)  # the won deal it came from, if any
+    name: Mapped[str] = mapped_column(String(300))
+    client_name: Mapped[str] = mapped_column(String(300), default="")  # as shown in the app (the alias, for confidential deals)
+    status: Mapped[str] = mapped_column(String(20), default="planning")  # planning, active, on_hold, completed, cancelled
+    engagement_type: Mapped[str] = mapped_column(String(30), default="")
+    industry: Mapped[str] = mapped_column(String(120), default="")
+    region: Mapped[str] = mapped_column(String(120), default="")
+    currency: Mapped[str] = mapped_column(String(8), default="")
+    contract_value: Mapped[float] = mapped_column(Float, default=0)  # as signed; approved change requests add to it
+    budget_cost: Mapped[float] = mapped_column(Float, default=0)  # planned cost to deliver
+    start_date: Mapped[str] = mapped_column(String(10), default="")  # YYYY-MM-DD
+    end_date: Mapped[str] = mapped_column(String(10), default="")  # planned
+    actual_end_date: Mapped[str] = mapped_column(String(10), default="")
+    manager_id: Mapped[str] = mapped_column(String(32), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)  # what the bid said: verdict, readiness, margin, gaps at win
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+
+class ProjectItem(Base):
+    """One line in a project: a milestone, team member, risk, issue, change request, invoice, cost, SLA month or status update."""
+    __tablename__ = "project_items"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_id)
+    tenant_id: Mapped[str] = mapped_column(ForeignKey("tenants.id", ondelete="CASCADE"), index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(20), index=True)
+    title: Mapped[str] = mapped_column(String(400))
+    status: Mapped[str] = mapped_column(String(20), default="")
+    owner: Mapped[str] = mapped_column(String(200), default="")
+    due_date: Mapped[str] = mapped_column(String(10), default="")
+    done_date: Mapped[str] = mapped_column(String(10), default="")
+    amount: Mapped[float] = mapped_column(Float, default=0)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    sort: Mapped[int] = mapped_column(Integer, default=0)
+    created_by: Mapped[str] = mapped_column(String(32), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)

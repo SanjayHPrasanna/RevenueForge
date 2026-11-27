@@ -9,7 +9,7 @@ import jwt
 from fastapi.testclient import TestClient
 from app.main import app
 from app.config import settings
-from app.routers import assistant, auth, deals, insights, learning, library, network, radar
+from app.routers import assistant, auth, deals, insights, learning, library, projects, radar
 
 PW = os.environ.get("QA_PASSWORD") or __import__("secrets").token_urlsafe(18)  # throwaway test accounts
 S = os.path.join(ROOT, "sample-data")
@@ -167,9 +167,8 @@ with TestClient(app, raise_server_exceptions=False) as c:
                    deadline=datetime.now(timezone.utc) + timedelta(days=9), published=datetime.now(timezone.utc))
         db.add(t); db.commit(); tender_id = t.id
     c.get("/api/radar", headers=A)
-    rq = c.post("/api/buyer/requests", files={"file": ("rfp.docx", b.getvalue())}, headers=C).json()
     IDS = {"deal_id": did, "req_id": rid, "comment_id": "nope", "stage": "pricing", "what": "requirements", "kind": "capabilities",
-           "item_id": lib[0]["id"], "doc_id": "nope", "batch": bt, "eid": "nope", "uid": uid, "tender_id": tender_id, "rid": rq["id"], "vid": "nope", "inv_id": "nope"}
+           "item_id": lib[0]["id"], "doc_id": "nope", "batch": bt, "eid": "nope", "uid": uid, "tender_id": tender_id, "rid": "nope", "vid": "nope", "inv_id": "nope", "pid": "nope", "iid": "nope", "key": "nope"}
     KEYS = ["name", "text", "role", "email", "status", "overrides", "selected", "category", "subcategory", "priority", "page", "final_value",
             "actual_effort_days", "settings", "headcount", "listed", "regions", "industries", "vendor_ids", "message", "question", "answer", "items",
             "skip", "replace", "type", "mapping", "engagement_type", "client_aliases", "active", "due_date", "match_status", "response",
@@ -177,7 +176,7 @@ with TestClient(app, raise_server_exceptions=False) as c:
     VALUES = [None, 12345, -1, 1e308, "x" * 200_000, [], {}, ["a", {"b": 1}], {"a": [1, 2]}, True, "=1+1", "NaN", "Infinity"]
     SKIP_ALLOWED = {("POST", "/api/radar/refresh"), ("POST", "/api/company/ai/test"), ("POST", "/api/auth/ai-config/test")}
     n = 0
-    for m in (auth, deals, insights, learning, library, network, radar):
+    for m in (auth, deals, insights, learning, library, projects, radar):
         for route in m.router.routes:
             for method in route.methods - {"GET", "DELETE"}:
                 if (method, route.path) in SKIP_ALLOWED or route.path in ("/api/auth/google", "/api/auth/microsoft"):

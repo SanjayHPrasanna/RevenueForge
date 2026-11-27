@@ -28,7 +28,7 @@ def _ai() -> dict:
     who, terms = AI_TERMS[name]
     if name == "gemini" and not p.paid:
         trains = ("This is a free-tier key. Google's terms allow it to use what is sent on the free tier to improve its products, and "
-                  "people may review it. Use sample or non-confidential documents only; the app asks you to confirm before each RFP.")
+                  "people may review it. A billed key avoids this.")
     elif name == "gemini":
         trains = ("This key is on a billed Google Cloud project. Google's paid-tier terms say prompts and responses aren't used to improve its "
                   "products; Google keeps them for a limited time only to detect misuse.")

@@ -197,13 +197,6 @@ export function TermsPage() {
           are estimates from the notice summary and your library.</p>
       </section>
       <section>
-        <H>Supplier network</H>
-        <p>Buyers see a supplier's public profile only if the supplier lists itself. Shortlists rank suppliers by evidence in their own libraries,
-          the same way for everyone; they are advice, not a procurement decision, and don't replace a buyer's own procurement rules.
-          Demo suppliers are fictional and labelled as such. When a supplier accepts an invitation, a copy of the buyer's RFP is placed in the
-          supplier's workspace and processed with the supplier's own setup, including its own AI provider.</p>
-      </section>
-      <section>
         <H>Acceptable use</H>
         <p>Don't try to reach another company's data, overload or probe the service, upload malware, or use the service to break the law or
           someone else's rights. We may suspend accounts that do.</p>

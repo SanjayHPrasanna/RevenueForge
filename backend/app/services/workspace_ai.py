@@ -92,6 +92,25 @@ def build_context(ctx: Ctx, question: str) -> str:
             add(f"- {r.code} [{r.category}, {r.priority}, p.{r.page}] {r.match_status}" + (f", {risk} risk" if risk else "")
                 + f": {_clip(mask(r.text), 160)}" + (f" → plan: {_clip(mask(fix), 110)}" if fix else ""))
 
+    # ---------------------------------------------------------------- delivery: projects after a win
+    from ..models import Project, ProjectItem
+    from ..routers.projects import summarize
+    projects = db.scalars(select(Project).where(Project.tenant_id == tid).order_by(Project.created_at.desc())).all()[:30]
+    if projects:
+        pitems: dict[str, list] = defaultdict(list)
+        for i in db.scalars(select(ProjectItem).where(ProjectItem.tenant_id == tid)):
+            pitems[i.project_id].append(i)
+        add(f"\n## Projects being delivered ({len(projects)})")
+        for p in projects:
+            sm = summarize(p, pitems[p.id])
+            nm = sm["next_milestone"]
+            add(f"- {p.name} | client: {p.client_name or '-'} | status: {p.status} | health: {sm['health']}"
+                + (f" ({'; '.join(sm['health_reasons'][:3])})" if sm["health_reasons"] else "")
+                + f" | {p.start_date or '-'} to {p.end_date or '-'} | milestones {sm['milestones']['done']}/{sm['milestones']['total']} done, {sm['milestones']['late']} late"
+                + f" | next: {nm['title'] + ' due ' + nm['due_date'] if nm else '-'}"
+                + f" | value {p.currency} {sm['value_total']:,.0f}, invoiced {sm['invoiced']:,.0f}, paid {sm['paid']:,.0f}, overdue {sm['overdue']:,.0f}"
+                + f" | cost {sm['burn_pct'] if sm['burn_pct'] is not None else '-'}% of budget | open risks {sm['risks_open']} ({sm['risks_high']} high), issues {sm['issues_open']}")
+
     # ---------------------------------------------------------------- knowledge library
     caps = db.scalars(select(Capability).where(Capability.tenant_id == tid)).all()
     add(f"\n## Capabilities ({len(caps)})")

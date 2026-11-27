@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Briefcase, EyeOff, Plus } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Briefcase, EyeOff, FileText, Plus, Star, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Dropzone, Empty, Meter, Modal, PageLoader, Spinner, useToast } from "../components/ui";
 import { api } from "../lib/api";
@@ -13,21 +13,38 @@ function NewDeal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const toast = useToast();
   const nav = useNavigate();
   const qc = useQueryClient();
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);  // the first one is the main RFP; the rest are read with it
+  const more = useRef<HTMLInputElement>(null);
+  const file = files[0] || null;
   const [det, setDet] = useState<any>(null);
   const [detecting, setDetecting] = useState(false);
   const { data: company } = useQuery({ queryKey: ["company"], queryFn: () => api.get("/company") });
   const [f, setF] = useState({ name: "", client_name: "", client_aliases: "", client_alias: "", confidential: true, engagement_type: "" });
-  const [ack, setAck] = useState(false);
-  const freeTier = !!(company?.llm?.enabled && !company.llm.paid);
   useEffect(() => {
     if (!open) {
-      setFile(null);
+      setFiles([]);
       setDet(null);
     }
   }, [open]);
-  const pick = async (fl: File) => {
-    setFile(fl);
+  const OK = /\.(pdf|docx|txt|xlsx|xlsm|csv|pptx|md)$/i;
+  const addFiles = (list: File[]) => {
+    const good = list.filter((x) => OK.test(x.name));
+    if (good.length < list.length) toast("error", "Some files were skipped: use PDF, Word, Excel, CSV, PowerPoint or text.");
+    const merged = [...files, ...good.filter((g) => !files.some((x) => x.name === g.name && x.size === g.size))].slice(0, 10);
+    if (files.length + good.length > 10) toast("error", "Up to 10 files per deal.");
+    if (!merged.length) return;
+    setFiles(merged);
+    if (!files.length) {
+      // read the details (title, client, industry) from the main tender document: the first PDF or Word file
+      const main = merged.find((x) => /\.(pdf|docx)$/i.test(x.name)) || merged[0];
+      const ordered = [main, ...merged.filter((x) => x !== main)];
+      setFiles(ordered);
+      detect(main);
+    }
+  };
+  const makeMain = (i: number) => { const next = [files[i], ...files.filter((_, j) => j !== i)]; setFiles(next); detect(next[0]); };
+  const removeAt = (i: number) => { const next = files.filter((_, j) => j !== i); setFiles(next); if (i === 0 && next.length) detect(next[0]); if (!next.length) setDet(null); };
+  const detect = async (fl: File) => {
     setDetecting(true);
     try {
       const fd = new FormData();
@@ -37,7 +54,6 @@ function NewDeal({ open, onClose }: { open: boolean; onClose: () => void }) {
       setF((x) => ({ ...x, name: d.title || "", client_name: d.client_name || "", client_aliases: (d.client_aliases || []).join(", "), engagement_type: d.engagement_type || "" }));
     } catch (e: any) {
       toast("error", e.message);
-      setFile(null);
     } finally {
       setDetecting(false);
     }
@@ -45,9 +61,8 @@ function NewDeal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const create = useMutation({
     mutationFn: () => {
       const fd = new FormData();
-      fd.append("file", file!);
+      files.forEach((x) => fd.append("files", x));
       Object.entries(f).forEach(([k, v]) => fd.append(k, String(v)));
-      if (freeTier) fd.append("ai_ack", String(ack));
       return api.upload("/deals", fd);
     },
     onSuccess: (d) => {
@@ -60,18 +75,35 @@ function NewDeal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
   return (
     <Modal open={open} onClose={onClose} title="New deal" wide>
-      {company?.llm?.enabled && !company.llm.paid && (
-        <div className="mb-4 rounded-md border border-ember-100 bg-ember-50 px-3.5 py-2.5 text-[12.5px] text-ember-600">
-          <b>Free Gemini tier:</b> Google may use content sent on the free tier to improve its products, and reviewers may read it. Use sample or non-confidential documents, or switch to a paid key (set <code>LLM_PAID=true</code>) for client RFPs.
-        </div>
-      )}
-      {!file || detecting ? (
-        <Dropzone accept=".pdf,.docx,.txt" onFile={pick} busy={detecting} label="Drop the RFP, RFI, RFQ or SOW here or browse" hint="PDF or Word, up to 40 MB" />
+      {!file || (detecting && !det) ? (
+        <Dropzone accept=".pdf,.docx,.txt,.xlsx,.xlsm,.csv,.pptx,.md" onFiles={addFiles} busy={detecting}
+          label="Upload one or more tender files here: RFP, RFQ, RFI, SOW, annexures, addenda or pricing sheets"
+          hint="Drop them together or browse. PDF, Word, Excel, CSV, PowerPoint or text · up to 10 files, 40 MB each" />
       ) : (
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); create.mutate(); }}>
-          <div className="rounded-md bg-paper border border-line px-3 py-2 text-[13px] flex flex-wrap gap-x-4 gap-y-1">
-            <span className="font-semibold truncate max-w-full">{file.name}</span>
-            {det && <span className="text-ink-muted">{det.doc_type} · {det.pages} pages · {det.industry}{det.region ? ` · ${det.region}` : ""}{det.currency ? ` · ${det.currency}` : ""}</span>}
+          <div className="rounded-md bg-paper border border-line">
+            <div className="px-3 py-2 text-[12.5px] text-ink-muted border-b border-line-soft flex items-center gap-2">
+              <span className="flex-1">{files.length === 1 ? "1 file" : `${files.length} files, read together as one tender`}
+                {det && ` · main: ${det.doc_type} · ${det.pages} pages · ${det.industry}${det.region ? ` · ${det.region}` : ""}${det.currency ? ` · ${det.currency}` : ""}`}</span>
+              {detecting && <Spinner />}
+            </div>
+            <ul className="divide-y divide-line-soft">
+              {files.map((x, i) => (
+                <li key={x.name + x.size} className="px-3 py-1.5 flex items-center gap-2 text-[13px]">
+                  <FileText className="h-4 w-4 text-ink-faint shrink-0" />
+                  <span className="truncate flex-1 min-w-0" title={x.name}>{x.name}</span>
+                  <span className="text-[11.5px] text-ink-faint num">{x.size >= 1048576 ? `${(x.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(x.size / 1024))} KB`}</span>
+                  {i === 0 ? <span className="chip bg-brand-500/10 text-brand-700 text-[11px]">Main RFP</span>
+                    : <button type="button" className="btn-ghost h-7 px-2 text-[12px]" onClick={() => makeMain(i)} title="Read the deal's details from this file"><Star className="h-3.5 w-3.5" /> Make main</button>}
+                  <button type="button" className="btn-ghost h-7 w-7 p-0" onClick={() => removeAt(i)} aria-label={`Remove ${x.name}`}><X className="h-3.5 w-3.5" /></button>
+                </li>
+              ))}
+            </ul>
+            <div className="px-3 py-2 border-t border-line-soft">
+              <input ref={more} type="file" multiple hidden accept=".pdf,.docx,.txt,.xlsx,.xlsm,.csv,.pptx,.md"
+                onChange={(e) => { addFiles(Array.from(e.target.files || [])); e.target.value = ""; }} />
+              <button type="button" className="btn-ghost h-8 text-[13px]" disabled={files.length >= 10} onClick={() => more.current?.click()}><Plus className="h-3.5 w-3.5" /> Add more files (RFQ, annexures, addenda…)</button>
+            </div>
           </div>
           <div>
             <label className="label">Deal name</label>
@@ -110,16 +142,9 @@ function NewDeal({ open, onClose }: { open: boolean; onClose: () => void }) {
               {Object.entries(ENGAGEMENT).map(([k, v]) => <option key={k} value={k}>{v}{det?.engagement_type === k ? " (detected)" : ""}</option>)}
             </select>
           </div>
-          {freeTier && (
-            <label className="flex items-start gap-3 cursor-pointer rounded-md border border-ember-100 bg-ember-50 p-3.5 text-[13px] text-ember-600">
-              <input type="checkbox" className="mt-0.5 h-4 w-4 accent-[#118AC3]" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-              <span>This document is a sample or isn't confidential. I understand it goes to a free Google AI key, where Google may use it to improve
-                its products and people may read it.</span>
-            </label>
-          )}
           <div className="flex items-center gap-3 pt-2">
-            <button className="btn-primary" disabled={create.isPending || (freeTier && !ack)}>{create.isPending && <Spinner />} Analyse RFP</button>
-            <button type="button" className="btn-ghost" onClick={() => setFile(null)}>Choose another file</button>
+            <button className="btn-primary" disabled={create.isPending || detecting}>{create.isPending && <Spinner />} Analyse {files.length > 1 ? `${files.length} files` : "RFP"}</button>
+            <button type="button" className="btn-ghost" onClick={() => { setFiles([]); setDet(null); }}>Start over</button>
           </div>
         </form>
       )}

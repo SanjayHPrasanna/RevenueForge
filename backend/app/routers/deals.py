@@ -119,21 +119,26 @@ async def detect(file: UploadFile = File(...), ctx: Ctx = Depends(current_ctx)):
 
 
 @router.post("")
-async def create_deal(file: UploadFile = File(...), name: str = Form(""), client_name: str = Form(""), client_alias: str = Form(""),
+async def create_deal(files: list[UploadFile] | None = File(None), file: UploadFile | None = File(None), name: str = Form(""), client_name: str = Form(""), client_alias: str = Form(""),
                       client_aliases: str = Form(""), confidential: bool = Form(True), engagement_type: str = Form(""),
                       ai_ack: bool = Form(False), ctx: Ctx = Depends(require_roles("presales"))):
-    if llm.free_tier() and not ai_ack:
-        raise HTTPException(428, llm.FREE_TIER_ACK)
-    doc, data = await save_upload(ctx, file, "rfp")
+    uploads = [f for f in ([file] if file else []) + list(files or []) if f and f.filename]
+    if not uploads:
+        raise HTTPException(400, "Add at least one tender file (RFP, RFQ, RFI, annexure...).")
+    if len(uploads) > 10:
+        raise HTTPException(400, "Up to 10 files per deal. Combine the smaller annexures, or leave out ones with no requirements.")
+    docs = [(await save_upload(ctx, f, "rfp"))[0] for f in uploads]
+    doc = docs[0]
     aliases = [a.strip() for a in client_aliases.split(",") if a.strip()]
     n = ctx.db.scalar(select(func.count()).select_from(Deal).where(Deal.tenant_id == ctx.tenant_id)) or 0
     d = Deal(tenant_id=ctx.tenant_id, name=name.strip() or "Untitled deal", client_name=client_name.strip(),
              client_alias=client_alias.strip() or f"Client {chr(65 + n % 26)}", client_aliases=aliases, confidential=confidential,
              engagement_type=engagement_type if engagement_type in ("managed_services", "build_run", "implementation", "product", "consulting") else "",
              owner_id=ctx.user.id, rfp_document_id=doc.id, status="processing",
-             progress={"stage": "requirements", "pct": 0, "message": "Queued"})
+             progress={"stage": "requirements", "pct": 0, "message": "Queued"},
+             meta={"rfp_document_ids": [x.id for x in docs]} if len(docs) > 1 else {})
     ctx.db.add(d)
-    ctx.audit("deal.create", d.name, file=file.filename)
+    ctx.audit("deal.create", d.name, file=", ".join(f.filename for f in uploads)[:500])
     ctx.db.commit()
     pipeline.start(d.id, notify_user=ctx.user.id)
     return deal_out(ctx, d)
@@ -553,13 +558,12 @@ async def accuracy_labels(deal_id: str, file: UploadFile = File(...), ctx: Ctx =
 @router.get("/{deal_id}/source")
 def source(deal_id: str, ctx: Ctx = Depends(current_ctx)):
     d = _deal(ctx, deal_id)
-    doc = ctx.db.get(Document, d.rfp_document_id)
-    if not doc:
+    if not ctx.db.get(Document, d.rfp_document_id):
         raise HTTPException(404, "Source document missing.")
-    parsed = pipeline.get_parsed(ctx.db, doc)
+    parsed = pipeline.deal_parsed(ctx.db, d)
     ctx.db.commit()
     mask = deal_masker(d)
-    return {"filename": mask(doc.filename), "pages": parsed.pages,
+    return {"filename": mask(parsed.filename), "pages": parsed.pages,
             "blocks": [{"idx": b.idx, "page": b.page, "kind": b.kind, "text": mask(b.text), "ref": b.ref} for b in parsed.blocks]}
 
 

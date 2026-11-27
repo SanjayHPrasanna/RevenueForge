@@ -93,6 +93,33 @@ def get_parsed(db: Session, doc: Document) -> ParsedDocument:
     return parsed
 
 
+def deal_parsed(db: Session, deal: Deal) -> ParsedDocument:
+    """The deal's tender documents read as one: the main RFP plus any other files uploaded with it (RFQ, annexures,
+    addenda, pricing sheets). Each file starts with a heading naming it, and pages run on from file to file, so
+    requirements and the source viewer point at the same place."""
+    ids = [deal.rfp_document_id] + [i for i in (deal.meta or {}).get("rfp_document_ids", []) if i != deal.rfp_document_id]
+    docs = [d for d in (db.get(Document, i) for i in ids if i) if d and d.tenant_id == deal.tenant_id]
+    if len(docs) <= 1:
+        return get_parsed(db, docs[0]) if docs else ParsedDocument("", 0, [])
+    blocks: list[Block] = []
+    tables: list = []
+    page_off = 0
+    for n, doc in enumerate(docs, start=1):
+        p = get_parsed(db, doc)
+        blocks.append(Block(idx=len(blocks), page=page_off + 1, kind="heading", text=f"Document {n} of {len(docs)}: {doc.filename}",
+                            section=doc.filename[:200]))
+        stem = Path(doc.filename).stem[:200]
+        for b in p.blocks:
+            # Text before a file's first heading belongs to that file (an annexure often has no headings at all). Only the
+            # main RFP keeps its untitled cover page, which holds the title and dates rather than requirements.
+            sec = b.section or ("" if n == 1 else stem)
+            blocks.append(Block(idx=len(blocks), page=page_off + max(1, b.page), kind=b.kind, text=b.text, section=sec, ref=b.ref))
+        tables.extend(p.tables or [])
+        page_off += max(1, p.pages)
+    names = ", ".join(d.filename for d in docs)
+    return ParsedDocument(f"{len(docs)} files: {names}"[:300], page_off, blocks, tables)
+
+
 def _stage(db: Session, deal: Deal, name: str) -> DealStage:
     st = db.scalar(select(DealStage).where(DealStage.deal_id == deal.id, DealStage.stage == name))
     if not st:
@@ -194,8 +221,7 @@ def run_stage(db: Session, deal: Deal, name: str) -> dict:
         db.commit()
 
     if name == "requirements":
-        doc = db.get(Document, deal.rfp_document_id)
-        parsed = get_parsed(db, doc)
+        parsed = deal_parsed(db, deal)
         guidance = learning.few_shot_block(learning.few_shot(db, tid, ["category", "subcategory", "priority", "removed", "added"],
                                                              [mask(parsed.text[:4000])], k=10))
         reqs, meta, engine = extraction.extract_requirements(parsed, use_llm=True, mask_fn=mask, guidance=guidance, progress=prog,
@@ -499,11 +525,10 @@ def build_profile(db: Session, deal: Deal, parsed: ParsedDocument, reqs: list[di
 
 
 def rfp_text(db: Session, deal: Deal) -> str:
-    doc = db.get(Document, deal.rfp_document_id) if deal.rfp_document_id else None
-    if not doc:
+    if not deal.rfp_document_id:
         return ""
     try:
-        return get_parsed(db, doc).text
+        return deal_parsed(db, deal).text
     except Exception:
         return ""
 

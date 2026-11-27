@@ -27,14 +27,15 @@ const Connect = React.lazy(() => import("./pages/Connect"));
 const WinLoss = React.lazy(() => PAGES.winloss());
 const RadarPage = React.lazy(() => PAGES.radar());
 const Market = React.lazy(() => PAGES.market());
-const Customers = React.lazy(() => PAGES.customers());
+const Projects = React.lazy(() => PAGES.projects().then((m) => ({ default: m.Projects })));
+const ProjectPage = React.lazy(() => PAGES.projects().then((m) => ({ default: m.ProjectPage })));
+const Clients = React.lazy(() => PAGES.projects().then((m) => ({ default: m.Clients })));
+const ClientPage = React.lazy(() => PAGES.projects().then((m) => ({ default: m.ClientPage })));
 const Platform = React.lazy(() => PAGES.platform());
 const CalendarPage = React.lazy(() => PAGES.calendar());
 const TrustPage = React.lazy(() => PAGES.trust().then((m) => ({ default: m.TrustPage })));
 const PrivacyPage = React.lazy(() => PAGES.trust().then((m) => ({ default: m.PrivacyPage })));
 const TermsPage = React.lazy(() => PAGES.trust().then((m) => ({ default: m.TermsPage })));
-const BuyerRequests = React.lazy(() => PAGES.buyer().then((m) => ({ default: m.BuyerRequests })));
-const BuyerRequest = React.lazy(() => PAGES.buyer().then((m) => ({ default: m.BuyerRequest })));
 
 /** Shown for addresses that don't exist, instead of silently jumping to the home page. */
 function NotFound() {
@@ -77,7 +78,7 @@ function Public({ children }: { children: React.ReactNode }) {
   const next = new URLSearchParams(loc.search).get("next") || "";
   if (user && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\")) return <Navigate to={next} replace />;
   // signed in already (or just now, on sign-up): a brand-new vendor workspace goes to setup, not to an empty workspace
-  if (user) return <Navigate to={user.tenant?.kind === "buyer" ? "/app/buyer" : Object.keys(user.tenant?.onboarding || {}).length ? "/app" : "/onboarding"} replace />;
+  if (user) return <Navigate to={Object.keys(user.tenant?.onboarding || {}).length ? "/app" : "/onboarding"} replace />;
   return <>{children}</>;
 }
 
@@ -111,11 +112,15 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
                 <Route path="winloss" element={<WinLoss />} />
                 <Route path="opportunities" element={<RadarPage />} />
                 <Route path="market" element={<Market />} />
-                <Route path="customers" element={<Customers />} />
+                <Route path="projects" element={<Projects />} />
+                <Route path="projects/:id" element={<ProjectPage />} />
+                <Route path="projects/:id/:tab" element={<ProjectPage />} />
+                <Route path="clients" element={<Clients />} />
+                <Route path="clients/:key" element={<ClientPage />} />
+                <Route path="customers" element={<Navigate to="/app" replace />} />
                 <Route path="platform" element={<Platform />} />
                 <Route path="calendar" element={<CalendarPage />} />
-                <Route path="buyer" element={<BuyerRequests />} />
-                <Route path="buyer/:id" element={<BuyerRequest />} />
+                <Route path="buyer/*" element={<Navigate to="/app" replace />} />
                 <Route path="settings" element={<SettingsPage />} />
               </Route>
               <Route path="*" element={<NotFound />} />

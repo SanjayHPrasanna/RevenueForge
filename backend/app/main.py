@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import BASE_DIR, settings
 from .db import init_db
-from .routers import assistant, auth, calendar, company_data, deals, insights, learning, library, mcp, network, platform, radar, trust
+from .routers import assistant, auth, calendar, company_data, deals, insights, learning, library, mcp, platform, projects, radar, trust
 from .services import company_ai, llm  # noqa: F401  (company_ai registers the per-company AI settings)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -90,8 +90,6 @@ def _startup():
     notify.start_deadline_watch()  # "due in 3 days / tomorrow" reminder emails
     from .services import tender_feeds
     tender_feeds.start_schedule()  # opportunity radar: read public tender sources every few hours
-    from .services import demo_vendors
-    demo_vendors.ensure()  # fictional suppliers for the supplier-network demo (DEMO_VENDORS=false leaves them out)
     # Any deal left mid-run by a restart is marked so the user can re-run it.
     from sqlalchemy import select
     from .db import SessionLocal
@@ -156,7 +154,7 @@ app.include_router(insights.router)
 app.include_router(learning.router)
 app.include_router(assistant.router)
 app.include_router(radar.router)
-app.include_router(network.router)
+app.include_router(projects.router)  # delivery: projects after a win, client 360
 app.include_router(trust.router)
 app.include_router(company_data.router)
 app.include_router(mcp.router)  # AI assistants: /mcp, OAuth sign-in, /.well-known discovery

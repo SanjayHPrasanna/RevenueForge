@@ -45,8 +45,7 @@ export default function SettingsPage() {
       <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.05] tracking-[-0.025em] text-brand-950">Settings</h1>
       <MyEmails />
       <AiAssistants />
-      {user?.tenant.kind !== "buyer" && <NetworkListing isAdmin={isAdmin} />}
-      {user?.tenant.kind !== "buyer" && <section className="card p-5">
+      {<section className="card p-5">
         <div className="font-bold">Commercial policy</div>
         <div className="text-[13px] text-ink-muted mb-4">Used by every pricing run. Finance can still adjust per deal.</div>
         <div className="flex flex-wrap gap-4">
@@ -149,70 +148,6 @@ function MyEmails() {
   );
 }
 
-/** "List us in the supplier network": what buyers can find, and the preview of exactly what they'll see. */
-function NetworkListing({ isAdmin }: { isAdmin: boolean }) {
-  const toast = useToast();
-  const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ["network-profile"], queryFn: () => api.get<any>("/network/profile") });
-  const [f, setF] = useState<any>(null);
-  const [preview, setPreview] = useState(false);
-  useEffect(() => { if (data && !f) setF({ ...data.settings, industries: (data.settings.industries || []).join(", ") }); }, [data]);
-  const save = useMutation({
-    mutationFn: (body: any) => api.put<any>("/network/profile", body),
-    onSuccess: (r) => { qc.setQueryData(["network-profile"], r); setF({ ...r.settings, industries: (r.settings.industries || []).join(", ") });
-      toast("ok", r.settings.listed ? "Your company is listed in the supplier network." : "Your company is not listed in the supplier network."); },
-    onError: (e: any) => toast("error", e.message),
-  });
-  if (!data || !f) return null;
-  const body = () => ({ ...f, industries: String(f.industries || "").split(",").map((x: string) => x.trim()).filter(Boolean) });
-  const p = data.preview;
-  return (
-    <section className="card p-5">
-      <div className="flex flex-wrap items-start gap-3">
-        <div className="flex-1 min-w-[280px]">
-          <div className="font-bold">Supplier network</div>
-          <div className="text-[13px] text-ink-muted mt-0.5">Let buyers who upload an RFP find you when your proven work matches it, and invite you to bid. Buyers see your capabilities, company certificates, case-study summaries without client names, and how many people have each skill. Never people's names, rates, deals or clients.</div>
-        </div>
-        <span className={`chip ${data.settings.listed ? "bg-fit-strong-soft text-fit-strong-ink" : "bg-line-soft text-ink-muted"}`}>{data.settings.listed ? "Listed" : "Not listed"}</span>
-      </div>
-      <div className="grid md:grid-cols-2 gap-4 mt-4 text-[13px]">
-        <div>
-          <span className="label">Regions you serve</span>
-          <div className="flex flex-wrap gap-1.5">
-            {data.regions.map((r: string) => {
-              const on = (f.regions || []).includes(r);
-              return <button key={r} type="button" disabled={!isAdmin} onClick={() => setF({ ...f, regions: on ? f.regions.filter((x: string) => x !== r) : [...(f.regions || []), r] })}
-                className={`chip border ${on ? "bg-brand-50 border-brand-300 text-brand-800" : "bg-surface border-line text-ink-soft"}`} aria-pressed={on}>{r}</button>;
-            })}
-          </div>
-        </div>
-        <div className="space-y-3">
-          <label className="block"><span className="label">Industries you focus on</span>
-            <input className="input" disabled={!isAdmin} value={f.industries} onChange={(e) => setF({ ...f, industries: e.target.value })} placeholder="e.g. Healthcare, Transportation, Banking" /></label>
-          <label className="block"><span className="label">Short description for buyers</span>
-            <textarea className="input h-20 py-2" disabled={!isAdmin} value={f.summary} onChange={(e) => setF({ ...f, summary: e.target.value })} placeholder="Leave empty to use 'About the company'" /></label>
-        </div>
-      </div>
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        {isAdmin && <button className="btn-primary" disabled={save.isPending} onClick={() => save.mutate({ ...body(), listed: !data.settings.listed })}>
-          {save.isPending && <Spinner />} {data.settings.listed ? "Remove us from the network" : "List us in the supplier network"}</button>}
-        {isAdmin && data.settings.listed && <button className="btn-outline" disabled={save.isPending} onClick={() => save.mutate(body())}>Save changes</button>}
-        <button className="btn-ghost" onClick={() => setPreview(!preview)}>{preview ? "Hide" : "Preview"} what buyers see</button>
-        {!isAdmin && <span className="text-[12.5px] text-ink-muted">Only company admins can change the listing.</span>}
-      </div>
-      {preview && (
-        <div className="mt-4 rounded-lg border border-line-soft bg-paper p-4 text-[13px] space-y-2 anim-fade-in">
-          <div><b>{p.name}</b> · {p.headquarters || "Headquarters not set"} · {p.headcount} people</div>
-          <div><span className="text-ink-muted">Capabilities:</span> {p.capabilities.map((c: any) => c.name).join(", ") || "none yet"}</div>
-          <div><span className="text-ink-muted">Certificates and partnerships:</span> {p.certifications.map((c: any) => c.name).join(", ") || "none"}</div>
-          <div><span className="text-ink-muted">Case studies:</span> {p.case_studies.map((c: any) => c.title).join("; ") || "none yet"}</div>
-          <div><span className="text-ink-muted">Skills (people):</span> {p.skills.map((s: any) => `${s.technology} ${s.people}`).join(", ") || "none"}</div>
-        </div>
-      )}
-    </section>
-  );
-}
-
 function AiEngine({ c }: { c: any }) {
   const toast = useToast();
   const qc = useQueryClient();
@@ -256,7 +191,6 @@ function AiEngine({ c }: { c: any }) {
                     <div className="rounded bg-paper px-3 py-2"><div className="text-ink-muted">Failed calls</div><div className={`font-semibold num ${c.llm.failures ? "text-fit-gap-ink" : ""}`}>{c.llm.failures}</div></div>
                   </>}
                 </div>
-                {!c.llm.paid && <div className="mt-3 rounded border border-ember-100 bg-ember-50 px-3 py-2 text-[12.5px] text-ember-600">Free tier: Google may use submitted content to improve its products and reviewers may read it. Don't process confidential client RFPs until the key is on a billed project; then tick "Paid / billed key" below (or set <code>LLM_PAID=true</code> on the server).</div>}
                 {c.llm.last_error && <div className="mt-2 text-[12px] text-fit-gap-ink break-words">Last error: {c.llm.last_error}</div>}
               </>
             ) : (
@@ -311,7 +245,7 @@ function AiEngine({ c }: { c: any }) {
             {f.provider !== "none" && (
               <label className="flex items-start gap-2 text-[13px] pt-6">
                 <input type="checkbox" className="h-4 w-4 mt-0.5 accent-[#118AC3]" checked={!!f.paid} onChange={(e) => setF({ ...f, paid: e.target.checked })} />
-                <span>Paid / billed key<span className="block text-ink-muted text-[12px]">Tick only when the provider doesn't use your content for training. This hides the "sample data only" banner.</span></span>
+                <span>Paid / billed key<span className="block text-ink-muted text-[12px]">Tick if the key is on a billed plan, where the provider doesn't use your content for training.</span></span>
               </label>
             )}
           </div>
@@ -421,7 +355,7 @@ function CompanyAi() {
           {f.provider === "gemini" && (
             <label className="flex items-start gap-2 text-[13px] pt-6">
               <input type="checkbox" className="h-4 w-4 mt-0.5 accent-[#118AC3]" checked={!!f.paid} onChange={(e) => setF({ ...f, paid: e.target.checked })} />
-              <span>Paid / billed key<span className="block text-ink-muted text-[12px]">Leave unticked for a free Gemini key: your team keeps seeing the "sample data only" banner.</span></span>
+              <span>Paid / billed key<span className="block text-ink-muted text-[12px]">Tick if the key is on a billed Google Cloud project.</span></span>
             </label>
           )}
         </div>
