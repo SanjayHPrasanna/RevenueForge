@@ -9,7 +9,7 @@ import { useAuth } from "../lib/auth";
 import { ago, ENGAGEMENT, money } from "../lib/format";
 import { DealStatus } from "./Dashboard";
 
-/* Delivery 360: a won bid becomes a project and is run to the end here. Client 360 shows every bid and project for one client. */
+/* Delivery 360: a won bid becomes a project and is run to the end here. Customer 360 shows every bid and project for one client. */
 
 const EDIT_ROLES = ["admin", "presales", "delivery", "finance", "architect"];
 const useCanEdit = () => EDIT_ROLES.includes(useAuth().user?.role || "");
@@ -591,7 +591,7 @@ function Updates({ p, rows, canEdit }: { p: any; rows: any[]; canEdit: boolean }
         <div className="font-bold flex-1">Status reports <span className="text-ink-muted font-normal text-[13px]">· {rows.length}</span></div>
         {canEdit && <button className="btn-primary h-8 text-[13px]" onClick={() => setAdding(true)}><Plus className="h-3.5 w-3.5" /> New report</button>}
       </div>
-      {!sorted.length ? <div className="px-5 py-6 text-[13px] text-ink-muted">No status reports yet. A short weekly report keeps everyone, and Client 360, up to date.</div> : (
+      {!sorted.length ? <div className="px-5 py-6 text-[13px] text-ink-muted">No status reports yet. A short weekly report keeps everyone, and Customer 360, up to date.</div> : (
         <ol className="divide-y divide-line-soft">
           {sorted.map((u) => (
             <li key={u.id} className="px-5 py-4">
@@ -615,7 +615,7 @@ export function Clients() {
   return (
     <div className="px-4 lg:px-8 py-6 max-w-[1400px] space-y-5">
       <div>
-        <h1 className={H1}>Client 360</h1>
+        <h1 className={H1}>Customer 360</h1>
         <p className="text-[13.5px] text-ink-muted mt-1">Every bid and project for each client in one place: what you've won and lost, what's being delivered, and what they owe.</p>
       </div>
       {!data.length ? (
@@ -658,7 +658,7 @@ export function ClientPage() {
   return (
     <div className="px-4 lg:px-6 py-6 max-w-[1480px] space-y-5">
       <div>
-        <Link to="/app/clients" className="text-[13px] text-ink-muted hover:text-ink inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" /> Client 360</Link>
+        <Link to="/app/clients" className="text-[13px] text-ink-muted hover:text-ink inline-flex items-center gap-1"><ArrowLeft className="h-3.5 w-3.5" /> Customer 360</Link>
         <div className="mt-3 flex items-center gap-3 flex-wrap">
           <h1 className="font-display font-semibold text-[26px] md:text-[30px] leading-[1.1] tracking-[-0.02em] text-ink">{c.name}</h1>
           <Health h={c.health} />
